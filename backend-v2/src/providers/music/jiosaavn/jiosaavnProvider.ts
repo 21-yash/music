@@ -32,7 +32,8 @@ import {
 } from './jiosaavnCrypto';
 import { logger } from '../../../utils/logger';
 
-const BASE_URL = 'https://www.jiosaavn.com/api.php';
+// Use our custom Vercel proxy running in Mumbai (bom1) to bypass geo-blocks
+const BASE_URL = 'https://music-jiosaavn-proxy.vercel.app/api/index';
 
 const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent': 'JioSaavn/7.39.2 (Android; 13; en)',
