@@ -1,0 +1,8 @@
+# Ignore the old backend since it has its own repository
+backend/
+
+# Android/IDEA specific ignores (if importing root in Android Studio)
+.idea/
+.gradle/
+local.properties
+*.iml
