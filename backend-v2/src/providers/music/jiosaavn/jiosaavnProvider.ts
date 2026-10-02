@@ -38,6 +38,9 @@ const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   Accept: 'application/json',
+  // Spoof Indian IP to bypass geo-restrictions on certain songs
+  'X-Forwarded-For': '103.111.161.0',
+  'X-Real-IP': '103.111.161.0',
 };
 
 /**
@@ -52,9 +55,9 @@ const DEFAULT_HEADERS: Record<string, string> = {
  *   and ranks results using a scoring system that penalizes
  *   covers/karaoke/remixes and prioritizes high play-count originals.
  *
- * No geo-spoofing headers are used — the backend is expected to run
- * in an Asian region (Singapore/Mumbai) where JioSaavn's full catalog
- * is available.
+ * Geo-spoofing headers are used (X-Forwarded-For) to simulate an Indian
+ * IP address so we get access to the full JioSaavn catalog regardless of
+ * where the backend is hosted (e.g., Singapore).
  */
 export class JioSaavnProvider implements MusicProvider {
   readonly name = 'JioSaavn';
