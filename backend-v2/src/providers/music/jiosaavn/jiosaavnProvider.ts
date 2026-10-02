@@ -35,8 +35,11 @@ import { logger } from '../../../utils/logger';
 const BASE_URL = 'https://www.jiosaavn.com/api.php';
 
 const DEFAULT_HEADERS: Record<string, string> = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'User-Agent': 'JioSaavn/7.39.2 (Android; 13; en)',
+  'app_version': '7.39.2',
+  'api_version': '4',
+  'readable_version': '7.39.2',
+  'network_type': 'WIFI',
   Accept: 'application/json',
   // Spoof Indian IP to bypass geo-restrictions on certain songs
   'X-Forwarded-For': '103.111.161.0',
