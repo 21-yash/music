@@ -2,7 +2,7 @@ import { MusicProvider } from '../MusicProvider';
 import { Song, Album, Artist, Playlist, StreamInfo, SearchResults } from '../types';
 import { logger } from '../../../utils/logger';
 import YTMusic from 'ytmusic-api';
-import ytdl from '@distube/ytdl-core';
+import play from 'play-dl';
 import { JioSaavnProvider } from '../jiosaavn/jiosaavnProvider';
 
 export class SpotifyProvider implements MusicProvider {
@@ -190,18 +190,20 @@ export class SpotifyProvider implements MusicProvider {
 
     const videoId = ytResults[0].videoId;
 
-    // 4. Extract stream using @distube/ytdl-core
-    const info = await ytdl.getInfo(videoId);
+    // 4. Extract stream using play-dl (bypasses recent YouTube PoW blocks)
+    const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
     
     // Choose the highest quality audio-only stream
-    const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+    const audioFormats = info.format.filter((f: any) => 
+      f.mimeType && f.mimeType.startsWith('audio/')
+    );
     
     if (audioFormats.length === 0) {
       throw new Error('No audio streams found on YouTube');
     }
 
     // Sort by audio bitrate descending
-    audioFormats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
+    audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
 
     let selectedFormat = audioFormats[0]; // High
     if (quality === 'medium') {
@@ -212,7 +214,7 @@ export class SpotifyProvider implements MusicProvider {
 
     return {
       url: selectedFormat.url,
-      quality: `${selectedFormat.audioBitrate || 128}kbps (YouTube Fallback)`,
+      quality: `${Math.round((selectedFormat.bitrate || 128000) / 1000)}kbps (YouTube Fallback)`,
       contentType: selectedFormat.mimeType?.split(';')[0] || 'audio/mp4',
     };
   }
