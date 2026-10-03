@@ -198,6 +198,11 @@ export class SpotifyProvider implements MusicProvider {
     const videoId = ytResults[0].videoId;
 
     // 4. Extract stream using play-dl (bypasses recent YouTube PoW blocks)
+    // NOTE: play-dl's PoW algorithm causes OOM crashes on free Render instances.
+    // Until YouTube eases the PoW block or we upgrade the server, we must fail gracefully.
+    throw new Error('Song not found on JioSaavn, and YouTube Fallback is currently disabled due to YouTube Proof-of-Work (PoW) blocking.');
+
+    /*
     const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
     
     // Choose the highest quality audio-only stream
@@ -212,17 +217,11 @@ export class SpotifyProvider implements MusicProvider {
     // Sort by audio bitrate descending
     audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
 
-    let selectedFormat = audioFormats[0]; // High
-    if (quality === 'medium') {
-      selectedFormat = audioFormats[Math.floor(audioFormats.length / 2)];
-    } else if (quality === 'low') {
-      selectedFormat = audioFormats[audioFormats.length - 1];
-    }
-
     return {
-      url: selectedFormat.url || '',
+      url: selectedFormat.url,
       quality: `${Math.round((selectedFormat.bitrate || 128000) / 1000)}kbps (YouTube Fallback)`,
       contentType: selectedFormat.mimeType?.split(';')[0] || 'audio/mp4',
     };
+    */
   }
 }
