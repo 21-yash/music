@@ -174,6 +174,7 @@ export class SpotifyProvider implements MusicProvider {
         };
       }
     } catch (err) {
+      console.error('JIOSAAVN ERROR:', err);
       logger.warn({ error: err }, 'Hybrid Stream: JioSaavn failed, falling back to YouTube');
     }
 

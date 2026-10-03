@@ -1,15 +1,16 @@
-import crypto from 'crypto';
 
 /**
  * JioSaavn media URL decryption.
  *
  * JioSaavn encrypts CDN URLs using DES-ECB with a known static key.
  * This module decrypts those URLs and generates quality variant URLs.
- *
- * Uses Node.js native crypto instead of CryptoJS — no extra dependency.
+ * Uses crypto-js instead of native Node.js crypto because OpenSSL 3.0 (Node 17+)
+ * removed support for legacy DES-ECB ciphers by default, causing ERR_OSSL_EVP_UNSUPPORTED.
  */
+import CryptoJS from 'crypto-js';
 
-const JIOSAAVN_KEY = Buffer.from('38346591', 'utf8');
+// The key as a WordArray for crypto-js
+const JIOSAAVN_KEY = CryptoJS.enc.Utf8.parse('38346591');
 
 /**
  * Decrypt a JioSaavn encrypted_media_url to get the real CDN link.
@@ -18,15 +19,18 @@ export function decryptMediaUrl(encryptedUrl: string): string | null {
   if (!encryptedUrl) return null;
 
   try {
-    const decipher = crypto.createDecipheriv('des-ecb', JIOSAAVN_KEY, null);
-    decipher.setAutoPadding(true);
+    const decrypted = CryptoJS.DES.decrypt(
+      { ciphertext: CryptoJS.enc.Base64.parse(encryptedUrl) } as CryptoJS.lib.CipherParams,
+      JIOSAAVN_KEY,
+      {
+        mode: CryptoJS.mode.ECB,
+        padding: CryptoJS.pad.Pkcs7,
+      }
+    );
 
-    const encrypted = Buffer.from(encryptedUrl, 'base64');
-    let decrypted = decipher.update(encrypted);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-    return decrypted.toString('utf8');
-  } catch {
+    return decrypted.toString(CryptoJS.enc.Utf8);
+  } catch (error) {
+    console.error('Decryption failed:', error);
     return null;
   }
 }
