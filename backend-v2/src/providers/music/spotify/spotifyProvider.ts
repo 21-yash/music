@@ -3,6 +3,7 @@ import { Song, Album, Artist, Playlist, StreamInfo, SearchResults } from '../typ
 import { logger } from '../../../utils/logger';
 import YTMusic from 'ytmusic-api';
 import ytdl from '@distube/ytdl-core';
+import { JioSaavnProvider } from '../jiosaavn/jiosaavnProvider';
 
 export class SpotifyProvider implements MusicProvider {
   readonly name = 'Spotify';
@@ -155,7 +156,29 @@ export class SpotifyProvider implements MusicProvider {
 
     const searchQuery = `${track.title} ${track.artists[0]?.name || ''}`;
 
-    // 3. Search YouTube Music for the exact match
+    // 3. HYBRID ENGINE: Try JioSaavn first for 320kbps High Quality Audio
+    try {
+      const jiosaavn = new JioSaavnProvider();
+      const jsResults = await jiosaavn.search(searchQuery, 1, 5);
+      
+      if (jsResults.songs.length > 0) {
+        const jsSong = jsResults.songs[0];
+        // If we found a match, extract the stream from JioSaavn
+        const jsStream = await jiosaavn.resolveStreamUrl(jsSong.streamRef, quality);
+        logger.info({ spotifyTrack: track.title, jiosaavnId: jsSong.id }, 'Hybrid Stream: JioSaavn Match Found');
+        
+        // Ensure we add a source marker so the UI knows where it came from
+        return {
+          ...jsStream,
+          quality: `${jsStream.quality} (JioSaavn 320kbps Engine)`
+        };
+      }
+    } catch (err) {
+      logger.warn({ error: err }, 'Hybrid Stream: JioSaavn failed, falling back to YouTube');
+    }
+
+    // 4. FALLBACK: Search YouTube Music for the exact match
+    logger.info({ track: track.title }, 'Hybrid Stream: Using YouTube Fallback');
     const ytmusic = new YTMusic();
     await ytmusic.initialize();
     const ytResults = await ytmusic.searchSongs(searchQuery);
@@ -188,7 +211,7 @@ export class SpotifyProvider implements MusicProvider {
 
     return {
       url: selectedFormat.url,
-      quality: `${selectedFormat.audioBitrate || 128}kbps`,
+      quality: `${selectedFormat.audioBitrate || 128}kbps (YouTube Fallback)`,
       contentType: selectedFormat.mimeType?.split(';')[0] || 'audio/mp4',
     };
   }
