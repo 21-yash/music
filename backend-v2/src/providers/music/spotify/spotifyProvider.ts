@@ -53,6 +53,8 @@ export class SpotifyProvider implements MusicProvider {
     });
 
     if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'No error body');
+      logger.error({ status: response.status, body: errorBody, url }, 'Spotify API error details');
       throw new Error(`Spotify API error: ${response.status} ${response.statusText}`);
     }
 
@@ -61,10 +63,11 @@ export class SpotifyProvider implements MusicProvider {
 
   async search(query: string, page: number, limit: number): Promise<SearchResults> {
     const offset = (page - 1) * limit;
+    const spotifyLimit = Math.min(limit, 10); // Spotify restricts limit to 10 for basic API access
     const params = new URLSearchParams({
       q: query,
       type: 'track',
-      limit: limit.toString(),
+      limit: spotifyLimit.toString(),
       offset: offset.toString(),
     });
 
@@ -94,32 +97,10 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async getTrending(): Promise<Song[]> {
-    // Spotify's Global Top 50 Playlist
-    const playlistId = '37i9dQZEVXbMDoHDwVN2tF'; 
-    const data = await this.fetchApi(`/playlists/${playlistId}/tracks`, new URLSearchParams({ limit: '30' }));
-
-    return (data.items || []).map((item: any) => {
-      const track = item.track;
-      return {
-        id: track.id,
-        title: track.name,
-        artists: track.artists.map((a: any) => ({ id: a.id, name: a.name, imageUrl: null })),
-        album: {
-          id: track.album.id,
-          title: track.album.name,
-          imageUrl: track.album.images[0]?.url || '',
-        },
-        duration: Math.floor(track.duration_ms / 1000),
-        imageUrl: track.album.images[0]?.url || '',
-        year: track.album.release_date?.substring(0, 4) || '',
-        language: '',
-        hasLyrics: false,
-        playCount: track.popularity * 1000000,
-        label: '',
-        streamRef: track.id,
-        providerId: this.id,
-      };
-    });
+    // Instead of using playlists (which are heavily restricted and throw 403s), 
+    // we'll just search for recent trending hits to populate the home screen.
+    const res = await this.search('top hits', 1, 10);
+    return res.songs;
   }
 
   async getSong(id: string): Promise<Song | null> {
