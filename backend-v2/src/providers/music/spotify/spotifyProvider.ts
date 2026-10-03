@@ -1,6 +1,6 @@
 import { MusicProvider } from '../MusicProvider';
 import { Song, Album, Artist, Playlist, StreamInfo, SearchResults } from '../types';
-
+import { logger } from '../../../utils/logger';
 import YTMusic from 'ytmusic-api';
 import ytdl from '@distube/ytdl-core';
 
