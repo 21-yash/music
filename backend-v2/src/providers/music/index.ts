@@ -10,3 +10,5 @@ export type {
 } from './types';
 
 export type { MusicProvider } from './MusicProvider';
+export { JioSaavnProvider } from './jiosaavn/jiosaavnProvider';
+export { SpotifyProvider } from './spotify/spotifyProvider';

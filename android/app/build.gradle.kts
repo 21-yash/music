@@ -21,7 +21,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Base URL for the backend API — configurable per build type
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:3000/api/v1/\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://music-l0wf.onrender.com/api/v1/\"")
     }
 
     buildTypes {
@@ -32,7 +32,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            buildConfigField("String", "API_BASE_URL", "\"https://your-production-url.com/api/v1/\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://music-l0wf.onrender.com/api/v1/\"")
         }
         debug {
             isDebuggable = true

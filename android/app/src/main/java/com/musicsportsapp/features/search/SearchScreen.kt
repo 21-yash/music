@@ -1,45 +1,29 @@
 package com.musicsportsapp.features.search
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musicsportsapp.features.music.components.SongItem
 
-/**
- * Search screen — unified search across music and sports.
- *
- * Will support searching songs, artists, albums, playlists,
- * and matches/teams once the respective features are built.
- * For now, shows the search bar and genre/category browse grid.
- */
 @Composable
-fun SearchScreen() {
-    var searchQuery by remember { mutableStateOf("") }
+fun SearchScreen(
+    viewModel: SearchViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
 
     Column(
         modifier = Modifier
@@ -58,14 +42,12 @@ fun SearchScreen() {
 
         // Search bar
         OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
+            value = uiState.query,
+            onValueChange = { viewModel.updateQuery(it) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
-            placeholder = {
-                Text("Songs, artists, teams...")
-            },
+            placeholder = { Text("Songs, artists, albums...") },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Filled.Search,
@@ -85,59 +67,132 @@ fun SearchScreen() {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            text = "Browse Categories",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
+        if (uiState.query.isBlank()) {
+            BrowseCategories()
+        } else {
+            SearchResultsContent(
+                uiState = uiState,
+                onSongClick = { viewModel.playSong(it) }
+            )
+        }
+    }
+}
 
-        Spacer(modifier = Modifier.height(12.dp))
+@Composable
+fun SearchResultsContent(
+    uiState: SearchUiState,
+    onSongClick: (com.musicsportsapp.features.music.domain.model.Song) -> Unit
+) {
+    if (uiState.isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
 
-        // Category grid
-        val categories = listOf(
-            "Bollywood", "Pop", "Rock", "Hip-Hop",
-            "Classical", "Jazz", "EDM", "Indie",
-            "Cricket", "Football", "Tennis", "Basketball",
-        )
+    if (uiState.error != null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(text = uiState.error, color = MaterialTheme.colorScheme.error)
+        }
+        return
+    }
 
-        val categoryColors = listOf(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-        )
+    val results = uiState.results
+    if (results == null || (results.songs.isEmpty() && results.albums.isEmpty() && results.artists.isEmpty())) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Text(
+                text = "No results found for \"${uiState.query}\"",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 32.dp)
+            )
+        }
+        return
+    }
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(categories.size) { index ->
-                Card(
+    LazyColumn(
+        contentPadding = PaddingValues(bottom = 120.dp) // Space for MiniPlayer
+    ) {
+        if (results.songs.isNotEmpty()) {
+            item { SectionHeader("Songs") }
+            items(results.songs) { song ->
+                SongItem(
+                    song = song,
+                    onClick = { onSongClick(song) },
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+
+        // Albums and Artists would go here, maybe using LazyRow or different Item composables
+        // For brevity, we focus on songs in this initial implementation
+    }
+}
+
+@Composable
+fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+    )
+}
+
+@Composable
+fun BrowseCategories() {
+    Text(
+        text = "Browse Categories",
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = Modifier.padding(horizontal = 20.dp),
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    val categories = listOf(
+        "Bollywood", "Pop", "Rock", "Hip-Hop",
+        "Classical", "Jazz", "EDM", "Indie",
+        "Cricket", "Football", "Tennis", "Basketball",
+    )
+
+    val categoryColors = listOf(
+        MaterialTheme.colorScheme.primaryContainer,
+        MaterialTheme.colorScheme.secondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer,
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+    )
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(categories.size) { index ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(80.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = categoryColors[index % categoryColors.size].copy(alpha = 0.4f),
+                ),
+            ) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = categoryColors[index % categoryColors.size].copy(alpha = 0.4f),
-                    ),
+                        .fillMaxSize()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = categories[index],
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                    Text(
+                        text = categories[index],
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
             }
         }
