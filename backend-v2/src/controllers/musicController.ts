@@ -113,56 +113,16 @@ export async function stream(req: Request, res: Response, next: NextFunction): P
     // Resolve the actual direct CDN URL from the provider
     const streamInfo = await musicService.resolveStreamUrl(streamRef, quality);
 
-    // Fetch the stream from the provider's CDN
-    // We proxy it to avoid CORS issues and to hide the direct URL.
-    const headers = new Headers();
-    if (req.headers.range) {
-      headers.set('Range', req.headers.range);
-    }
-
-    const response = await fetch(streamInfo.url, {
-      headers,
-      // Pass along any standard abort signal
-      signal: req.signal
+    // 🚀 OPTIMIZATION: Instead of proxying the massive audio stream through our Render server
+    // (which causes slow load times, huge latency, and burns server bandwidth), 
+    // we return the direct CDN URL to the client. 
+    // Android ExoPlayer (and HTML5 Audio) will stream directly from YouTube/JioSaavn's Edge CDNs!
+    sendSuccess(res, {
+      url: streamInfo.url,
+      quality: streamInfo.quality,
+      contentType: streamInfo.contentType
     });
 
-    if (!response.ok) {
-      logger.error({ status: response.status, url: streamInfo.url }, 'Failed to fetch stream from CDN');
-      res.status(502).json({ success: false, error: { code: 'BAD_GATEWAY', message: 'Failed to retrieve audio stream' } });
-      return;
-    }
-
-    // Proxy the headers
-    response.headers.forEach((value, key) => {
-      // Forward relevant headers, especially Content-Type, Content-Length, Content-Range, Accept-Ranges
-      if (['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'].includes(key.toLowerCase())) {
-        res.setHeader(key, value);
-      }
-    });
-
-    res.status(response.status); // Forward 200 or 206
-
-    // Pipe the response body to the express response
-    if (response.body) {
-      // Create a node-readable stream from the web stream and pipe it
-      const reader = response.body.getReader();
-      const pump = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(value);
-          }
-          res.end();
-        } catch (err) {
-          logger.error({ err }, 'Stream piping error');
-          res.end();
-        }
-      };
-      pump();
-    } else {
-      res.end();
-    }
   } catch (error) {
     // If it's a known error, we can handle it
     logger.error({ error }, 'Stream error');
