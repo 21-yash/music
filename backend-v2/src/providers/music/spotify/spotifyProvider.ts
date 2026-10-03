@@ -213,7 +213,7 @@ export class SpotifyProvider implements MusicProvider {
     }
 
     return {
-      url: selectedFormat.url,
+      url: selectedFormat.url || '',
       quality: `${Math.round((selectedFormat.bitrate || 128000) / 1000)}kbps (YouTube Fallback)`,
       contentType: selectedFormat.mimeType?.split(';')[0] || 'audio/mp4',
     };
