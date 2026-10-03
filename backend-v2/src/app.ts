@@ -25,6 +25,7 @@ export function createApp(): express.Application {
       origin(origin, callback) {
         // Allow requests with no origin (mobile apps, Postman, curl)
         if (!origin) return callback(null, true);
+        if (origins.includes('*')) return callback(null, true);
         if (origins.includes(origin)) return callback(null, true);
         return callback(null, false);
       },
