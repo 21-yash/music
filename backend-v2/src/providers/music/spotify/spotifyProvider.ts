@@ -162,16 +162,23 @@ export class SpotifyProvider implements MusicProvider {
       const jsResults = await jiosaavn.search(searchQuery, 1, 5);
       
       if (jsResults.songs.length > 0) {
-        const jsSong = jsResults.songs[0];
-        // If we found a match, extract the stream from JioSaavn
-        const jsStream = await jiosaavn.resolveStreamUrl(jsSong.streamRef, quality);
-        logger.info({ spotifyTrack: track.title, jiosaavnId: jsSong.id }, 'Hybrid Stream: JioSaavn Match Found');
-        
-        // Ensure we add a source marker so the UI knows where it came from
-        return {
-          ...jsStream,
-          quality: `${jsStream.quality} (JioSaavn 320kbps Engine)`
-        };
+        // STRICT MATCHING: JioSaavn search is fuzzy and often returns covers/remixes.
+        // We must ensure the duration is within 15 seconds of the original Spotify track.
+        const bestMatch = jsResults.songs.find(s => Math.abs(s.duration - track.duration) <= 15);
+
+        if (bestMatch) {
+          // If we found an exact match, extract the stream from JioSaavn
+          const jsStream = await jiosaavn.resolveStreamUrl(bestMatch.streamRef, quality);
+          logger.info({ spotifyTrack: track.title, jiosaavnId: bestMatch.id }, 'Hybrid Stream: JioSaavn Match Found');
+          
+          // Ensure we add a source marker so the UI knows where it came from
+          return {
+            ...jsStream,
+            quality: `${jsStream.quality} (JioSaavn 320kbps Engine)`
+          };
+        } else {
+          logger.info('Hybrid Stream: JioSaavn returned results but none matched the strict duration. Skipping to Fallback.');
+        }
       }
     } catch (err) {
       console.error('JIOSAAVN ERROR:', err);
