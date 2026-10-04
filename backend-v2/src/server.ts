@@ -8,6 +8,8 @@ import { logger } from './utils/logger';
 import { registerMusicProvider } from './services/musicService';
 import { JioSaavnProvider } from './providers/music';
 import { YouTubeProvider } from './providers/music/youtube/youtubeProvider';
+import { initSportsService } from './services/sportsService';
+import { CricbuzzProvider } from './providers/sports/cricket/cricbuzzProvider';
 
 /**
  * Application entry point.
@@ -29,6 +31,7 @@ async function start(): Promise<void> {
     // ─── Initialize Services ───────────────────────────────────
     registerMusicProvider(new JioSaavnProvider(), true);
     registerMusicProvider(new YouTubeProvider(), false);
+    initSportsService(new CricbuzzProvider());
 
     // ─── Create Express app & HTTP server ──────────────────────
     const app = createApp();
