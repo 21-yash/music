@@ -26,11 +26,11 @@ export class YouTubeProvider implements MusicProvider {
     const songs: Song[] = results.slice(0, limit).map((s: any) => ({
       id: s.videoId,
       title: s.name,
-      artists: s.artists.map((a: any) => ({
-        id: a.artistId || '',
-        name: a.name,
+      artists: s.artist ? [{
+        id: s.artist.artistId || '',
+        name: s.artist.name,
         imageUrl: null
-      })),
+      }] : [],
       album: s.album ? {
         id: s.album.albumId,
         title: s.album.name,
