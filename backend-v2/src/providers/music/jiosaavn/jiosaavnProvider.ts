@@ -368,6 +368,7 @@ export class JioSaavnProvider implements MusicProvider {
     const url = getQualityUrl(decrypted, quality);
 
     return {
+      type: 'jiosaavn',
       url,
       quality: getQualityLabel(quality),
       contentType: 'audio/mp4',

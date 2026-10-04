@@ -40,6 +40,26 @@ fun SearchScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Provider Toggle
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+        ) {
+            val options = listOf("jiosaavn" to "JioSaavn", "youtube" to "YouTube")
+            options.forEachIndexed { index, (id, label) ->
+                SegmentedButton(
+                    selected = uiState.provider == id,
+                    onClick = { viewModel.updateProvider(id) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+                ) {
+                    Text(label)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Search bar
         OutlinedTextField(
             value = uiState.query,

@@ -84,3 +84,23 @@ data class Playlist(
     val songs: List<Song>,
     val providerId: String
 )
+
+/**
+ * Resolved stream information from the backend.
+ * Uses a discriminated union to handle different streaming sources.
+ */
+sealed class StreamInfo {
+    data class JioSaavn(
+        val url: String,
+        val quality: String,
+        val contentType: String
+    ) : StreamInfo()
+    
+    data class YouTube(
+        val videoId: String
+    ) : StreamInfo()
+    
+    data class None(
+        val message: String
+    ) : StreamInfo()
+}

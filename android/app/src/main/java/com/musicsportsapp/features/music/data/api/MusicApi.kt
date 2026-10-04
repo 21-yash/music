@@ -11,42 +11,54 @@ import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+import com.musicsportsapp.features.music.data.dto.StreamInfoDto
+
 /**
  * Retrofit interface for the Music API.
- * 
- * Note: Stream URL resolution is done dynamically in the Media3
- * player by hitting `/api/v1/music/stream?id=...`, not through Retrofit,
- * because ExoPlayer handles the actual audio streaming from the CDN URL.
  */
 interface MusicApi {
+
+    @GET("music/stream")
+    suspend fun getStream(
+        @Query("ref") ref: String,
+        @Query("quality") quality: String = "high",
+        @Query("provider") provider: String? = null
+    ): ApiResponse<StreamInfoDto>
 
     @GET("music/search")
     suspend fun search(
         @Query("q") query: String,
         @Query("page") page: Int = 1,
-        @Query("limit") limit: Int = 20
+        @Query("limit") limit: Int = 20,
+        @Query("provider") provider: String? = null
     ): ApiResponse<SearchResultsDto>
 
     @GET("music/trending")
-    suspend fun getTrending(): ApiResponse<TrendingResponseDto>
+    suspend fun getTrending(
+        @Query("provider") provider: String? = null
+    ): ApiResponse<TrendingResponseDto>
 
     @GET("music/songs/{id}")
     suspend fun getSong(
-        @Path("id") id: String
+        @Path("id") id: String,
+        @Query("provider") provider: String? = null
     ): ApiResponse<SongDto>
 
     @GET("music/albums/{id}")
     suspend fun getAlbum(
-        @Path("id") id: String
+        @Path("id") id: String,
+        @Query("provider") provider: String? = null
     ): ApiResponse<AlbumDto>
 
     @GET("music/artists/{id}")
     suspend fun getArtist(
-        @Path("id") id: String
+        @Path("id") id: String,
+        @Query("provider") provider: String? = null
     ): ApiResponse<ArtistDto>
 
     @GET("music/playlists/{id}")
     suspend fun getPlaylist(
-        @Path("id") id: String
+        @Path("id") id: String,
+        @Query("provider") provider: String? = null
     ): ApiResponse<PlaylistDto>
 }

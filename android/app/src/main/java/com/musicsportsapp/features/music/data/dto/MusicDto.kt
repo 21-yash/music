@@ -160,3 +160,42 @@ data class PlaylistDto(
 data class TrendingResponseDto(
     val songs: List<SongDto> = emptyList()
 )
+
+@Serializable
+sealed class StreamInfoDto {
+    abstract fun toDomain(): com.musicsportsapp.features.music.domain.model.StreamInfo
+
+    @Serializable
+    @kotlinx.serialization.SerialName("jiosaavn")
+    data class JioSaavnDto(
+        val url: String,
+        val quality: String,
+        val contentType: String
+    ) : StreamInfoDto() {
+        override fun toDomain() = com.musicsportsapp.features.music.domain.model.StreamInfo.JioSaavn(
+            url = url,
+            quality = quality,
+            contentType = contentType
+        )
+    }
+
+    @Serializable
+    @kotlinx.serialization.SerialName("youtube")
+    data class YouTubeDto(
+        val videoId: String
+    ) : StreamInfoDto() {
+        override fun toDomain() = com.musicsportsapp.features.music.domain.model.StreamInfo.YouTube(
+            videoId = videoId
+        )
+    }
+
+    @Serializable
+    @kotlinx.serialization.SerialName("none")
+    data class NoneDto(
+        val message: String
+    ) : StreamInfoDto() {
+        override fun toDomain() = com.musicsportsapp.features.music.domain.model.StreamInfo.None(
+            message = message
+        )
+    }
+}

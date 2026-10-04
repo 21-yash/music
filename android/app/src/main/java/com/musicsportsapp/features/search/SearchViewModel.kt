@@ -19,6 +19,7 @@ import javax.inject.Inject
 
 data class SearchUiState(
     val query: String = "",
+    val provider: String = "jiosaavn", // "jiosaavn" or "youtube"
     val results: SearchResults? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -38,11 +39,19 @@ class SearchViewModel @Inject constructor(
 
     fun updateQuery(newQuery: String) {
         _uiState.update { it.copy(query = newQuery) }
-        
+        triggerSearch(newQuery, _uiState.value.provider)
+    }
+
+    fun updateProvider(newProvider: String) {
+        _uiState.update { it.copy(provider = newProvider) }
+        triggerSearch(_uiState.value.query, newProvider)
+    }
+
+    private fun triggerSearch(query: String, provider: String) {
         // Debounce search requests
         searchJob?.cancel()
         
-        if (newQuery.isBlank()) {
+        if (query.isBlank()) {
             _uiState.update { it.copy(results = null, isLoading = false, error = null) }
             return
         }
@@ -53,7 +62,7 @@ class SearchViewModel @Inject constructor(
             
             _uiState.update { it.copy(isLoading = true, error = null) }
             
-            when (val result = repository.search(newQuery)) {
+            when (val result = repository.search(query, provider)) {
                 is AppResult.Success -> {
                     _uiState.update { 
                         it.copy(

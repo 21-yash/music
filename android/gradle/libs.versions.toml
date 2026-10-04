@@ -47,6 +47,9 @@ media3 = "1.5.1"
 # Coil
 coil = "2.7.0"
 
+# NewPipeExtractor
+newpipe = "v0.24.2"
+
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version = "1.16.0" }
@@ -110,6 +113,9 @@ media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "medi
 
 # Coil
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# NewPipeExtractor
+newpipe-extractor = { group = "com.github.TeamNewPipe", name = "NewPipeExtractor", version.ref = "newpipe" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

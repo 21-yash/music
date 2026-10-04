@@ -36,26 +36,33 @@ const CACHE_PREFIX = {
   playlist: 'music:playlist:',
   trending: 'music:trending',
   streamToken: 'music:stoken:', // maps songId → encrypted streamRef
+  streamResolved: 'music:sres:', // maps songId:quality → resolved StreamInfo
 } as const;
 
 // ─── Service ─────────────────────────────────────────────────────────
 
-let _provider: MusicProvider | null = null;
+const _providers = new Map<string, MusicProvider>();
+let _defaultProviderId = 'jiosaavn';
 
 /**
- * Initialize the music service with a provider.
- * Call this once during app startup.
+ * Register a music provider with the service.
+ * Call this during app startup for each provider.
  */
-export function initMusicService(provider: MusicProvider): void {
-  _provider = provider;
-  logger.info({ provider: provider.name }, 'Music service initialized');
+export function registerMusicProvider(provider: MusicProvider, isDefault: boolean = false): void {
+  _providers.set(provider.name, provider);
+  if (isDefault) {
+    _defaultProviderId = provider.name;
+  }
+  logger.info({ provider: provider.name }, 'Music provider registered');
 }
 
-function getProvider(): MusicProvider {
-  if (!_provider) {
-    throw new Error('Music service not initialized. Call initMusicService() first.');
+function getProvider(providerId?: string): MusicProvider {
+  const id = providerId || _defaultProviderId;
+  const provider = _providers.get(id);
+  if (!provider) {
+    throw new Error(`Music provider '${id}' not found or not initialized.`);
   }
-  return _provider;
+  return provider;
 }
 
 /**
@@ -65,12 +72,14 @@ export async function search(
   query: string,
   page: number,
   limit: number,
+  providerId?: string
 ): Promise<SearchResults> {
-  const cacheKey = `${CACHE_PREFIX.search}${hashKey(query)}:${page}:${limit}`;
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.search}${hashKey(query)}:${page}:${limit}:${provider.name}`;
   const cached = await getFromCache<SearchResults>(cacheKey);
   if (cached) return cached;
 
-  const results = await getProvider().search(query, page, limit);
+  const results = await provider.search(query, page, limit);
 
   // Store streamRefs in Redis and strip them from the response
   await storeStreamTokens(results.songs);
@@ -83,12 +92,13 @@ export async function search(
 /**
  * Get song details by ID.
  */
-export async function getSong(id: string): Promise<Song | null> {
-  const cacheKey = `${CACHE_PREFIX.song}${id}`;
+export async function getSong(id: string, providerId?: string): Promise<Song | null> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.song}${id}:${provider.name}`;
   const cached = await getFromCache<Song>(cacheKey);
   if (cached) return cached;
 
-  const song = await getProvider().getSong(id);
+  const song = await provider.getSong(id);
   if (song) {
     await storeStreamTokens([song]);
     const sanitized = stripStreamRef(song);
@@ -101,12 +111,13 @@ export async function getSong(id: string): Promise<Song | null> {
 /**
  * Get album with songs.
  */
-export async function getAlbum(id: string): Promise<Album | null> {
-  const cacheKey = `${CACHE_PREFIX.album}${id}`;
+export async function getAlbum(id: string, providerId?: string): Promise<Album | null> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.album}${id}:${provider.name}`;
   const cached = await getFromCache<Album>(cacheKey);
   if (cached) return cached;
 
-  const album = await getProvider().getAlbum(id);
+  const album = await provider.getAlbum(id);
   if (album) {
     await storeStreamTokens(album.songs);
     const sanitized = { ...album, songs: album.songs.map(stripStreamRef) };
@@ -119,12 +130,13 @@ export async function getAlbum(id: string): Promise<Album | null> {
 /**
  * Get artist with top songs and albums.
  */
-export async function getArtist(id: string): Promise<Artist | null> {
-  const cacheKey = `${CACHE_PREFIX.artist}${id}`;
+export async function getArtist(id: string, providerId?: string): Promise<Artist | null> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.artist}${id}:${provider.name}`;
   const cached = await getFromCache<Artist>(cacheKey);
   if (cached) return cached;
 
-  const artist = await getProvider().getArtist(id);
+  const artist = await provider.getArtist(id);
   if (artist) {
     await storeStreamTokens(artist.topSongs);
     const sanitized = { ...artist, topSongs: artist.topSongs.map(stripStreamRef) };
@@ -137,12 +149,13 @@ export async function getArtist(id: string): Promise<Artist | null> {
 /**
  * Get playlist with songs.
  */
-export async function getPlaylist(id: string): Promise<Playlist | null> {
-  const cacheKey = `${CACHE_PREFIX.playlist}${id}`;
+export async function getPlaylist(id: string, providerId?: string): Promise<Playlist | null> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.playlist}${id}:${provider.name}`;
   const cached = await getFromCache<Playlist>(cacheKey);
   if (cached) return cached;
 
-  const playlist = await getProvider().getPlaylist(id);
+  const playlist = await provider.getPlaylist(id);
   if (playlist) {
     await storeStreamTokens(playlist.songs);
     const sanitized = { ...playlist, songs: playlist.songs.map(stripStreamRef) };
@@ -155,12 +168,13 @@ export async function getPlaylist(id: string): Promise<Playlist | null> {
 /**
  * Get trending songs.
  */
-export async function getTrending(): Promise<Song[]> {
-  const cacheKey = CACHE_PREFIX.trending;
+export async function getTrending(providerId?: string): Promise<Song[]> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.trending}:${provider.name}`;
   const cached = await getFromCache<Song[]>(cacheKey);
   if (cached) return cached;
 
-  const songs = await getProvider().getTrending();
+  const songs = await provider.getTrending();
   await storeStreamTokens(songs);
   const sanitized = songs.map(stripStreamRef);
   await setCache(cacheKey, sanitized, CACHE_TTL.trending);
@@ -179,23 +193,31 @@ export async function getTrending(): Promise<Song[]> {
 export async function resolveStreamUrl(
   songId: string,
   quality: 'high' | 'medium' | 'low' = 'high',
+  providerId?: string
 ): Promise<StreamInfo> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.streamResolved}${songId}:${quality}:${provider.name}`;
+  const cached = await getFromCache<StreamInfo>(cacheKey);
+  if (cached) return cached;
+
   // Look up the stored streamRef for this song ID
-  const streamRef = await getStreamToken(songId);
+  let streamRef = await getStreamToken(songId);
 
-  if (streamRef) {
-    return getProvider().resolveStreamUrl(streamRef, quality);
+  if (!streamRef) {
+    // If not in Redis (expired/evicted), fetch fresh from provider
+    const song = await provider.getSong(songId);
+    if (!song || !song.streamRef) {
+      throw new Error(`No playable stream found for song ${songId}`);
+    }
+    await storeStreamTokens([song]);
+    streamRef = song.streamRef;
   }
 
-  // If not in Redis (expired/evicted), fetch fresh from provider
-  const song = await getProvider().getSong(songId);
-  if (!song || !song.streamRef) {
-    throw new Error(`No playable stream found for song ${songId}`);
-  }
-
-  // Store for next time
-  await storeStreamTokens([song]);
-  return getProvider().resolveStreamUrl(song.streamRef, quality);
+  const result = await provider.resolveStreamUrl(streamRef, quality);
+  // Cache the resolved result for 2 hours (CDN links are usually valid for 4-6 hours)
+  await setCache(cacheKey, result, 2 * 60 * 60);
+  
+  return result;
 }
 
 // ─── Redis cache helpers ─────────────────────────────────────────────

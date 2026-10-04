@@ -96,11 +96,7 @@ export interface SearchResults {
 
 // ─── Stream ──────────────────────────────────────────────────────────
 
-export interface StreamInfo {
-  /** Direct CDN URL for the audio file. */
-  url: string;
-  /** Audio quality label (e.g. '320kbps', '160kbps', '96kbps'). */
-  quality: string;
-  /** MIME type (e.g. 'audio/mp4'). */
-  contentType: string;
-}
+export type StreamInfo = 
+  | { type: 'jiosaavn'; url: string; quality: string; contentType: string }
+  | { type: 'youtube'; videoId: string }
+  | { type: 'none'; message: string };

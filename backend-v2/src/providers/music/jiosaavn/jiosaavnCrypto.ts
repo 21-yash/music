@@ -55,8 +55,8 @@ export function getQualityUrl(
   const target = qualityMap[quality];
 
   return decryptedUrl
-    .replace(/_96\.mp4$/, target)
-    .replace(/_96_p\.mp4$/, target);
+    .replace(/_96\.mp4/, target)
+    .replace(/_96_p\.mp4/, target);
 }
 
 /**

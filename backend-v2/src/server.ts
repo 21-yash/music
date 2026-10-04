@@ -5,8 +5,9 @@ import { connectMongoDB, disconnectMongoDB } from './config/database';
 import { connectRedis, disconnectRedis } from './config/redis';
 import { initializeSocketIO } from './websocket';
 import { logger } from './utils/logger';
-import { initMusicService } from './services/musicService';
+import { registerMusicProvider } from './services/musicService';
 import { JioSaavnProvider } from './providers/music';
+import { YouTubeProvider } from './providers/music/youtube/youtubeProvider';
 
 /**
  * Application entry point.
@@ -26,7 +27,8 @@ async function start(): Promise<void> {
     await connectRedis();
 
     // ─── Initialize Services ───────────────────────────────────
-    initMusicService(new JioSaavnProvider());
+    registerMusicProvider(new JioSaavnProvider(), true);
+    registerMusicProvider(new YouTubeProvider(), false);
 
     // ─── Create Express app & HTTP server ──────────────────────
     const app = createApp();

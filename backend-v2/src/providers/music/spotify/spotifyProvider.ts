@@ -188,10 +188,14 @@ export class SpotifyProvider implements MusicProvider {
           const jsStream = await jiosaavnInstance.resolveStreamUrl(bestMatch.streamRef, quality);
           logger.info({ spotifyTrack: track.title, jiosaavnId: bestMatch.id }, 'Hybrid Stream: JioSaavn Match Found');
           
-          return {
-            ...jsStream,
-            quality: `${jsStream.quality} (JioSaavn 320kbps Engine)`
-          };
+          if (jsStream.type === 'jiosaavn') {
+            return {
+              ...jsStream,
+              quality: `${jsStream.quality} (JioSaavn Engine)`
+            };
+          } else {
+            return jsStream;
+          }
         } else {
           logger.info('Hybrid Stream: JioSaavn returned results but none matched the strict duration. Skipping.');
         }
@@ -200,7 +204,26 @@ export class SpotifyProvider implements MusicProvider {
       logger.warn({ error: err }, 'Hybrid Stream: JioSaavn failed');
     }
 
-    // YouTube fallback is disabled — PoW blocks crash the server on free-tier Render
-    throw new Error('Song not available on JioSaavn. YouTube fallback is currently disabled.');
+    // Fallback: Search YouTube Music and return the videoId for client-side extraction
+    try {
+      const YTMusic = require('ytmusic-api').default;
+      const ytmusic = new YTMusic();
+      await ytmusic.initialize();
+      const ytResults = await ytmusic.searchSongs(searchQuery);
+
+      if (ytResults && ytResults.length > 0) {
+        return {
+          type: 'youtube',
+          videoId: ytResults[0].videoId
+        };
+      }
+    } catch (err) {
+      logger.error({ error: err }, 'Hybrid Stream: YTMusic search failed');
+    }
+
+    return {
+      type: 'none',
+      message: 'Song not available on JioSaavn and could not be found on YouTube.'
+    };
   }
 }

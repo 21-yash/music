@@ -16,8 +16,9 @@ export async function search(req: Request, res: Response, next: NextFunction): P
     const query = req.query.q as string;
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
+    const provider = req.query.provider as string | undefined;
 
-    const results = await musicService.search(query, page, limit);
+    const results = await musicService.search(query, page, limit, provider);
     sendSuccess(res, results);
   } catch (error) {
     next(error);
@@ -27,7 +28,8 @@ export async function search(req: Request, res: Response, next: NextFunction): P
 export async function getSong(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const song = await musicService.getSong(id);
+    const provider = req.query.provider as string | undefined;
+    const song = await musicService.getSong(id, provider);
 
     if (!song) {
       throw new NotFoundError('Song');
@@ -42,7 +44,8 @@ export async function getSong(req: Request, res: Response, next: NextFunction): 
 export async function getAlbum(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const album = await musicService.getAlbum(id);
+    const provider = req.query.provider as string | undefined;
+    const album = await musicService.getAlbum(id, provider);
 
     if (!album) {
       throw new NotFoundError('Album');
@@ -57,7 +60,8 @@ export async function getAlbum(req: Request, res: Response, next: NextFunction):
 export async function getArtist(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const artist = await musicService.getArtist(id);
+    const provider = req.query.provider as string | undefined;
+    const artist = await musicService.getArtist(id, provider);
 
     if (!artist) {
       throw new NotFoundError('Artist');
@@ -72,7 +76,8 @@ export async function getArtist(req: Request, res: Response, next: NextFunction)
 export async function getPlaylist(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const playlist = await musicService.getPlaylist(id);
+    const provider = req.query.provider as string | undefined;
+    const playlist = await musicService.getPlaylist(id, provider);
 
     if (!playlist) {
       throw new NotFoundError('Playlist');
@@ -84,9 +89,10 @@ export async function getPlaylist(req: Request, res: Response, next: NextFunctio
   }
 }
 
-export async function getTrending(_req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getTrending(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const songs = await musicService.getTrending();
+    const provider = req.query.provider as string | undefined;
+    const songs = await musicService.getTrending(provider);
     sendSuccess(res, { songs });
   } catch (error) {
     next(error);
@@ -102,23 +108,20 @@ export async function getTrending(_req: Request, res: Response, next: NextFuncti
  */
 export async function stream(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const songId = req.query.id as string;
+    const songId = (req.query.ref || req.query.id) as string;
     const quality = (req.query.quality as 'high' | 'medium' | 'low') || 'high';
+    const provider = req.query.provider as string | undefined;
 
     if (!songId) {
-      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Song ID is required' } });
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Song ID (ref) is required' } });
       return;
     }
 
     // Resolve the actual direct CDN URL from the provider (via Redis stream token lookup)
-    const streamInfo = await musicService.resolveStreamUrl(songId, quality);
+    const streamInfo = await musicService.resolveStreamUrl(songId, quality, provider);
 
-    // Return the direct CDN URL — Android ExoPlayer streams directly from JioSaavn's Edge CDN
-    sendSuccess(res, {
-      url: streamInfo.url,
-      quality: streamInfo.quality,
-      contentType: streamInfo.contentType
-    });
+    // Return the discriminated union directly
+    sendSuccess(res, streamInfo);
 
   } catch (error) {
     logger.error({ error }, 'Stream error');
