@@ -112,7 +112,7 @@ class MusicPlayerManager @Inject constructor(
 
     private suspend fun extractYouTubeStream(videoId: String): String? = withContext(Dispatchers.IO) {
         try {
-            val url = "https://www.youtube.com/watch?v=\$videoId"
+            val url = "https://www.youtube.com/watch?v=$videoId"
             val extractor = NewPipe.getService(0).getStreamExtractor(url) as YoutubeStreamExtractor
             extractor.fetchPage()
             
