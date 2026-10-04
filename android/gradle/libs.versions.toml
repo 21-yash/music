@@ -48,7 +48,7 @@ media3 = "1.5.1"
 coil = "2.7.0"
 
 # NewPipeExtractor
-newpipe = "v0.24.2"
+newpipe = "v0.26.5"
 
 [libraries]
 # AndroidX Core
