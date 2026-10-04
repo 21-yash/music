@@ -8,8 +8,9 @@
  * removed support for legacy DES-ECB ciphers by default, causing ERR_OSSL_EVP_UNSUPPORTED.
  */
 import CryptoJS from 'crypto-js';
+import { logger } from '../../../utils/logger';
 
-// The key as a WordArray for crypto-js
+// The key as a WordArray for crypto-js. This is JioSaavn's well-known static DES-ECB key.
 const JIOSAAVN_KEY = CryptoJS.enc.Utf8.parse('38346591');
 
 /**
@@ -30,7 +31,7 @@ export function decryptMediaUrl(encryptedUrl: string): string | null {
 
     return decrypted.toString(CryptoJS.enc.Utf8);
   } catch (error) {
-    console.error('Decryption failed:', error);
+    logger.error({ error }, 'JioSaavn decryption failed');
     return null;
   }
 }
@@ -54,8 +55,8 @@ export function getQualityUrl(
   const target = qualityMap[quality];
 
   return decryptedUrl
-    .replace(/_96\.mp4/, target)
-    .replace(/_96_p\.mp4/, target);
+    .replace(/_96\.mp4$/, target)
+    .replace(/_96_p\.mp4$/, target);
 }
 
 /**

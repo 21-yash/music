@@ -39,8 +39,8 @@ export function cleanText(text: string | undefined | null): string {
 export function upgradeImageUrl(url: string | undefined | null): string | null {
   if (!url) return null;
   return url
-    .replace(/150x150/g, '500x500')
-    .replace(/50x50/g, '500x500');
+    .replace(/\/150x150\b/g, '/500x500')
+    .replace(/\/50x50\b/g, '/500x500');
 }
 
 // ─── Artist extraction ──────────────────────────────────────────────
@@ -142,7 +142,9 @@ const VARIANT_PATTERNS = [
   /\b(karaoke|instrumental|cover|remix|lofi|lo-fi|reverb|slowed)\b/i,
   /\b(8d\s*audio|reverb\s*\+\s*slowed|bass\s*boosted)\b/i,
   /\b(unplugged|acoustic\s*version|live\s*version)\b/i,
-  /\b(reprise|revisited)\b/i,
+  /\b(reprise|revisited|recreated|remastered)\b/i,
+  /\blofi\s*mix\b/i,
+  /\bslowed\s*\+\s*reverb\b/i,
 ];
 
 /**
@@ -171,7 +173,11 @@ export function songFingerprint(song: Song): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
-  return `${title}|${artist}|${song.duration}`;
+  // Round duration to nearest 5 seconds to handle rounding differences
+  // between autocomplete and search results for the same song
+  const roundedDuration = Math.round(song.duration / 5) * 5;
+
+  return `${title}|${artist}|${roundedDuration}`;
 }
 
 /**

@@ -10,7 +10,7 @@ export const searchSchema = z.object({
 
 export const streamSchema = z.object({
   query: z.object({
-    ref: z.string().min(1, 'Stream reference is required'),
+    id: z.string().min(1, 'Song ID is required'),
     quality: z.enum(['high', 'medium', 'low']).default('high'),
   }),
 });

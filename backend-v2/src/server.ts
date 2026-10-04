@@ -6,7 +6,7 @@ import { connectRedis, disconnectRedis } from './config/redis';
 import { initializeSocketIO } from './websocket';
 import { logger } from './utils/logger';
 import { initMusicService } from './services/musicService';
-import { SpotifyProvider } from './providers/music';
+import { JioSaavnProvider } from './providers/music';
 
 /**
  * Application entry point.
@@ -26,7 +26,7 @@ async function start(): Promise<void> {
     await connectRedis();
 
     // ─── Initialize Services ───────────────────────────────────
-    initMusicService(new SpotifyProvider());
+    initMusicService(new JioSaavnProvider());
 
     // ─── Create Express app & HTTP server ──────────────────────
     const app = createApp();

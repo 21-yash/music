@@ -1,9 +1,22 @@
 import { MusicProvider } from '../MusicProvider';
 import { Song, Album, Artist, Playlist, StreamInfo, SearchResults } from '../types';
 import { logger } from '../../../utils/logger';
-import YTMusic from 'ytmusic-api';
-import play from 'play-dl';
 import { JioSaavnProvider } from '../jiosaavn/jiosaavnProvider';
+
+/**
+ * Spotify provider.
+ *
+ * Uses the Spotify Web API for metadata (search, track details).
+ * Stream resolution uses a hybrid engine: searches JioSaavn for matching
+ * audio since Spotify doesn't expose raw audio streams via their API.
+ *
+ * NOTE: This provider is currently NOT the active provider. JioSaavnProvider
+ * is used directly for both search and playback (see server.ts).
+ * This file is kept for potential future use as a metadata-enrichment source.
+ */
+
+/** Reuse a single JioSaavn instance for stream resolution instead of creating one per call. */
+const jiosaavnInstance = new JioSaavnProvider();
 
 export class SpotifyProvider implements MusicProvider {
   readonly name = 'Spotify';
@@ -31,6 +44,7 @@ export class SpotifyProvider implements MusicProvider {
         Authorization: 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64'),
       },
       body: new URLSearchParams({ grant_type: 'client_credentials' }),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {
@@ -51,6 +65,7 @@ export class SpotifyProvider implements MusicProvider {
 
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {
@@ -86,11 +101,11 @@ export class SpotifyProvider implements MusicProvider {
       duration: Math.floor(track.duration_ms / 1000),
       imageUrl: track.album.images[0]?.url || '',
       year: track.album.release_date?.substring(0, 4) || '',
-      language: '', // Spotify doesn't provide language on tracks easily
+      language: '',
       hasLyrics: false,
-      playCount: track.popularity * 1000000, // Approximation since Spotify doesn't expose raw play count here
+      playCount: track.popularity * 1000000, // Approximation — Spotify doesn't expose raw play count
       label: '',
-      streamRef: track.id, // We'll pass the Spotify ID to resolveStreamUrl
+      streamRef: track.id, // Spotify ID used for hybrid stream resolution
       providerId: this.id,
     }));
 
@@ -98,8 +113,6 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async getTrending(): Promise<Song[]> {
-    // Instead of using playlists (which are heavily restricted and throw 403s), 
-    // we'll just search for recent trending hits to populate the home screen.
     const res = await this.search('top hits', 1, 10);
     return res.songs;
   }
@@ -148,80 +161,46 @@ export class SpotifyProvider implements MusicProvider {
     return songs.filter(s => s !== null) as Song[];
   }
 
+  /**
+   * Resolve a stream URL using the hybrid engine.
+   *
+   * Flow:
+   * 1. Fetch track metadata from Spotify
+   * 2. Search JioSaavn for a matching song (strict ±15s duration check)
+   * 3. If found, decrypt and return JioSaavn's 320kbps CDN URL
+   * 4. If not found, throw — YouTube fallback is disabled
+   */
   async resolveStreamUrl(streamRef: string, quality: 'high' | 'medium' | 'low'): Promise<StreamInfo> {
-    // 1. We have the Spotify ID (streamRef)
-    // 2. Fetch the exact Track name and Artist from Spotify
     const track = await this.getSong(streamRef);
     if (!track) throw new Error('Spotify track not found');
 
     const searchQuery = `${track.title} ${track.artists[0]?.name || ''}`;
 
-    // 3. HYBRID ENGINE: Try JioSaavn first for 320kbps High Quality Audio
+    // Try JioSaavn for 320kbps high-quality audio
     try {
-      const jiosaavn = new JioSaavnProvider();
-      const jsResults = await jiosaavn.search(searchQuery, 1, 5);
+      const jsResults = await jiosaavnInstance.search(searchQuery, 1, 5);
       
       if (jsResults.songs.length > 0) {
-        // STRICT MATCHING: JioSaavn search is fuzzy and often returns covers/remixes.
-        // We must ensure the duration is within 15 seconds of the original Spotify track.
+        // Strict matching: duration must be within 15 seconds of original Spotify track
         const bestMatch = jsResults.songs.find(s => Math.abs(s.duration - track.duration) <= 15);
 
         if (bestMatch) {
-          // If we found an exact match, extract the stream from JioSaavn
-          const jsStream = await jiosaavn.resolveStreamUrl(bestMatch.streamRef, quality);
+          const jsStream = await jiosaavnInstance.resolveStreamUrl(bestMatch.streamRef, quality);
           logger.info({ spotifyTrack: track.title, jiosaavnId: bestMatch.id }, 'Hybrid Stream: JioSaavn Match Found');
           
-          // Ensure we add a source marker so the UI knows where it came from
           return {
             ...jsStream,
             quality: `${jsStream.quality} (JioSaavn 320kbps Engine)`
           };
         } else {
-          logger.info('Hybrid Stream: JioSaavn returned results but none matched the strict duration. Skipping to Fallback.');
+          logger.info('Hybrid Stream: JioSaavn returned results but none matched the strict duration. Skipping.');
         }
       }
     } catch (err) {
-      console.error('JIOSAAVN ERROR:', err);
-      logger.warn({ error: err }, 'Hybrid Stream: JioSaavn failed, falling back to YouTube');
+      logger.warn({ error: err }, 'Hybrid Stream: JioSaavn failed');
     }
 
-    // 4. FALLBACK: Search YouTube Music for the exact match
-    logger.info({ track: track.title }, 'Hybrid Stream: Using YouTube Fallback');
-    const ytmusic = new YTMusic();
-    await ytmusic.initialize();
-    const ytResults = await ytmusic.searchSongs(searchQuery);
-
-    if (!ytResults || ytResults.length === 0) {
-      throw new Error('No equivalent song found on YouTube Music');
-    }
-
-    const videoId = ytResults[0].videoId;
-
-    // 4. Extract stream using play-dl (bypasses recent YouTube PoW blocks)
-    // NOTE: play-dl's PoW algorithm causes OOM crashes on free Render instances.
-    // Until YouTube eases the PoW block or we upgrade the server, we must fail gracefully.
-    throw new Error('Song not found on JioSaavn, and YouTube Fallback is currently disabled due to YouTube Proof-of-Work (PoW) blocking.');
-
-    /*
-    const info = await play.video_info(`https://www.youtube.com/watch?v=${videoId}`);
-    
-    // Choose the highest quality audio-only stream
-    const audioFormats = info.format.filter((f: any) => 
-      f.mimeType && f.mimeType.startsWith('audio/')
-    );
-    
-    if (audioFormats.length === 0) {
-      throw new Error('No audio streams found on YouTube');
-    }
-
-    // Sort by audio bitrate descending
-    audioFormats.sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0));
-
-    return {
-      url: selectedFormat.url,
-      quality: `${Math.round((selectedFormat.bitrate || 128000) / 1000)}kbps (YouTube Fallback)`,
-      contentType: selectedFormat.mimeType?.split(';')[0] || 'audio/mp4',
-    };
-    */
+    // YouTube fallback is disabled — PoW blocks crash the server on free-tier Render
+    throw new Error('Song not available on JioSaavn. YouTube fallback is currently disabled.');
   }
 }

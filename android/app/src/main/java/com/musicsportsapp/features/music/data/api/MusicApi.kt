@@ -14,9 +14,9 @@ import retrofit2.http.Query
 /**
  * Retrofit interface for the Music API.
  * 
- * Note: Stream URL resolution is typically done dynamically in the Media3
- * player by hitting `/api/v1/music/stream?ref=...`, not through Retrofit,
- * because we need to stream the raw bytes via ExoPlayer, not parse JSON.
+ * Note: Stream URL resolution is done dynamically in the Media3
+ * player by hitting `/api/v1/music/stream?id=...`, not through Retrofit,
+ * because ExoPlayer handles the actual audio streaming from the CDN URL.
  */
 interface MusicApi {
 

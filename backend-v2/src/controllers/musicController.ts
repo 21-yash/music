@@ -94,29 +94,26 @@ export async function getTrending(_req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * Proxy the audio stream.
+ * Resolve a stream URL for a song.
  *
- * Resolves the opaque streamRef into a CDN URL, fetches the audio,
- * and pipes it to the client with support for Range requests.
- * This is crucial for ExoPlayer/Media3 playback.
+ * Takes a song ID, looks up the encrypted media reference server-side,
+ * decrypts it, and returns a direct CDN URL. The client never sees
+ * the encrypted URL — it only knows the song ID.
  */
 export async function stream(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const streamRef = req.query.ref as string;
+    const songId = req.query.id as string;
     const quality = (req.query.quality as 'high' | 'medium' | 'low') || 'high';
 
-    if (!streamRef) {
-      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Stream reference is required' } });
+    if (!songId) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Song ID is required' } });
       return;
     }
 
-    // Resolve the actual direct CDN URL from the provider
-    const streamInfo = await musicService.resolveStreamUrl(streamRef, quality);
+    // Resolve the actual direct CDN URL from the provider (via Redis stream token lookup)
+    const streamInfo = await musicService.resolveStreamUrl(songId, quality);
 
-    // 🚀 OPTIMIZATION: Instead of proxying the massive audio stream through our Render server
-    // (which causes slow load times, huge latency, and burns server bandwidth), 
-    // we return the direct CDN URL to the client. 
-    // Android ExoPlayer (and HTML5 Audio) will stream directly from YouTube/JioSaavn's Edge CDNs!
+    // Return the direct CDN URL — Android ExoPlayer streams directly from JioSaavn's Edge CDN
     sendSuccess(res, {
       url: streamInfo.url,
       quality: streamInfo.quality,
@@ -124,7 +121,6 @@ export async function stream(req: Request, res: Response, next: NextFunction): P
     });
 
   } catch (error) {
-    // If it's a known error, we can handle it
     logger.error({ error }, 'Stream error');
     next(error);
   }

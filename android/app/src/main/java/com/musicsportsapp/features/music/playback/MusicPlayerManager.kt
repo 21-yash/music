@@ -54,7 +54,7 @@ class MusicPlayerManager @Inject constructor(
         currentSong = song
         _playbackState.update { it.copy(currentSong = song, error = null) }
 
-        val streamUrl = "${BuildConfig.API_BASE_URL}music/stream?ref=${song.streamRef}&quality=high"
+        val streamUrl = "${BuildConfig.API_BASE_URL}music/stream?id=${song.id}&quality=high"
 
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(song.title)

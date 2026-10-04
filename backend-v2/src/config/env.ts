@@ -29,6 +29,9 @@ const envSchema = z.object({
   // JWT secrets — required even at startup so the app fails fast if missing
   JWT_ACCESS_SECRET: z.string().min(1, 'JWT_ACCESS_SECRET is required'),
   JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required'),
+
+  // JioSaavn Vercel proxy API key (required in production to prevent open relay abuse)
+  JIOSAAVN_PROXY_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

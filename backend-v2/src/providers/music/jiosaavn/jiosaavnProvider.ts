@@ -35,17 +35,21 @@ import { logger } from '../../../utils/logger';
 // Use our custom Vercel proxy running in Mumbai (bom1) to bypass geo-blocks
 const BASE_URL = 'https://music-jiosaavn-proxy.vercel.app/api/index';
 
-const DEFAULT_HEADERS: Record<string, string> = {
-  'User-Agent': 'JioSaavn/7.39.2 (Android; 13; en)',
-  'app_version': '7.39.2',
-  'api_version': '4',
-  'readable_version': '7.39.2',
-  'network_type': 'WIFI',
-  Accept: 'application/json',
-  // Spoof Indian IP to bypass geo-restrictions on certain songs
-  'X-Forwarded-For': '103.111.161.0',
-  'X-Real-IP': '103.111.161.0',
-};
+/**
+ * Build request headers for the Vercel proxy.
+ * Includes the API key for proxy authentication.
+ */
+function getProxyHeaders(): Record<string, string> {
+  return {
+    'User-Agent': 'JioSaavn/7.39.2 (Android; 13; en)',
+    'app_version': '7.39.2',
+    'api_version': '4',
+    'readable_version': '7.39.2',
+    'network_type': 'WIFI',
+    Accept: 'application/json',
+    'x-proxy-key': process.env.JIOSAAVN_PROXY_KEY || '',
+  };
+}
 
 /**
  * JioSaavn music provider.
@@ -331,7 +335,7 @@ export class JioSaavnProvider implements MusicProvider {
           _format: 'json',
           _marker: '0',
           cc: 'in',
-          q: 'trending hindi songs 2025',
+          q: `trending hindi songs ${new Date().getFullYear()}`,
           p: '1',
           n: '30',
         });
@@ -376,7 +380,7 @@ export class JioSaavnProvider implements MusicProvider {
     const url = `${BASE_URL}?${params.toString()}`;
 
     const response = await fetch(url, {
-      headers: DEFAULT_HEADERS,
+      headers: getProxyHeaders(),
       signal: AbortSignal.timeout(10_000),
     });
 
