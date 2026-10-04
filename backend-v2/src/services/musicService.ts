@@ -49,11 +49,11 @@ let _defaultProviderId = 'jiosaavn';
  * Call this during app startup for each provider.
  */
 export function registerMusicProvider(provider: MusicProvider, isDefault: boolean = false): void {
-  _providers.set(provider.name, provider);
+  _providers.set(provider.id, provider);
   if (isDefault) {
-    _defaultProviderId = provider.name;
+    _defaultProviderId = provider.id;
   }
-  logger.info({ provider: provider.name }, 'Music provider registered');
+  logger.info({ provider: provider.id }, 'Music provider registered');
 }
 
 function getProvider(providerId?: string): MusicProvider {
