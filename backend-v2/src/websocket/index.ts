@@ -2,25 +2,21 @@ import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { registerSportsHandlers } from './sportsHandler';
+import { SportsWorker } from '../jobs/sportsWorker';
+
+let io: SocketIOServer | null = null;
+let sportsWorker: SportsWorker | null = null;
 
 /**
  * Initialize Socket.IO and attach it to the HTTP server.
- *
- * At this phase the Socket.IO server is set up with CORS configuration
- * and basic connection/disconnect logging. Future phases will add
- * authentication middleware, room management, and event handlers.
- *
- * Design decision: Socket.IO distributes state/events — it is NOT the
- * source of truth. Redis/MongoDB/provider state is authoritative.
- * After a reconnect, clients must resynchronize authoritative state
- * rather than assume they received every missed event.
  */
 export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   const origins = env.CORS_ORIGINS.split(',').map((o) => o.trim());
 
-  const io = new SocketIOServer(httpServer, {
+  io = new SocketIOServer(httpServer, {
     cors: {
-      origin: origins,
+      origin: origins.includes('*') ? true : origins,
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -28,8 +24,15 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
     pingTimeout: 20_000,
   });
 
+  // Start the demand-driven sports worker
+  sportsWorker = new SportsWorker(io, 10_000); // 10 second polling interval
+  sportsWorker.start();
+
   io.on('connection', (socket) => {
     logger.info({ socketId: socket.id }, 'Socket.IO client connected');
+
+    // Register domain handlers
+    registerSportsHandlers(socket);
 
     socket.on('disconnect', (reason) => {
       logger.info(
@@ -49,3 +52,4 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   logger.info('Socket.IO server initialized');
   return io;
 }
+

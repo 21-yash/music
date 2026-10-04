@@ -106,11 +106,14 @@ export async function getMatches(
  */
 export async function getMatchDetails(
   matchId: string,
+  forceRefresh: boolean = false,
 ): Promise<{ match: MatchDetails; fetchedAt: string } | null> {
   const cacheKey = `${CACHE_PREFIX.matchDetails}${matchId}`;
 
-  const cached = await getFromCache<{ match: MatchDetails; fetchedAt: string }>(cacheKey);
-  if (cached) return cached;
+  if (!forceRefresh) {
+    const cached = await getFromCache<{ match: MatchDetails; fetchedAt: string }>(cacheKey);
+    if (cached) return cached;
+  }
 
   const slug = await getSlug(matchId);
   if (!slug) {

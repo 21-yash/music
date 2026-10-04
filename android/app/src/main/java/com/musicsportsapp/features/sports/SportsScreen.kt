@@ -32,108 +32,125 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.collectAsState
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musicsportsapp.features.sports.domain.model.MatchSummary
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.clickable
+
 /**
  * Sports tab — live scores and match tracking.
  *
- * Will be populated in Phases 7-9 with real match data from the
- * cricket (and later other sports) provider. For now, shows the
- * structural layout with Live / Upcoming / Completed filter chips
- * and placeholder match cards.
+ * Fetches real match data from the backend REST API via SportsViewModel.
  */
 @Composable
-fun SportsScreen() {
-    var selectedFilter by remember { mutableIntStateOf(0) }
-    val filters = listOf("Live", "Upcoming", "Completed")
+fun SportsScreen(
+    viewModel: SportsViewModel = hiltViewModel(),
+    onMatchClick: (String) -> Unit = {}
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val filters = listOf("Live" to "live", "Upcoming" to "upcoming", "Recent" to "recent")
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 16.dp),
-    ) {
-        item {
-            Text(
-                text = "Sports",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-        }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "Sports",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
+        )
 
         // Filter chips
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                filters.forEachIndexed { index, label ->
-                    FilterChip(
-                        selected = selectedFilter == index,
-                        onClick = { selectedFilter = index },
-                        label = {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelLarge,
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            filters.forEach { (label, value) ->
+                FilterChip(
+                    selected = uiState.selectedFilter == value,
+                    onClick = { viewModel.onFilterSelected(value) },
+                    label = {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    },
+                    leadingIcon = if (value == "live" && uiState.selectedFilter == "live") {
+                        {
+                            Icon(
+                                imageVector = Icons.Filled.Circle,
+                                contentDescription = null,
+                                modifier = Modifier.size(8.dp),
+                                tint = MaterialTheme.colorScheme.error,
                             )
-                        },
-                        leadingIcon = if (index == 0 && selectedFilter == 0) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Filled.Circle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(8.dp),
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        } else null,
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        ),
-                    )
-                }
+                        }
+                    } else null,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ),
+                )
             }
         }
 
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Placeholder match cards
-        items(6) { index ->
-            MatchCard(
-                team1 = "Team A",
-                team2 = "Team B",
-                score1 = if (selectedFilter != 1) "${(index * 37 + 120) % 300}/${(index * 2 + 3) % 10}" else "—",
-                score2 = if (selectedFilter == 2) "${(index * 41 + 90) % 280}/${(index * 3 + 2) % 10}" else "—",
-                status = when (selectedFilter) {
-                    0 -> "Live • ${index + 1}st Innings"
-                    1 -> "Starts in ${index + 1}h"
-                    else -> "Team A won by ${(index * 13 + 20) % 100} runs"
-                },
-                isLive = selectedFilter == 0,
-            )
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(32.dp))
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            when {
+                uiState.isLoading && uiState.matches.isEmpty() -> {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
+                uiState.error != null && uiState.matches.isEmpty() -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = uiState.error!!, color = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = { viewModel.retry() }) {
+                            Text("Retry")
+                        }
+                    }
+                }
+                uiState.matches.isEmpty() -> {
+                    Text(
+                        text = "No matches found.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 32.dp),
+                    ) {
+                        items(
+                            count = uiState.matches.size,
+                            key = { index -> uiState.matches[index].id }
+                        ) { index ->
+                            val match = uiState.matches[index]
+                            MatchCard(
+                                match = match,
+                                onClick = { onMatchClick(match.id) }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun MatchCard(
-    team1: String,
-    team2: String,
-    score1: String,
-    score2: String,
-    status: String,
-    isLive: Boolean,
+    match: MatchSummary,
+    onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -145,51 +162,73 @@ private fun MatchCard(
             // Status row
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                if (isLive) {
-                    Icon(
-                        imageVector = Icons.Filled.Circle,
-                        contentDescription = "Live",
-                        modifier = Modifier.size(8.dp),
-                        tint = MaterialTheme.colorScheme.error,
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (match.isLive) {
+                        Icon(
+                            imageVector = Icons.Filled.Circle,
+                            contentDescription = "Live",
+                            modifier = Modifier.size(8.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = match.status,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (match.isLive) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (match.isLive) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
                 }
+                
                 Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (isLive) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (isLive) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = match.seriesName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // Team scores
-            TeamRow(name = team1, score = score1)
+            TeamRow(name = match.team1.name, score = match.team1Score ?: "", logoUrl = match.team1.logoUrl)
             Spacer(modifier = Modifier.height(8.dp))
-            TeamRow(name = team2, score = score2)
+            TeamRow(name = match.team2.name, score = match.team2Score ?: "", logoUrl = match.team2.logoUrl)
         }
     }
 }
 
+
+
 @Composable
-private fun TeamRow(name: String, score: String) {
+private fun TeamRow(name: String, score: String, logoUrl: String?) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Team logo placeholder
+            // Team logo
             Card(
                 modifier = Modifier.size(28.dp),
                 shape = RoundedCornerShape(6.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
-            ) {}
+            ) {
+                if (logoUrl != null) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = "$name logo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = name,
