@@ -28,4 +28,27 @@ class SportsRepositoryImpl @Inject constructor(
             }
         }
     }
+    override fun getMatchDetails(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.MatchDetails>> = flow {
+        val result = safeApiCall { api.getMatchDetails(matchId) }
+        when (result) {
+            is AppResult.Success -> emit(Result.success(result.data.match.toDomain()))
+            is AppResult.Error -> emit(Result.failure(Exception(result.error.message)))
+        }
+    }
+
+    override fun getScorecard(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.Scorecard>> = flow {
+        val result = safeApiCall { api.getScorecard(matchId) }
+        when (result) {
+            is AppResult.Success -> emit(Result.success(result.data.scorecard.toDomain()))
+            is AppResult.Error -> emit(Result.failure(Exception(result.error.message)))
+        }
+    }
+
+    override fun getSquads(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.Squad>> = flow {
+        val result = safeApiCall { api.getSquads(matchId) }
+        when (result) {
+            is AppResult.Success -> emit(Result.success(result.data.squads.toDomain()))
+            is AppResult.Error -> emit(Result.failure(Exception(result.error.message)))
+        }
+    }
 }

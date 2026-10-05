@@ -70,6 +70,15 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Person,
     )
 
+    data class MatchDetails(val matchId: String = "{matchId}") : Screen(
+        route = "sports/match/$matchId",
+        label = "Match Details",
+        selectedIcon = Icons.Filled.SportsCricket,
+        unselectedIcon = Icons.Outlined.SportsCricket,
+    ) {
+        fun createRoute(id: String) = "sports/match/$id"
+    }
+
     companion object {
         /** Ordered list of bottom navigation tabs. */
         val bottomNavItems = listOf(Home, Music, Sports, Search, Library)

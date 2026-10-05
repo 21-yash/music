@@ -114,6 +114,13 @@ export class CricbuzzProvider implements SportsProvider {
       return null;
     }
 
+    // Fix missing imageIds for flags (matchHeader uses 'id' instead of 'teamId' and omits 'imageId')
+    const t1ImageMatch = allChunks.match(/"team1":\{[^}]*"imageId":(\d+)/);
+    const t2ImageMatch = allChunks.match(/"team2":\{[^}]*"imageId":(\d+)/);
+    
+    if (t1ImageMatch) (commentaryData.matchHeader as any).team1.imageId = t1ImageMatch[1];
+    if (t2ImageMatch) (commentaryData.matchHeader as any).team2.imageId = t2ImageMatch[1];
+
     return mapMatchDetails(commentaryData, matchId, slug);
   }
 

@@ -72,12 +72,12 @@ function buildTeamScore(
  */
 function buildTeam(raw: Record<string, unknown>): Team {
   return {
-    id: String(raw.teamId || ''),
-    name: String(raw.teamName || ''),
-    shortName: String(raw.teamSName || raw.teamName || ''),
+    id: String(raw.teamId || raw.id || ''),
+    name: String(raw.teamName || raw.name || ''),
+    shortName: String(raw.teamSName || raw.shortName || raw.teamName || raw.name || ''),
     flagUrl: buildFlagUrl(
       raw.imageId as string | number | undefined,
-      String(raw.teamName || ''),
+      String(raw.teamName || raw.name || ''),
     ),
   };
 }
@@ -373,7 +373,7 @@ export function mapMatchDetails(
       }
 
       commentary.push({
-        ball: String(comm.ballMetric || ''),
+        ball: (comm.ballMetric === '$undefined' || !comm.ballMetric) ? '' : String(comm.ballMetric),
         event,
         text: commText.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim(),
       });

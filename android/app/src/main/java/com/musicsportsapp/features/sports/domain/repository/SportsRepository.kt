@@ -9,4 +9,8 @@ interface SportsRepository {
      * Returns a Flow of Result containing the list of MatchSummary.
      */
     fun getMatches(filter: String): Flow<Result<List<MatchSummary>>>
+
+    fun getMatchDetails(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.MatchDetails>>
+    fun getScorecard(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.Scorecard>>
+    fun getSquads(matchId: String): Flow<Result<com.musicsportsapp.features.sports.domain.model.Squad>>
 }

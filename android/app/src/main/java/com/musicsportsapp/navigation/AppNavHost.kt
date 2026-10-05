@@ -49,7 +49,19 @@ fun AppNavHost(
         }
 
         composable(Screen.Sports.route) {
-            SportsScreen()
+            SportsScreen(
+                onMatchClick = { matchId ->
+                    navController.navigate(Screen.MatchDetails().createRoute(matchId))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.MatchDetails().route,
+        ) {
+            com.musicsportsapp.features.sports.MatchDetailsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.Search.route) {
