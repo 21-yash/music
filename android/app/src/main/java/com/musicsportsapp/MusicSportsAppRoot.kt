@@ -3,9 +3,11 @@ package com.musicsportsapp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -53,46 +55,10 @@ fun MusicSportsAppRoot(
 
     // Bottom bar is visible on all bottom-nav tabs, hidden on Profile
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
+    val showTopBar = currentRoute != Screen.MatchDetails().route
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { },
-                actions = {
-                    // Profile avatar button
-                    IconButton(
-                        onClick = {
-                            if (currentRoute != Screen.Profile.route) {
-                                navController.navigate(Screen.Profile.route) {
-                                    launchSingleTop = true
-                                }
-                            }
-                        },
-                    ) {
-                        Card(
-                            modifier = Modifier.size(32.dp),
-                            shape = CircleShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            ),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Person,
-                                contentDescription = "Profile",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(4.dp),
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
         bottomBar = {
             AnimatedVisibility(
                 visible = showBottomBar,
@@ -110,11 +76,42 @@ fun MusicSportsAppRoot(
             }
         },
     ) { innerPadding ->
-        AppNavHost(
-            navController = navController,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-        )
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            AppNavHost(
+                navController = navController,
+                modifier = Modifier.fillMaxSize(),
+            )
+            
+            // Floating Profile Avatar at Top End
+            if (showTopBar && currentRoute != Screen.Profile.route) {
+                IconButton(
+                    onClick = {
+                        navController.navigate(Screen.Profile.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 8.dp, end = 8.dp)
+                ) {
+                    Card(
+                        modifier = Modifier.size(32.dp),
+                        shape = CircleShape,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Person,
+                            contentDescription = "Profile",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(4.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
