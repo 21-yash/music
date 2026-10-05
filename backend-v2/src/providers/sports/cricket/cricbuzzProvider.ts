@@ -114,12 +114,28 @@ export class CricbuzzProvider implements SportsProvider {
       return null;
     }
 
-    // Fix missing imageIds for flags (matchHeader uses 'id' instead of 'teamId' and omits 'imageId')
-    const t1ImageMatch = allChunks.match(/"team1":\{[^}]*"imageId":(\d+)/);
-    const t2ImageMatch = allChunks.match(/"team2":\{[^}]*"imageId":(\d+)/);
-    
-    if (t1ImageMatch) (commentaryData.matchHeader as any).team1.imageId = t1ImageMatch[1];
-    if (t2ImageMatch) (commentaryData.matchHeader as any).team2.imageId = t2ImageMatch[1];
+    // Fix missing imageIds for flags: Build a map of teamId -> imageId from all available chunks
+    const teamImageMap = new Map<string, string>();
+    const imageBlockRegex = /\{[^}]*"imageId":\d+[^}]*\}/g;
+    let imgMatch;
+    while ((imgMatch = imageBlockRegex.exec(allChunks)) !== null) {
+      const block = imgMatch[0];
+      const tIdMatch = block.match(/"(?:teamId|id)":(\d+)/);
+      const iIdMatch = block.match(/"imageId":(\d+)/);
+      if (tIdMatch && iIdMatch) {
+        teamImageMap.set(tIdMatch[1], iIdMatch[1]);
+      }
+    }
+
+    const mh = commentaryData.matchHeader as any;
+    if (mh.team1) {
+      const t1Id = String(mh.team1.id || mh.team1.teamId || '');
+      if (t1Id && teamImageMap.has(t1Id)) mh.team1.imageId = teamImageMap.get(t1Id);
+    }
+    if (mh.team2) {
+      const t2Id = String(mh.team2.id || mh.team2.teamId || '');
+      if (t2Id && teamImageMap.has(t2Id)) mh.team2.imageId = teamImageMap.get(t2Id);
+    }
 
     return mapMatchDetails(commentaryData, matchId, slug);
   }
