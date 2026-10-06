@@ -412,7 +412,7 @@ export function mapMatchDetails(
     lastWicket: String(miniscore.lastWicket || ''),
     recentBalls: String(miniscore.recentOvsStats || ''),
     toss,
-    oversLeft: String(miniscore.oversRem || ''),
+    oversLeft: (miniscore.oversRem && String(miniscore.oversRem) !== "undefined") ? String(miniscore.oversRem) : '',
     latestPerformance: (miniscore.latestPerformance as any[])?.map((lp: any) => ({
       runs: Number(lp.runs || 0),
       wkts: Number(lp.wkts || 0),
