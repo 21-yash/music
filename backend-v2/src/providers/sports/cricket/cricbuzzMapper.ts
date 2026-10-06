@@ -386,7 +386,7 @@ export function mapMatchDetails(
       if (commentary.length >= 6) break;
     }
   }
-    const venueInfo: any = header.venueInfo || {};
+    const venueInfo: any = commentaryData.venueInfo || {};
     const venue = [venueInfo.ground, venueInfo.city].filter(Boolean).join(', ');
 
   const rawOversRem = String(miniscore.oversRem || '');

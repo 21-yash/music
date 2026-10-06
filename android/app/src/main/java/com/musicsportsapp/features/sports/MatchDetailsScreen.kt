@@ -516,7 +516,7 @@ private fun LiveTab(details: MatchDetails) {
                         "Batting",
                         modifier = Modifier.padding(16.dp),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         color = TextMain
                     )
                     Divider(color = BorderLight)
@@ -538,7 +538,7 @@ private fun LiveTab(details: MatchDetails) {
                         "Bowling",
                         modifier = Modifier.padding(16.dp),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         color = TextMain
                     )
                     Divider(color = BorderLight)
@@ -760,14 +760,14 @@ private fun LiveBatterRow(bat: BatsmanLive, isLast: Boolean) {
             Text(
                 text = bat.name + if (bat.onStrike) " *" else "",
                 color = if (bat.onStrike) Color(0xFF00B050) else AccentBlue,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f).padding(end = 8.dp)
             )
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextMain)) { append(bat.runs.toString()) }
-                    withStyle(SpanStyle(color = TextSecondary, fontSize = 14.sp)) { append(" (${bat.balls})") }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextMain)) { append(bat.runs.toString()) }
+                    withStyle(SpanStyle(color = TextSecondary, fontSize = 13.sp)) { append(" (${bat.balls})") }
                 }
             )
         }
@@ -775,9 +775,9 @@ private fun LiveBatterRow(bat: BatsmanLive, isLast: Boolean) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("4s: ${bat.fours}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-            Text("6s: ${bat.sixes}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-            Text("SR: ${bat.strikeRate}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+            Text("4s: ${bat.fours}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+            Text("6s: ${bat.sixes}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+            Text("SR: ${bat.strikeRate}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
         }
     }
     if (!isLast) Divider(color = BorderLight, modifier = Modifier.padding(horizontal = 16.dp))
@@ -798,14 +798,14 @@ private fun LiveBowlerRow(bowl: BowlerLive, isLast: Boolean) {
             Text(
                 text = bowl.name,
                 color = AccentBlue,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f).padding(end = 8.dp)
             )
             Text(
                 text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextMain)) { append(bowl.wickets.toString()) }
-                    withStyle(SpanStyle(color = TextSecondary, fontSize = 14.sp)) { append("-${bowl.runs}") }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextMain)) { append(bowl.wickets.toString()) }
+                    withStyle(SpanStyle(color = TextSecondary, fontSize = 13.sp)) { append("-${bowl.runs}") }
                 }
             )
         }
@@ -813,9 +813,9 @@ private fun LiveBowlerRow(bowl: BowlerLive, isLast: Boolean) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("O: ${bowl.overs}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-            Text("M: ${bowl.maidens}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f))
-            Text("ECO: ${bowl.economy}", fontSize = 14.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+            Text("O: ${bowl.overs}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+            Text("M: ${bowl.maidens}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+            Text("ECO: ${bowl.economy}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
         }
     }
     if (!isLast) Divider(color = BorderLight, modifier = Modifier.padding(horizontal = 16.dp))
@@ -835,7 +835,7 @@ private fun HeaderCell(text: String, width: Dp, bold: Boolean = false) {
         text,
         modifier = Modifier.width(width),
         textAlign = TextAlign.End,
-        fontSize = 12.sp,
+        fontSize = 11.sp,
         maxLines = 1,
         softWrap = false,
         fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
@@ -849,7 +849,7 @@ private fun StatCell(text: String, width: Dp, strong: Boolean = false) {
         text,
         modifier = Modifier.width(width),
         textAlign = TextAlign.End,
-        fontSize = 14.sp,
+        fontSize = 13.sp,
         maxLines = 1,
         softWrap = false,
         fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal,
@@ -947,9 +947,9 @@ private fun ScorecardTab(scorecard: Scorecard?) {
                     inning.batting.forEach { bat ->
                         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(bat.name, fontWeight = FontWeight.Medium, color = TextMain, fontSize = 14.sp)
+                                Text(bat.name, fontWeight = FontWeight.Medium, color = TextMain, fontSize = 13.sp)
                                 Spacer(modifier = Modifier.height(2.dp))
-                                Text(bat.status, fontSize = 12.sp, color = TextSecondary)
+                                Text(bat.status, fontSize = 11.sp, color = TextSecondary)
                             }
                             StatCell(bat.runs.toString(), ColR, strong = true)
                             StatCell(bat.balls.toString(), ColB)
@@ -970,7 +970,7 @@ private fun ScorecardTab(scorecard: Scorecard?) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Extras", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextMain)
-                        Text(inning.extras, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextMain)
+                        Text(inning.extras, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = TextMain)
                     }
                 }
             }
@@ -1002,7 +1002,7 @@ private fun ScorecardTab(scorecard: Scorecard?) {
                                 Text(
                                     text = buildAnnotatedString {
                                         withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextMain)) {
-                                            append("${index + 1}. ${fow.scoreAtWicket}")
+                                            append("${fow.scoreAtWicket}-${index + 1}")
                                         }
                                         withStyle(SpanStyle(color = TextSecondary)) {
                                             append("  ${fow.player}")
@@ -1054,7 +1054,7 @@ private fun ScorecardTab(scorecard: Scorecard?) {
                                 modifier = Modifier.weight(1f).padding(end = 8.dp),
                                 fontWeight = FontWeight.Medium,
                                 color = TextMain,
-                                fontSize = 14.sp
+                                fontSize = 13.sp
                             )
                             StatCell(bowl.overs, ColO)
                             StatCell(bowl.maidens.toString(), ColM)
