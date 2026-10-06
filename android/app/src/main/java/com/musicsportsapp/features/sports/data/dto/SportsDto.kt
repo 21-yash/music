@@ -18,6 +18,7 @@ data class MatchSummaryDto(
     val id: String,
     val series: String = "",
     val matchDesc: String = "",
+    val venue: String = "",
     val state: String,
     val format: String = "OTHER",
     val team1: TeamDto,
@@ -39,6 +40,9 @@ data class MatchSummaryDto(
         return MatchSummary(
             id = id,
             title = computedTitle,
+            matchDesc = matchDesc,
+            series = series,
+            venue = venue,
             state = try { MatchState.valueOf(state.uppercase()) } catch (e: Exception) { MatchState.COMPLETED },
             format = try { MatchFormat.valueOf(format.uppercase()) } catch (e: Exception) { MatchFormat.OTHER },
             team1 = team1.toDomain(),
@@ -82,6 +86,7 @@ data class MatchDetailsDto(
     val id: String,
     val series: String = "",
     val matchDesc: String = "",
+    val venue: String = "",
     val state: String,
     val format: String = "OTHER",
     val team1: TeamDto,
@@ -98,6 +103,9 @@ data class MatchDetailsDto(
     val partnership: String = "",
     val lastWicket: String = "",
     val recentBalls: String = "",
+    val toss: String = "",
+    val oversLeft: String = "",
+    val latestPerformance: List<PerformanceDto> = emptyList(),
     val commentary: List<CommentaryEntryDto> = emptyList()
 ) {
     fun toDomain(): com.musicsportsapp.features.sports.domain.model.MatchDetails {
@@ -105,6 +113,7 @@ data class MatchDetailsDto(
             id = id,
             series = series,
             matchDesc = matchDesc,
+            venue = venue,
             state = state,
             format = format,
             team1 = team1,
@@ -124,9 +133,21 @@ data class MatchDetailsDto(
             partnership = partnership,
             lastWicket = lastWicket,
             recentBalls = recentBalls,
+            toss = toss,
+            oversLeft = oversLeft,
+            latestPerformance = latestPerformance.map { it.toDomain() },
             commentary = commentary.map { it.toDomain() }
         )
     }
+}
+
+@Serializable
+data class PerformanceDto(
+    val runs: Int = 0,
+    val wkts: Int = 0,
+    val label: String = ""
+) {
+    fun toDomain() = com.musicsportsapp.features.sports.domain.model.Performance(runs, wkts, label)
 }
 
 @Serializable

@@ -26,6 +26,9 @@ data class LiveScore(
 data class MatchSummary(
     val id: String,
     val title: String,
+    val matchDesc: String,
+    val series: String,
+    val venue: String,
     val state: MatchState,
     val format: MatchFormat,
     val team1: Team,
@@ -49,7 +52,16 @@ data class MatchDetails(
     val partnership: String,
     val lastWicket: String,
     val recentBalls: String,
+    val toss: String,
+    val oversLeft: String,
+    val latestPerformance: List<Performance>,
     val commentary: List<CommentaryEntry>
+)
+
+data class Performance(
+    val runs: Int,
+    val wkts: Int,
+    val label: String
 )
 
 data class BatsmanLive(

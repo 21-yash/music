@@ -251,8 +251,26 @@ private fun InfoTab(details: MatchDetails) {
         item {
             SectionCard(modifier = Modifier.padding(bottom = 24.dp)) {
                 CardHeader { CardHeaderTitle("Match Details") }
-                InfoRow("Match", details.summary.title, emphasized = true)
-                InfoRow("Series", details.summary.seriesName, isLast = true)
+                
+                val titleStr = buildString {
+                    append(details.summary.team1.shortName)
+                    append(" vs ")
+                    append(details.summary.team2.shortName)
+                    if (details.summary.matchDesc.isNotBlank()) append(" • ${details.summary.matchDesc}")
+                    if (details.summary.series.isNotBlank()) append(" • ${details.summary.series}")
+                }
+                InfoRow("Match", titleStr, emphasized = true)
+                InfoRow("Series", details.summary.series)
+                if (details.summary.venue.isNotBlank()) {
+                    InfoRow("Venue", details.summary.venue)
+                }
+                
+                if (details.summary.startTime > 0L) {
+                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy • hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(details.summary.startTime))
+                    InfoRow("Date & Time", dateStr)
+                }
+                
+                InfoRow("Toss", if (details.toss.isNotBlank()) details.toss else "-", isLast = true)
             }
         }
     }
@@ -473,7 +491,7 @@ private fun LiveTab(details: MatchDetails) {
         val rrr = details.summary.liveScore?.requiredRunRate ?: ""
         val partnership = details.partnership
 
-        if (crr.isNotBlank() || rrr.isNotBlank() || partnership.isNotBlank()) {
+        if (crr.isNotBlank() || rrr.isNotBlank() || details.partnership.isNotBlank()) {
             item {
                 Row(
                     modifier = Modifier
@@ -486,7 +504,7 @@ private fun LiveTab(details: MatchDetails) {
                 ) {
                     if (crr.isNotBlank()) SummaryStat("CRR:", crr)
                     if (rrr.isNotBlank()) SummaryStat("RRR:", rrr)
-                    if (partnership.isNotBlank()) SummaryStat("Partnership:", partnership)
+                    if (details.partnership.isNotBlank()) SummaryStat("Partnership:", details.partnership)
                 }
             }
         }
@@ -535,15 +553,65 @@ private fun LiveTab(details: MatchDetails) {
             }
         }
 
+        // Key Stats (Bubbles)
+        val hasKeyStats = details.latestPerformance.isNotEmpty() || details.oversLeft.isNotBlank()
+                          
+        if (hasKeyStats) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (details.oversLeft.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .background(CardHeaderBg, RoundedCornerShape(16.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "Ovs Left: ${details.oversLeft}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextMain
+                            )
+                        }
+                    }
+
+                    if (details.latestPerformance.isNotEmpty()) {
+                        var perfIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+                        val perf = details.latestPerformance[perfIndex % details.latestPerformance.size]
+                        
+                        Box(
+                            modifier = Modifier
+                                .background(CardHeaderBg, RoundedCornerShape(16.dp))
+                                .clickable { perfIndex++ }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "${perf.label}: ${perf.runs} runs, ${perf.wkts} wkts",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextMain
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Recent Balls
-        val recentBalls = details.summary.liveScore?.recentBalls
-        if (!recentBalls.isNullOrEmpty()) {
+        val recentBallsStr = details.recentBalls
+        val recentBalls = if (recentBallsStr.isNotBlank()) {
+            recentBallsStr.split(" ", "|").map { it.trim() }.filter { it.isNotBlank() }
+        } else emptyList()
+        
+        if (recentBalls.isNotEmpty()) {
             item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 24.dp)
-                        .background(CardHeaderBg, RoundedCornerShape(16.dp))
+                        .padding(bottom = 16.dp)
+                        .background(CardBlue, RoundedCornerShape(16.dp))
                         .padding(16.dp)
                 ) {
                     Text(
@@ -556,9 +624,9 @@ private fun LiveTab(details: MatchDetails) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(recentBalls) { ball ->
                             val bgColor = when (ball) {
-                                "W" -> AccentRed
-                                "4" -> AccentBlue
-                                "6" -> Color(0xFF9B51E0)
+                                "W", "Wicket" -> AccentRed
+                                "4", "Four" -> AccentBlue
+                                "6", "Six" -> Color(0xFF9B51E0)
                                 else -> Color.White
                             }
                             val colored = ball == "W" || ball == "4" || ball == "6"
@@ -576,6 +644,26 @@ private fun LiveTab(details: MatchDetails) {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        if (details.lastWicket.isNotBlank()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp)
+                        .background(Color(0xFFFFF0F0), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Last Wicket: ${details.lastWicket}",
+                        fontSize = 13.sp,
+                        color = AccentRed,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -914,7 +1002,7 @@ private fun ScorecardTab(scorecard: Scorecard?) {
                                 Text(
                                     text = buildAnnotatedString {
                                         withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextMain)) {
-                                            append(fow.scoreAtWicket)
+                                            append("${index + 1}. ${fow.scoreAtWicket}")
                                         }
                                         withStyle(SpanStyle(color = TextSecondary)) {
                                             append("  ${fow.player}")

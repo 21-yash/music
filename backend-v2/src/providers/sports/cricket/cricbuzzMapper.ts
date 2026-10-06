@@ -386,6 +386,11 @@ export function mapMatchDetails(
       if (commentary.length >= 6) break;
     }
   }
+    const venueInfo: any = header.venueInfo || {};
+    const venue = [venueInfo.ground, venueInfo.city].filter(Boolean).join(', ');
+
+  const rawOversRem = String(miniscore.oversRem || '');
+  const oversLeft = (rawOversRem && rawOversRem !== "undefined" && rawOversRem !== "$undefined") ? rawOversRem : '';
 
   return {
     id: matchId,
@@ -398,7 +403,7 @@ export function mapMatchDetails(
     team2,
     team1Score,
     team2Score,
-    venue: '',
+    venue: venue,
     status: String(header.status || miniscore.status || ''),
     state,
     isLive: state === 'live',
@@ -412,7 +417,7 @@ export function mapMatchDetails(
     lastWicket: String(miniscore.lastWicket || ''),
     recentBalls: String(miniscore.recentOvsStats || ''),
     toss,
-    oversLeft: (miniscore.oversRem && String(miniscore.oversRem) !== "undefined") ? String(miniscore.oversRem) : '',
+    oversLeft: oversLeft,
     latestPerformance: (miniscore.latestPerformance as any[])?.map((lp: any) => ({
       runs: Number(lp.runs || 0),
       wkts: Number(lp.wkts || 0),
