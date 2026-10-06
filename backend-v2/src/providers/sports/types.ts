@@ -50,6 +50,9 @@ export interface MatchDetails extends MatchSummary {
   partnership: string;
   lastWicket: string;
   recentBalls: string;
+  toss: string;
+  oversLeft: string;
+  latestPerformance: { runs: number; wkts: number; label: string }[];
   commentary: CommentaryEntry[];
 }
 

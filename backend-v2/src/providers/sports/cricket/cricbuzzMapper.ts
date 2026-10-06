@@ -243,6 +243,11 @@ export function mapMatchDetails(
   const stateTitleStr = String(header.stateTitle || '');
   const state = classifyState(stateStr, stateTitleStr);
 
+  const tossResults = header.tossResults as Record<string, unknown> | undefined;
+  const toss = tossResults
+    ? `${tossResults.tossWinnerName || ''} (${tossResults.decision || ''})`
+    : '';
+
   // Player of the match
   let playerOfMatch: PlayerRef | null = null;
   const pomList = header.playersOfTheMatch as Record<string, unknown>[] | undefined;
@@ -406,6 +411,13 @@ export function mapMatchDetails(
     partnership,
     lastWicket: String(miniscore.lastWicket || ''),
     recentBalls: String(miniscore.recentOvsStats || ''),
+    toss,
+    oversLeft: String(miniscore.oversRem || ''),
+    latestPerformance: (miniscore.latestPerformance as any[])?.map((lp: any) => ({
+      runs: Number(lp.runs || 0),
+      wkts: Number(lp.wkts || 0),
+      label: String(lp.label || '')
+    })) || [],
     commentary,
   };
 }
