@@ -170,8 +170,8 @@ fun MatchDetailsScreen(
                         when (selectedTabIndex) {
                             0 -> InfoTab(details = details)
                             1 -> LiveTab(details = details)
-                            2 -> ScorecardTab(scorecard = uiState.scorecard)
-                            3 -> SquadsTab(squads = uiState.squads)
+                            2 -> ScorecardTab(scorecard = uiState.scorecard, state = details.summary.state)
+                            3 -> SquadsTab(squads = uiState.squads, state = details.summary.state)
                         }
                     }
                 }
@@ -858,10 +858,14 @@ private fun StatCell(text: String, width: Dp, strong: Boolean = false) {
 }
 
 @Composable
-private fun ScorecardTab(scorecard: Scorecard?) {
-    if (scorecard == null) {
+private fun ScorecardTab(scorecard: Scorecard?, state: String) {
+    if (scorecard == null || scorecard.innings.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Scorecard unavailable", color = Color.Gray)
+            if (state == "upcoming" || state == "preview") {
+                Text("Scorecard yet to take place", color = Color.Gray)
+            } else {
+                Text("Scorecard unavailable", color = Color.Gray)
+            }
         }
         return
     }
@@ -1073,15 +1077,17 @@ private fun ScorecardTab(scorecard: Scorecard?) {
 // ─── SQUADS TAB ───────────────────────────────────────────────────────
 
 @Composable
-private fun SquadsTab(squads: Squad?) {
-    if (squads == null) {
+private fun SquadsTab(squads: Squad?, state: String) {
+    if (squads == null || squads.teams.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Squads unavailable", color = Color.Gray)
+            if (state == "upcoming" || state == "preview") {
+                Text("Squads yet to be announced", color = Color.Gray)
+            } else {
+                Text("Squads unavailable", color = Color.Gray)
+            }
         }
         return
     }
-
-    if (squads.teams.isEmpty()) return
 
     // The prototype shows every team as its own stacked card (no team tab switcher)
     LazyColumn(contentPadding = ContentPadding) {

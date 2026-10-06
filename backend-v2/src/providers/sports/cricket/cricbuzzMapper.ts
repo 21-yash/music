@@ -244,9 +244,14 @@ export function mapMatchDetails(
   const state = classifyState(stateStr, stateTitleStr);
 
   const tossResults = header.tossResults as Record<string, unknown> | undefined;
-  const toss = tossResults
-    ? `${tossResults.tossWinnerName || ''} (${tossResults.decision || ''})`
-    : '';
+  let toss = '';
+  if (tossResults && tossResults.tossWinnerName) {
+      toss = `${tossResults.tossWinnerName} (${tossResults.decision || ''})`;
+  } else if (state === 'upcoming' || state === 'preview') {
+      toss = 'Yet to take place';
+  } else {
+      toss = '-';
+  }
 
   // Player of the match
   let playerOfMatch: PlayerRef | null = null;
@@ -386,7 +391,7 @@ export function mapMatchDetails(
       if (commentary.length >= 6) break;
     }
   }
-    const venueInfo: any = commentaryData.venueInfo || {};
+    const venueInfo: any = commentaryData.venueInfo || header.venueInfo || header.venue || (commentaryData.matchInfo && commentaryData.matchInfo.venueInfo) || {};
     const venue = [venueInfo.ground, venueInfo.city].filter(Boolean).join(', ');
 
   const rawOversRem = String(miniscore.oversRem || '');
