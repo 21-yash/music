@@ -858,10 +858,10 @@ private fun StatCell(text: String, width: Dp, strong: Boolean = false) {
 }
 
 @Composable
-private fun ScorecardTab(scorecard: Scorecard?, state: String) {
+private fun ScorecardTab(scorecard: Scorecard?, state: com.musicsportsapp.features.sports.domain.model.MatchState) {
     if (scorecard == null || scorecard.innings.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (state == "upcoming" || state == "preview") {
+            if (state == com.musicsportsapp.features.sports.domain.model.MatchState.UPCOMING) {
                 Text("Scorecard yet to take place", color = Color.Gray)
             } else {
                 Text("Scorecard unavailable", color = Color.Gray)
@@ -1077,10 +1077,10 @@ private fun ScorecardTab(scorecard: Scorecard?, state: String) {
 // ─── SQUADS TAB ───────────────────────────────────────────────────────
 
 @Composable
-private fun SquadsTab(squads: Squad?, state: String) {
+private fun SquadsTab(squads: Squad?, state: com.musicsportsapp.features.sports.domain.model.MatchState) {
     if (squads == null || squads.teams.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (state == "upcoming" || state == "preview") {
+            if (state == com.musicsportsapp.features.sports.domain.model.MatchState.UPCOMING) {
                 Text("Squads yet to be announced", color = Color.Gray)
             } else {
                 Text("Squads unavailable", color = Color.Gray)

@@ -22,6 +22,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -52,6 +53,8 @@ fun MusicSportsAppRoot(
     val currentRoute = navBackStackEntry?.destination?.route
     
     val playbackState by rootViewModel.playbackState.collectAsState()
+    
+    var showFullPlayer by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     // Bottom bar is visible on all bottom-nav tabs, hidden on Profile
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
@@ -69,7 +72,7 @@ fun MusicSportsAppRoot(
                     MiniPlayer(
                         playbackState = playbackState,
                         onPlayPauseClick = { rootViewModel.togglePlayPause() },
-                        onNavigateToNowPlaying = { /* TODO: Open full player */ }
+                        onNavigateToNowPlaying = { showFullPlayer = true }
                     )
                     AppBottomNavBar(navController = navController)
                 }
@@ -81,6 +84,17 @@ fun MusicSportsAppRoot(
                 navController = navController,
                 modifier = Modifier.fillMaxSize(),
             )
+            
+            if (showFullPlayer && playbackState.currentSong != null) {
+                com.musicsportsapp.features.music.FullPlayerSheet(
+                    playbackState = playbackState,
+                    onPlayPauseClick = { rootViewModel.togglePlayPause() },
+                    onNextClick = { /* TODO: Hook up next */ },
+                    onPreviousClick = { /* TODO: Hook up previous */ },
+                    onSeek = { /* TODO: Hook up seek */ },
+                    onDismiss = { showFullPlayer = false }
+                )
+            }
             
             // Floating Profile Avatar at Top End
             if (showTopBar && currentRoute != Screen.Profile.route) {
