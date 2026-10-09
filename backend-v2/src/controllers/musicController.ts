@@ -99,6 +99,16 @@ export async function getTrending(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export async function getHomeData(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const provider = req.query.provider as string | undefined;
+    const data = await musicService.getHomeData(provider);
+    sendSuccess(res, data);
+  } catch (error) {
+    next(error);
+  }
+}
+
 /**
  * Resolve a stream URL for a song.
  *

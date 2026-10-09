@@ -100,3 +100,18 @@ export type StreamInfo =
   | { type: 'jiosaavn'; url: string; quality: string; contentType: string }
   | { type: 'youtube'; videoId: string }
   | { type: 'none'; message: string };
+
+// ─── Homepage ────────────────────────────────────────────────────────
+
+export interface PlaylistRef {
+  id: string;
+  title: string;
+  imageUrl: string | null;
+}
+
+export interface HomeData {
+  featuredReleases: AlbumRef[];
+  topPlaylists: PlaylistRef[];
+  charts: PlaylistRef[];
+  bestOf: PlaylistRef[];
+}

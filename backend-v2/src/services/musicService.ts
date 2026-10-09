@@ -182,6 +182,20 @@ export async function getTrending(providerId?: string): Promise<Song[]> {
 }
 
 /**
+ * Get homepage data.
+ */
+export async function getHomeData(providerId?: string): Promise<import('../providers/music').HomeData> {
+  const provider = getProvider(providerId);
+  const cacheKey = `music:home:${provider.name}`;
+  const cached = await getFromCache<import('../providers/music').HomeData>(cacheKey);
+  if (cached) return cached;
+
+  const homeData = await provider.getHomeData();
+  await setCache(cacheKey, homeData, CACHE_TTL.trending);
+  return homeData;
+}
+
+/**
  * Resolve a stream URL from a song ID.
  *
  * Looks up the stored streamRef for the given song ID from Redis,

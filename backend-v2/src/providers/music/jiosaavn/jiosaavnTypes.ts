@@ -134,6 +134,8 @@ export interface JioSaavnPlaylistResponse {
 
 export interface JioSaavnHomepageResponse {
   new_trending?: JioSaavnRawSong[];
-  charts?: Array<{ id: string; title?: string }>;
+  charts?: Array<any>;
   trending?: { [key: string]: JioSaavnRawSong[] };
+  new_albums?: Array<any>;
+  featured_playlists?: Array<any>;
 }

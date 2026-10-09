@@ -13,6 +13,9 @@ router.get('/search', validate({ query: searchSchema.shape.query }), musicContro
 /** Get trending songs */
 router.get('/trending', musicController.getTrending);
 
+/** Get home data (featured releases, top playlists) */
+router.get('/home', musicController.getHomeData);
+
 /** Proxy audio stream */
 router.get('/stream', validate({ query: streamSchema.shape.query }), musicController.stream);
 

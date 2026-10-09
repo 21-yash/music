@@ -5,6 +5,7 @@ import type {
   Playlist,
   SearchResults,
   StreamInfo,
+  HomeData,
 } from './types';
 
 /**
@@ -59,6 +60,9 @@ export interface MusicProvider {
 
   /** Get trending/popular songs. */
   getTrending(): Promise<Song[]>;
+
+  /** Get homepage data (featured releases, playlists, charts) */
+  getHomeData(): Promise<HomeData>;
 
   /**
    * Resolve an opaque stream reference to a playable URL.

@@ -60,6 +60,10 @@ export class YouTubeProvider implements MusicProvider {
     return []; // Optional: Could implement using YTMusic charts
   }
 
+  async getHomeData(): Promise<import('../types').HomeData> {
+    return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [] };
+  }
+
   async getSong(id: string): Promise<Song | null> {
     await this.ensureInitialized();
     const song = await this.ytmusic.getSong(id);

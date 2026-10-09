@@ -309,7 +309,41 @@ export class JioSaavnProvider implements MusicProvider {
 
   async getTrending(): Promise<Song[]> {
     try {
-      // Try homepage data first
+      // Fetch 'Trending Today' playlist (listid: 110858205) for high-quality curated trends
+      // This is far more accurate than the generic 'new_trending' homepage section.
+      const playlist = await this.getPlaylist('110858205');
+      if (playlist && playlist.songs.length > 0) {
+        return deduplicateAndRank(playlist.songs).slice(0, 30);
+      }
+
+      // Fallback: search for trending songs if playlist fails
+      const searchParams = new URLSearchParams({
+        __call: 'search.getResults',
+        _format: 'json',
+        _marker: '0',
+        cc: 'in',
+        q: `trending hindi songs ${new Date().getFullYear()}`,
+        p: '1',
+        n: '30',
+      });
+
+      const searchData =
+        await this.fetch<JioSaavnSearchResponse>(searchParams);
+      const songs = (searchData.results || [])
+        .map(mapSong)
+        .filter((s): s is Song => s !== null);
+
+      return deduplicateAndRank(songs).slice(0, 30);
+    } catch (error) {
+      logger.error({ error }, 'JioSaavn: failed to fetch trending');
+      return [];
+    }
+  }
+
+  // ─── Homepage Data ───────────────────────────────────────────────
+
+  async getHomeData(): Promise<import('../types').HomeData> {
+    try {
       const params = new URLSearchParams({
         __call: 'content.getHomepageData',
         _format: 'json',
@@ -318,39 +352,48 @@ export class JioSaavnProvider implements MusicProvider {
       });
 
       const data = await this.fetch<JioSaavnHomepageResponse>(params);
-      let songs: Song[] = [];
 
-      // Try new_trending section
-      if (data.new_trending) {
-        songs = data.new_trending
-          .filter((item) => item.type === 'song')
-          .map(mapSong)
-          .filter((s): s is Song => s !== null);
+      // Map new_albums -> featuredReleases
+      const featuredReleases = (data.new_albums || []).map((a: any) => ({
+        id: a.albumid || a.id || '',
+        title: cleanText(a.title || a.name || ''),
+        imageUrl: upgradeImageUrl(a.image),
+      })).filter((a) => a.id);
+
+      // Map featured_playlists -> topPlaylists
+      const allTopPlaylists = (data.featured_playlists || []).map((p: any) => ({
+        id: p.listid || p.id || '',
+        title: cleanText(p.listname || p.title || ''),
+        imageUrl: upgradeImageUrl(p.image),
+      })).filter((p: any) => p.id);
+
+      const bestOf: typeof allTopPlaylists = [];
+      const topPlaylists: typeof allTopPlaylists = [];
+
+      for (const p of allTopPlaylists) {
+        if (p.title.toLowerCase().includes('best of')) {
+          bestOf.push(p);
+        } else {
+          topPlaylists.push(p);
+        }
       }
 
-      // Fallback: search for trending songs
-      if (songs.length === 0) {
-        const searchParams = new URLSearchParams({
-          __call: 'search.getResults',
-          _format: 'json',
-          _marker: '0',
-          cc: 'in',
-          q: `trending hindi songs ${new Date().getFullYear()}`,
-          p: '1',
-          n: '30',
-        });
+      // Map charts -> charts
+      const charts = (data.charts || []).map((c: any) => ({
+        id: c.listid || c.id || '',
+        title: cleanText(c.listname || c.title || ''),
+        imageUrl: upgradeImageUrl(c.image),
+      })).filter((c: any) => c.id);
 
-        const searchData =
-          await this.fetch<JioSaavnSearchResponse>(searchParams);
-        songs = (searchData.results || [])
-          .map(mapSong)
-          .filter((s): s is Song => s !== null);
-      }
-
-      return deduplicateAndRank(songs).slice(0, 30);
+      return {
+        featuredReleases,
+        topPlaylists,
+        charts,
+        bestOf,
+      };
     } catch (error) {
-      logger.error({ error }, 'JioSaavn: failed to fetch trending');
-      return [];
+      logger.error({ error }, 'JioSaavn: failed to fetch home data');
+      return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [] };
     }
   }
 

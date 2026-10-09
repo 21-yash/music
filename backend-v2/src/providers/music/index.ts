@@ -7,6 +7,8 @@ export type {
   AlbumRef,
   SearchResults,
   StreamInfo,
+  HomeData,
+  PlaylistRef
 } from './types';
 
 export type { MusicProvider } from './MusicProvider';
