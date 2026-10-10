@@ -105,13 +105,16 @@ export interface JioSaavnArtistResponse {
   bio?: Array<{ text: string }>;
   fan_count?: string | number;
   follower_count?: string | number;
-  topSongs?: JioSaavnRawSong[];
+  topSongs?: JioSaavnRawSong[] | { songs?: JioSaavnRawSong[] };
   topAlbums?: Array<{
-    id: string;
+    id?: string;
+    albumid?: string;
     title?: string;
     name?: string;
+    album?: string;
     image?: string;
-  }>;
+    imageUrl?: string;
+  }> | { albums?: Array<any> };
 }
 
 // ─── Playlist details ────────────────────────────────────────────────

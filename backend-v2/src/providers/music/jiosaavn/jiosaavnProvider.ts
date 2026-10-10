@@ -230,15 +230,30 @@ export class JioSaavnProvider implements MusicProvider {
       });
 
       const data = await this.fetch<JioSaavnArtistResponse>(params);
-
-      const topSongs = (data.topSongs || [])
+      
+      const rawTopSongs = (data.topSongs as any)?.songs || data.topSongs || [];
+      const seenTitles = new Set<string>();
+      const topSongs = (Array.isArray(rawTopSongs) ? rawTopSongs : [])
         .map(mapSong)
-        .filter((s): s is Song => s !== null);
+        .filter((s): s is Song => s !== null)
+        .filter(s => {
+          const cleanTitle = s.title
+            .toLowerCase()
+            .replace(/\(.*?\)/g, '')
+            .replace(/\[.*?\]/g, '')
+            .replace(/-.*/g, '')
+            .replace(/[^a-z0-9]/g, '');
+            
+          if (seenTitles.has(cleanTitle)) return false;
+          seenTitles.add(cleanTitle);
+          return true;
+        });
 
-      const albums: AlbumRef[] = (data.topAlbums || []).map((a) => ({
-        id: a.id,
-        title: cleanText(a.title || a.name || ''),
-        imageUrl: upgradeImageUrl(a.image),
+      const rawTopAlbums = (data.topAlbums as any)?.albums || data.topAlbums || [];
+      const albums: AlbumRef[] = (Array.isArray(rawTopAlbums) ? rawTopAlbums : []).map((a) => ({
+        id: a.albumid || a.id || '',
+        title: cleanText(a.album || a.title || a.name || ''),
+        imageUrl: upgradeImageUrl(a.imageUrl || a.image),
       }));
 
       let parsedBio: any[] = [];

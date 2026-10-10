@@ -1,6 +1,9 @@
 package com.musicsportsapp
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -79,10 +82,11 @@ fun MusicSportsAppRoot(
     // Bottom bar is visible on all bottom-nav tabs, hidden on Profile
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
     val showTopBar = currentRoute != Screen.MatchDetails().route
+    val showMiniPlayer = currentRoute != Screen.MatchDetails().route
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = Color.Transparent
+        containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
             AppNavHost(
@@ -90,23 +94,28 @@ fun MusicSportsAppRoot(
                 modifier = Modifier.fillMaxSize(),
             )
             
-            // Floating Bottom Bar Overlay
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = innerPadding.calculateBottomPadding())
             ) {
-                AnimatedVisibility(
-                    visible = showBottomBar,
-                    enter = slideInVertically(initialOffsetY = { it }),
-                    exit = slideOutVertically(targetOffsetY = { it }),
-                ) {
-                    Column {
+                Column(modifier = Modifier.animateContentSize()) {
+                    AnimatedVisibility(
+                        visible = showMiniPlayer,
+                        enter = slideInVertically(initialOffsetY = { it }) + expandVertically(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(),
+                    ) {
                         MiniPlayer(
                             playbackState = playbackState,
                             onPlayPauseClick = { rootViewModel.togglePlayPause() },
                             onNavigateToNowPlaying = { showFullPlayer = true }
                         )
+                    }
+                    AnimatedVisibility(
+                        visible = showBottomBar,
+                        enter = slideInVertically(initialOffsetY = { it }) + expandVertically(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(),
+                    ) {
                         AppBottomNavBar(navController = navController)
                     }
                 }

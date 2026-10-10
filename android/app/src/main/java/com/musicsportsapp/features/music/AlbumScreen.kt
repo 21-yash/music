@@ -28,6 +28,7 @@ import coil.compose.AsyncImage
 fun AlbumScreen(
     albumId: String,
     viewModel: AlbumViewModel = hiltViewModel(),
+    musicViewModel: MusicViewModel = hiltViewModel(),
     onBackClick: () -> Unit,
     onNavigateToArtist: (String) -> Unit
 ) {
@@ -173,47 +174,11 @@ fun AlbumScreen(
                         }
                         items(album.songs.size) { index ->
                             val song = album.songs[index]
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 8.dp)
-                                    .clickable { /* Handle song click */ },
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AsyncImage(
-                                    model = song.imageUrl,
-                                    contentDescription = song.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                )
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = song.title,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onBackground,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = song.primaryArtistName,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Text(
-                                    text = song.formattedDuration,
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            com.musicsportsapp.features.music.components.SongItem(
+                                song = song,
+                                onClick = { musicViewModel.playSong(song) },
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
                         }
                     }
                 }

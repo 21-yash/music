@@ -1,5 +1,6 @@
 package com.musicsportsapp.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,6 +27,8 @@ import com.musicsportsapp.features.sports.SportsScreen
  * Transition: gentle fade to feel native and fast, avoiding jarring
  * slide animations between bottom-nav destinations.
  */
+
+private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -35,10 +38,34 @@ fun AppNavHost(
         navController = navController,
         startDestination = Screen.Home.route,
         modifier = modifier.fillMaxSize(),
-        enterTransition = { fadeIn(animationSpec = tween(200)) },
-        exitTransition = { fadeOut(animationSpec = tween(200)) },
-        popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-        popExitTransition = { fadeOut(animationSpec = tween(200)) },
+        enterTransition = {
+            if (detailRoutes.any { targetState.destination.route?.startsWith(it) == true }) {
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
+            } else {
+                fadeIn(animationSpec = tween(200))
+            }
+        },
+        exitTransition = {
+            if (detailRoutes.any { targetState.destination.route?.startsWith(it) == true }) {
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
+            } else {
+                fadeOut(animationSpec = tween(200))
+            }
+        },
+        popEnterTransition = {
+            if (detailRoutes.any { initialState.destination.route?.startsWith(it) == true }) {
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
+            } else {
+                fadeIn(animationSpec = tween(200))
+            }
+        },
+        popExitTransition = {
+            if (detailRoutes.any { initialState.destination.route?.startsWith(it) == true }) {
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
+            } else {
+                fadeOut(animationSpec = tween(200))
+            }
+        },
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
@@ -69,7 +96,7 @@ fun AppNavHost(
             com.musicsportsapp.features.music.ArtistScreen(
                 artistId = artistId,
                 onBackClick = { navController.popBackStack() },
-                onNavigateToPlaylist = { playlistId -> navController.navigate(Screen.Playlist().createRoute(playlistId)) }
+                onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
             )
         }
 

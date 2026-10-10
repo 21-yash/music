@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -109,14 +110,14 @@ fun MiniPlayer(
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.basicMarquee()
                     )
                     Text(
                         text = song.primaryArtistName,
                         color = colors.secondary,
                         fontSize = 13.sp,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.basicMarquee()
                     )
                 }
 

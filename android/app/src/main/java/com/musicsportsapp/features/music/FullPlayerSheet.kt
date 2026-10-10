@@ -15,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -269,7 +270,7 @@ fun FullPlayerSheet(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                modifier = Modifier.basicMarquee()
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -277,7 +278,7 @@ fun FullPlayerSheet(
                                 fontSize = 18.sp,
                                 color = TextSecondary,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                modifier = Modifier.basicMarquee()
                             )
                         }
                         IconButton(onClick = { liked = !liked }) {

@@ -31,8 +31,9 @@ import coil.compose.AsyncImage
 fun ArtistScreen(
     artistId: String,
     viewModel: ArtistViewModel = hiltViewModel(),
+    musicViewModel: MusicViewModel = hiltViewModel(),
     onBackClick: () -> Unit,
-    onNavigateToPlaylist: (String) -> Unit // if albums need to be clickable, they can route to an album screen, but for now we might route to search or playlist.
+    onNavigateToAlbum: (String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -173,6 +174,47 @@ fun ArtistScreen(
                             )
                         }
                     }
+
+                    if (artist.topSongs.isNotEmpty()) {
+                        item {
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Top Songs",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                TextButton(onClick = { /* TODO: See All */ }) {
+                                    Text(
+                                        text = "See All",
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Column(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                artist.topSongs.take(5).forEachIndexed { index, song ->
+                                    com.musicsportsapp.features.music.components.SongItem(
+                                        song = song,
+                                        onClick = {
+                                            musicViewModel.playSong(song)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                     
                     if (artist.albums.isNotEmpty()) {
                         item {
@@ -193,7 +235,9 @@ fun ArtistScreen(
                                 items(artist.albums.size) { index ->
                                     val album = artist.albums[index]
                                     Column(
-                                        modifier = Modifier.width(140.dp)
+                                        modifier = Modifier
+                                            .width(140.dp)
+                                            .clickable { onNavigateToAlbum(album.id) }
                                     ) {
                                         AsyncImage(
                                             model = album.imageUrl,
