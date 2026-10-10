@@ -241,7 +241,14 @@ export class JioSaavnProvider implements MusicProvider {
         imageUrl: upgradeImageUrl(a.image),
       }));
 
-      const bio = (data.bio || [])
+      let parsedBio: any[] = [];
+      if (typeof data.bio === 'string') {
+        try { parsedBio = JSON.parse(data.bio); } catch (e) {}
+      } else if (Array.isArray(data.bio)) {
+        parsedBio = data.bio;
+      }
+
+      const bio = parsedBio
         .map((b) => cleanText(b.text))
         .filter(Boolean)
         .join(' ');
