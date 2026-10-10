@@ -114,4 +114,5 @@ export interface HomeData {
   topPlaylists: PlaylistRef[];
   charts: PlaylistRef[];
   bestOf: PlaylistRef[];
+  popularArtists: ArtistCredit[];
 }

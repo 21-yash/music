@@ -118,7 +118,7 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async getHomeData(): Promise<import('../types').HomeData> {
-    return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [] };
+    return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [], popularArtists: [] };
   }
 
   async getSong(id: string): Promise<Song | null> {

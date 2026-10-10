@@ -356,14 +356,14 @@ export class JioSaavnProvider implements MusicProvider {
       // Map new_albums -> featuredReleases
       const featuredReleases = (data.new_albums || []).map((a: any) => ({
         id: a.albumid || a.id || '',
-        title: cleanText(a.title || a.name || ''),
+        title: cleanText(a.title || a.name || '').replace(/\s*\(.*?\)\s*/g, '').trim(),
         imageUrl: upgradeImageUrl(a.image),
       })).filter((a) => a.id);
 
       // Map featured_playlists -> topPlaylists
       const allTopPlaylists = (data.featured_playlists || []).map((p: any) => ({
         id: p.listid || p.id || '',
-        title: cleanText(p.listname || p.title || ''),
+        title: cleanText(p.listname || p.title || '').replace(/\s*\(.*?\)\s*/g, '').trim(),
         imageUrl: upgradeImageUrl(p.image),
       })).filter((p: any) => p.id);
 
@@ -381,19 +381,37 @@ export class JioSaavnProvider implements MusicProvider {
       // Map charts -> charts
       const charts = (data.charts || []).map((c: any) => ({
         id: c.listid || c.id || '',
-        title: cleanText(c.listname || c.title || ''),
+        title: cleanText(c.listname || c.title || '').replace(/\s*\(.*?\)\s*/g, '').trim(),
         imageUrl: upgradeImageUrl(c.image),
       })).filter((c: any) => c.id);
+
+      // Hardcoded popular artists (as JioSaavn API doesn't return them directly in homepage)
+      const popularArtists = [
+        // Top Indian Artists
+        { id: "459320", name: "Arijit Singh", imageUrl: "https://c.saavncdn.com/artists/Arijit_Singh_002_20230323062147_500x500.jpg" },
+        { id: "2933939", name: "Karan Aujla", imageUrl: "https://c.saavncdn.com/artists/Karan_Aujla_005_20231025062147_500x500.jpg" },
+        { id: "456185", name: "Badshah", imageUrl: "https://c.saavncdn.com/artists/Badshah_005_20230608062147_500x500.jpg" },
+        { id: "456933", name: "Shreya Ghoshal", imageUrl: "https://c.saavncdn.com/artists/Shreya_Ghoshal_002_20230323062147_500x500.jpg" },
+        { id: "459321", name: "A.R. Rahman", imageUrl: "https://c.saavncdn.com/artists/AR_Rahman_002_20230323062147_500x500.jpg" },
+        { id: "464232", name: "Anirudh Ravichander", imageUrl: "https://c.saavncdn.com/artists/Anirudh_Ravichander_002_20230323062147_500x500.jpg" },
+        
+        // Top Global Artists
+        { id: "3388725", name: "The Weeknd", imageUrl: "https://c.saavncdn.com/artists/The_Weeknd_005_20230821105953_500x500.jpg" },
+        { id: "3235334", name: "Taylor Swift", imageUrl: "https://c.saavncdn.com/artists/Taylor_Swift_005_20240419131627_500x500.jpg" },
+        { id: "3388654", name: "Drake", imageUrl: "https://c.saavncdn.com/artists/Drake_005_20230821105953_500x500.jpg" },
+        { id: "3482352", name: "Billie Eilish", imageUrl: "https://c.saavncdn.com/artists/Billie_Eilish_005_20240517140846_500x500.jpg" }
+      ];
 
       return {
         featuredReleases,
         topPlaylists,
         charts,
         bestOf,
+        popularArtists,
       };
     } catch (error) {
       logger.error({ error }, 'JioSaavn: failed to fetch home data');
-      return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [] };
+      return { featuredReleases: [], topPlaylists: [], charts: [], bestOf: [], popularArtists: [] };
     }
   }
 
