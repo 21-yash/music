@@ -1,94 +1,158 @@
 package com.musicsportsapp.features.search
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.musicsportsapp.features.music.components.SongItem
 
 @Composable
 fun SearchScreen(
-    viewModel: SearchViewModel = hiltViewModel()
+    viewModel: SearchViewModel = hiltViewModel(),
+    onBackClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 16.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding(),
     ) {
-        Text(
-            text = "Search",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Provider Toggle
-        SingleChoiceSegmentedButtonRow(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            val options = listOf("jiosaavn" to "JioSaavn", "youtube" to "YouTube")
-            options.forEachIndexed { index, (id, label) ->
-                SegmentedButton(
-                    selected = uiState.provider == id,
-                    onClick = { viewModel.updateProvider(id) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f))
+                    .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
+            ) {
+                BasicTextField(
+                    value = uiState.query,
+                    onValueChange = { viewModel.updateQuery(it) },
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    decorationBox = { innerTextField ->
+                        if (uiState.query.isEmpty()) {
+                            Text(
+                                text = if (uiState.provider == "jiosaavn") "Searching JioSaavn..." else "Searching YouTube...",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 15.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            val isJioSaavn = uiState.provider == "jiosaavn"
+            Box(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
+                    .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f), RoundedCornerShape(22.dp))
+                    .clickable { 
+                        viewModel.updateProvider(if (isJioSaavn) "youtube" else "jiosaavn") 
+                    }
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(label)
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(if (isJioSaavn) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = com.musicsportsapp.R.drawable.saavn),
+                            contentDescription = "JioSaavn",
+                            modifier = Modifier
+                                .size(if (isJioSaavn) 32.dp else 24.dp)
+                                .clip(CircleShape)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(if (!isJioSaavn) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f) else Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = com.musicsportsapp.R.drawable.yt),
+                            contentDescription = "YouTube",
+                            modifier = Modifier
+                                .size(if (!isJioSaavn) 32.dp else 24.dp)
+                                .clip(CircleShape)
+                        )
+                    }
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Search bar
-        OutlinedTextField(
-            value = uiState.query,
-            onValueChange = { viewModel.updateQuery(it) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            placeholder = { Text("Songs, artists, albums...") },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            },
-            shape = RoundedCornerShape(16.dp),
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        )
-
+        
         Spacer(modifier = Modifier.height(24.dp))
 
         if (uiState.query.isBlank()) {
-            BrowseCategories()
+            Box(
+                modifier = Modifier.fillMaxSize().padding(bottom = 120.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Text(
+                    text = "Type to start searching...",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 40.dp)
+                )
+            }
         } else {
             SearchResultsContent(
                 uiState = uiState,
@@ -105,14 +169,14 @@ fun SearchResultsContent(
 ) {
     if (uiState.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = Color.White)
         }
         return
     }
 
     if (uiState.error != null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = uiState.error, color = MaterialTheme.colorScheme.error)
+            Text(text = uiState.error, color = Color(0xFFEF4444))
         }
         return
     }
@@ -122,8 +186,8 @@ fun SearchResultsContent(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Text(
                 text = "No results found for \"${uiState.query}\"",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 15.sp,
+                color = Color(0xFF94A3B8),
                 modifier = Modifier.padding(top = 32.dp)
             )
         }
@@ -139,13 +203,10 @@ fun SearchResultsContent(
                 SongItem(
                     song = song,
                     onClick = { onSongClick(song) },
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
         }
-
-        // Albums and Artists would go here, maybe using LazyRow or different Item composables
-        // For brevity, we focus on songs in this initial implementation
     }
 }
 
@@ -153,9 +214,9 @@ fun SearchResultsContent(
 fun SectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.titleLarge,
+        fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onBackground,
+        color = Color.White,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
     )
 }

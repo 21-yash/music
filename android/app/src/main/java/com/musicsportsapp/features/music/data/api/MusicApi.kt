@@ -61,4 +61,9 @@ interface MusicApi {
         @Path("id") id: String,
         @Query("provider") provider: String? = null
     ): ApiResponse<PlaylistDto>
+
+    @GET("music/home")
+    suspend fun getHomeData(
+        @Query("provider") provider: String? = null
+    ): ApiResponse<com.musicsportsapp.features.music.data.dto.HomeDataDto>
 }

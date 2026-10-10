@@ -3,6 +3,8 @@ package com.musicsportsapp.features.sports
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.musicsportsapp.features.sports.data.remote.SportsSocketService
+import com.musicsportsapp.features.sports.data.dto.MatchDetailsResponseDto
 import com.musicsportsapp.features.sports.domain.model.MatchDetails
 import com.musicsportsapp.features.sports.domain.model.Scorecard
 import com.musicsportsapp.features.sports.domain.model.Squad
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 data class MatchDetailsUiState(
@@ -26,10 +29,11 @@ data class MatchDetailsUiState(
 @HiltViewModel
 class MatchDetailsViewModel @Inject constructor(
     private val repository: SportsRepository,
+    private val socketService: SportsSocketService,
+    private val json: Json,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    // Expecting matchId from navigation arguments
     private val matchId: String = checkNotNull(savedStateHandle["matchId"])
 
     private val _uiState = MutableStateFlow(MatchDetailsUiState())
@@ -37,6 +41,23 @@ class MatchDetailsViewModel @Inject constructor(
 
     init {
         loadData()
+        setupSocket()
+    }
+
+    private fun setupSocket() {
+        socketService.connect()
+        socketService.joinMatch(matchId)
+        
+        viewModelScope.launch {
+            socketService.matchUpdates.collect { payload ->
+                try {
+                    val response = json.decodeFromString<MatchDetailsResponseDto>(payload)
+                    _uiState.update { it.copy(details = response.match.toDomain()) }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 
     fun loadData() {
@@ -70,5 +91,10 @@ class MatchDetailsViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        socketService.leaveMatch(matchId)
     }
 }

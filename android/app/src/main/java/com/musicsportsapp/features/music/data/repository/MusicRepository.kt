@@ -45,4 +45,9 @@ class MusicRepository @Inject constructor(
         return safeApiCall { api.getStream(ref, quality, provider) }
             .map { it.toDomain() }
     }
+
+    suspend fun getHomeData(provider: String? = null): AppResult<HomeData> {
+        return safeApiCall { api.getHomeData(provider) }
+            .map { it.toDomain() }
+    }
 }

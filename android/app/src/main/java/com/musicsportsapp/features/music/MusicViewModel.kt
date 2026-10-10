@@ -14,8 +14,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import com.musicsportsapp.features.music.domain.model.HomeData
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
 data class MusicUiState(
     val trendingSongs: List<Song> = emptyList(),
+    val homeData: HomeData? = null,
     val isLoading: Boolean = false,
     val error: String? = null
 )
@@ -30,19 +36,36 @@ class MusicViewModel @Inject constructor(
     val uiState: StateFlow<MusicUiState> = _uiState.asStateFlow()
 
     init {
-        loadTrending()
+        loadData()
     }
 
-    private fun loadTrending() {
+    private fun loadData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            when (val result = repository.getTrending()) {
-                is AppResult.Success -> {
-                    _uiState.update { it.copy(trendingSongs = result.data, isLoading = false) }
-                }
-                is AppResult.Error -> {
-                    _uiState.update { it.copy(isLoading = false, error = result.error.message) }
-                }
+            
+            val trendingDeferred = async { repository.getTrending() }
+            val homeDataDeferred = async { repository.getHomeData() }
+            
+            val trendingResult = trendingDeferred.await()
+            val homeDataResult = homeDataDeferred.await()
+
+            var errorStr: String? = null
+            var trending = emptyList<Song>()
+            var home: HomeData? = null
+            
+            if (trendingResult is AppResult.Success) trending = trendingResult.data
+            else errorStr = (trendingResult as? AppResult.Error)?.error?.message
+            
+            if (homeDataResult is AppResult.Success) home = homeDataResult.data
+            else errorStr = (homeDataResult as? AppResult.Error)?.error?.message ?: errorStr
+
+            _uiState.update { 
+                it.copy(
+                    trendingSongs = trending, 
+                    homeData = home, 
+                    isLoading = false,
+                    error = errorStr
+                )
             }
         }
     }

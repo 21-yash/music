@@ -79,8 +79,35 @@ sealed class Screen(
         fun createRoute(id: String) = "sports/match/$id"
     }
 
+    data class Artist(val artistId: String = "{artistId}") : Screen(
+        route = "music/artist/$artistId",
+        label = "Artist",
+        selectedIcon = Icons.Filled.Person,
+        unselectedIcon = Icons.Outlined.Person,
+    ) {
+        fun createRoute(id: String) = "music/artist/$id"
+    }
+
+    data class Playlist(val playlistId: String = "{playlistId}") : Screen(
+        route = "music/playlist/$playlistId",
+        label = "Playlist",
+        selectedIcon = Icons.Filled.LibraryMusic,
+        unselectedIcon = Icons.Outlined.LibraryMusic,
+    ) {
+        fun createRoute(id: String) = "music/playlist/$id"
+    }
+
+    data class Album(val albumId: String = "{albumId}") : Screen(
+        route = "music/album/$albumId",
+        label = "Album",
+        selectedIcon = Icons.Filled.LibraryMusic,
+        unselectedIcon = Icons.Outlined.LibraryMusic,
+    ) {
+        fun createRoute(id: String) = "music/album/$id"
+    }
+
     companion object {
         /** Ordered list of bottom navigation tabs. */
-        val bottomNavItems = listOf(Home, Music, Sports, Search, Library)
+        val bottomNavItems = listOf(Home, Music, Sports, Library)
     }
 }

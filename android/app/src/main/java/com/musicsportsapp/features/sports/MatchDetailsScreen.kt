@@ -39,15 +39,15 @@ import com.musicsportsapp.features.sports.domain.model.*
 
 // ─── DESIGN TOKENS (from the HTML :root + inline styles) ──────────────
 
-private val TextMain = Color(0xFF1F223F)
-private val TextSecondary = Color(0xFF74768B)
+private val TextMain: Color @Composable get() = MaterialTheme.colorScheme.onBackground
+private val TextSecondary: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 private val AccentRed = Color(0xFFDE474E)
 private val AccentBlue = Color(0xFF5566FF)
-private val CardBlue = Color(0xFFF1F6FC)
-private val CardHeaderBg = Color(0xFFF8F9FE)
-private val SubHeaderBg = Color(0xFFFAFAFC)
-private val BorderLight = Color(0xFFF0F0F0)
-private val AvatarBg = Color(0xFFF5F6FC)
+private val CardBlue: Color @Composable get() = MaterialTheme.colorScheme.surface
+private val CardHeaderBg: Color @Composable get() = MaterialTheme.colorScheme.surfaceVariant
+private val SubHeaderBg: Color @Composable get() = MaterialTheme.colorScheme.background
+private val BorderLight: Color @Composable get() = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)
+private val AvatarBg: Color @Composable get() = MaterialTheme.colorScheme.surfaceVariant
 
 // Content area padding
 private val ContentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 100.dp)
@@ -77,8 +77,8 @@ fun MatchDetailsScreen(
 
     val backgroundBrush = Brush.verticalGradient(
         colors = listOf(
-            Color(0xFFFDF6F7),
-            Color(0xFFF4F7FC)
+            MaterialTheme.colorScheme.background,
+            MaterialTheme.colorScheme.background
         )
     )
 
@@ -141,9 +141,9 @@ fun MatchDetailsScreen(
                                     )
                                     .clip(pill)
                                     .background(if (isSelected) AccentBlue else Color.Transparent)
-                                    .border(1.dp, if (isSelected) AccentBlue else Color(0x0D000000), pill)
+                                    .border(1.dp, if (isSelected) AccentBlue else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f), pill)
                                     .clickable { selectedTabIndex = index }
-                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     text = tabs[index],
@@ -162,7 +162,7 @@ fun MatchDetailsScreen(
                             .weight(1f)
                             .fillMaxWidth()
                             .background(
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.surface,
                                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
                             )
                             .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
@@ -194,7 +194,7 @@ private fun SectionCard(
             .fillMaxWidth()
             .shadow(2.dp, shape, ambientColor = Color(0x05000000), spotColor = Color(0x05000000))
             .clip(shape)
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .border(1.dp, BorderLight, shape),
         content = content
     )
@@ -303,6 +303,7 @@ private fun CustomHeader(title: String, subtitle: String, onBackClick: () -> Uni
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -310,7 +311,7 @@ private fun CustomHeader(title: String, subtitle: String, onBackClick: () -> Uni
             onClick = onBackClick,
             modifier = Modifier
                 .size(40.dp)
-                .background(Color(0xB3FFFFFF), CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
         ) {
             Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = TextMain, modifier = Modifier.size(18.dp))
         }
@@ -356,14 +357,14 @@ private fun MatchCard(summary: MatchSummary) {
 
             Box(
                 modifier = Modifier
-                    .background(Color(0xFFFBE6FB), RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = summary.format.name,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFB054CC)
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
@@ -412,7 +413,7 @@ private fun TeamCardRow(name: String, score: String, logoUrl: String?) {
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(1.dp, Color(0x0D000000), CircleShape)
             ) {
                 if (logoUrl != null) {
@@ -627,11 +628,11 @@ private fun LiveTab(details: MatchDetails) {
                                 "W", "Wicket" -> AccentRed
                                 "4", "Four" -> AccentBlue
                                 "6", "Six" -> Color(0xFF9B51E0)
-                                else -> Color.White
+                                else -> MaterialTheme.colorScheme.surface
                             }
                             val colored = ball == "W" || ball == "4" || ball == "6"
                             val textColor = if (colored) Color.White else TextMain
-                            val borderColor = if (colored) bgColor else Color(0xFFE0E4F0)
+                            val borderColor = if (colored) bgColor else BorderLight
 
                             Box(
                                 modifier = Modifier
@@ -654,14 +655,14 @@ private fun LiveTab(details: MatchDetails) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 24.dp)
-                        .background(Color(0xFFFFF0F0), RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         "Last Wicket: ${details.lastWicket}",
                         fontSize = 13.sp,
-                        color = AccentRed,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -719,12 +720,12 @@ private fun LiveTab(details: MatchDetails) {
                                     append(",")
                                     append(parts[1])
                                 },
-                                color = Color(0xFF333333),
+                                color = TextMain,
                                 fontSize = 14.sp,
                                 lineHeight = 21.sp
                             )
                         } else {
-                            Text(comm.text, color = Color(0xFF333333), fontSize = 14.sp, lineHeight = 21.sp)
+                            Text(comm.text, color = TextMain, fontSize = 14.sp, lineHeight = 21.sp)
                         }
                     }
                 }

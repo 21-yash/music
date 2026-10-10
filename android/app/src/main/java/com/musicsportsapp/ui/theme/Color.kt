@@ -3,53 +3,53 @@ package com.musicsportsapp.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // ─── Dark Theme Colors ──────────────────────────────────────────────
-val DarkPrimary = Color(0xFF90CAF9)          // Light blue
-val DarkOnPrimary = Color(0xFF0D47A1)
-val DarkPrimaryContainer = Color(0xFF1565C0)
-val DarkOnPrimaryContainer = Color(0xFFBBDEFB)
+val DarkPrimary = Color(0xFF6366F1)          // Indigo
+val DarkOnPrimary = Color.White
+val DarkPrimaryContainer = Color(0xFF4F46E5)
+val DarkOnPrimaryContainer = Color.White
 
-val DarkSecondary = Color(0xFFA5D6A7)        // Light green
-val DarkOnSecondary = Color(0xFF1B5E20)
-val DarkSecondaryContainer = Color(0xFF2E7D32)
-val DarkOnSecondaryContainer = Color(0xFFC8E6C9)
+val DarkSecondary = Color(0xFFEC4899)        // Pink
+val DarkOnSecondary = Color.White
+val DarkSecondaryContainer = Color(0xFFDB2777)
+val DarkOnSecondaryContainer = Color.White
 
-val DarkTertiary = Color(0xFFFFCC80)         // Amber
-val DarkOnTertiary = Color(0xFF5D4037)
-val DarkTertiaryContainer = Color(0xFFE65100)
-val DarkOnTertiaryContainer = Color(0xFFFFE0B2)
+val DarkTertiary = Color(0xFF10B981)         // Emerald
+val DarkOnTertiary = Color.White
+val DarkTertiaryContainer = Color(0xFF059669)
+val DarkOnTertiaryContainer = Color.White
 
-val DarkBackground = Color(0xFF0F0F14)
-val DarkOnBackground = Color(0xFFE3E2E6)
-val DarkSurface = Color(0xFF16161C)
-val DarkOnSurface = Color(0xFFE3E2E6)
-val DarkSurfaceVariant = Color(0xFF1E1E26)
-val DarkOnSurfaceVariant = Color(0xFFC4C6D0)
+val DarkBackground = Color(0xFF0F172A)       // slate-900
+val DarkOnBackground = Color.White
+val DarkSurface = Color(0xFF1E293B)          // slate-800
+val DarkOnSurface = Color.White
+val DarkSurfaceVariant = Color(0xFF334155)   // slate-700
+val DarkOnSurfaceVariant = Color(0xFF94A3B8) // slate-400
 
-val DarkError = Color(0xFFFFB4AB)
-val DarkOnError = Color(0xFF690005)
+val DarkError = Color(0xFFEF4444)
+val DarkOnError = Color.White
 
 // ─── Light Theme Colors ──────────────────────────────────────────────
-val LightPrimary = Color(0xFF1565C0)
-val LightOnPrimary = Color(0xFFFFFFFF)
-val LightPrimaryContainer = Color(0xFFBBDEFB)
-val LightOnPrimaryContainer = Color(0xFF0D47A1)
+val LightPrimary = Color(0xFF6366F1)
+val LightOnPrimary = Color.White
+val LightPrimaryContainer = Color(0xFF818CF8)
+val LightOnPrimaryContainer = Color.White
 
-val LightSecondary = Color(0xFF2E7D32)
-val LightOnSecondary = Color(0xFFFFFFFF)
-val LightSecondaryContainer = Color(0xFFC8E6C9)
-val LightOnSecondaryContainer = Color(0xFF1B5E20)
+val LightSecondary = Color(0xFFEC4899)
+val LightOnSecondary = Color.White
+val LightSecondaryContainer = Color(0xFFF472B6)
+val LightOnSecondaryContainer = Color.White
 
-val LightTertiary = Color(0xFFE65100)
-val LightOnTertiary = Color(0xFFFFFFFF)
-val LightTertiaryContainer = Color(0xFFFFE0B2)
-val LightOnTertiaryContainer = Color(0xFF5D4037)
+val LightTertiary = Color(0xFF10B981)
+val LightOnTertiary = Color.White
+val LightTertiaryContainer = Color(0xFF34D399)
+val LightOnTertiaryContainer = Color.White
 
-val LightBackground = Color(0xFFFAFAFC)
-val LightOnBackground = Color(0xFF1B1B1F)
-val LightSurface = Color(0xFFFFFFFF)
-val LightOnSurface = Color(0xFF1B1B1F)
-val LightSurfaceVariant = Color(0xFFE7E0EC)
-val LightOnSurfaceVariant = Color(0xFF49454F)
+val LightBackground = Color(0xFFF1F5F9)      // slate-100
+val LightOnBackground = Color(0xFF0F172A)    // slate-900
+val LightSurface = Color(0xFFFFFFFF)         // white
+val LightOnSurface = Color(0xFF0F172A)
+val LightSurfaceVariant = Color(0xFFE2E8F0)  // slate-200
+val LightOnSurfaceVariant = Color(0xFF64748B) // slate-500
 
-val LightError = Color(0xFFBA1A1A)
-val LightOnError = Color(0xFFFFFFFF)
+val LightError = Color(0xFFEF4444)
+val LightOnError = Color.White

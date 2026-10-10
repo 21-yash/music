@@ -54,6 +54,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.musicsportsapp.features.sports.domain.model.MatchSummary
 
+import androidx.compose.foundation.layout.statusBarsPadding
+
 /**
  * Sports tab — live scores and match tracking.
  *
@@ -68,18 +70,10 @@ fun SportsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    val backgroundBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFFFDEFF2), // soft pink, top
-            Color(0xFFEDF0FF), // soft blue-lavender, middle
-            Color(0xFFF8F9FE)  // near-white, bottom
-        )
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundBrush)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -87,21 +81,23 @@ fun SportsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(start = 24.dp, end = 24.dp, top = 8.dp)
             ) {
                 Text(
-                    text = "Sports",
+                    text = "Cricket",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF1A1D2D)
+                    fontSize = 28.sp,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    letterSpacing = (-0.5).sp
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(0.dp))
                 Text(
-                    text = "Live scores  •  Latest updates  •  Cricket",
+                    text = "Live scores  •  Latest updates",
                     style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 12.sp,
-                    color = Color(0xFF6B7280),
-                    fontWeight = FontWeight.Medium
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -135,7 +131,7 @@ fun SportsScreen(
                             imageVector = Icons.Outlined.CalendarToday,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (uiState.selectedFilter == "upcoming") Color.White else Color(0xFF4B5563)
+                            tint = if (uiState.selectedFilter == "upcoming") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 )
@@ -148,7 +144,7 @@ fun SportsScreen(
                             imageVector = Icons.Outlined.Schedule,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (uiState.selectedFilter == "recent") Color.White else Color(0xFF4B5563)
+                            tint = if (uiState.selectedFilter == "recent") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 )
@@ -159,7 +155,7 @@ fun SportsScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 when {
                     uiState.isLoading && uiState.matches.isEmpty() -> {
-                        CircularProgressIndicator(color = Color(0xFF4338CA))
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
                     uiState.error != null && uiState.matches.isEmpty() -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -169,7 +165,7 @@ fun SportsScreen(
                         }
                     }
                     uiState.matches.isEmpty() -> {
-                        Text(text = "No matches found.", color = Color(0xFF6B7280))
+                        Text(text = "No matches found.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     else -> {
                         LazyColumn(
@@ -182,9 +178,7 @@ fun SportsScreen(
                                 key = { index -> uiState.matches[index].id }
                             ) { index ->
                                 val match = uiState.matches[index]
-                                // Alternate tint for visual rhythm between cards —
-                                // purely decorative, not tied to match state.
-                                val tint = if (index % 2 == 0) Color(0xFFEBEEFD) else Color(0xFFFDEDF0)
+                                val tint = MaterialTheme.colorScheme.surface
                                 MatchCard(
                                     match = match,
                                     backgroundTint = tint,
@@ -216,7 +210,7 @@ private fun FilterPill(
     } else {
         Modifier
             .background(Color.Transparent, RoundedCornerShape(24.dp))
-            .border(1.dp, Color(0xFFD1D5DB), RoundedCornerShape(24.dp))
+            .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
     }
 
     Row(
@@ -232,7 +226,7 @@ private fun FilterPill(
         Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = label,
-            color = if (isSelected) Color.White else Color(0xFF4B5563),
+            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.SemiBold,
             fontSize = 12.sp,
             maxLines = 1,
@@ -254,7 +248,7 @@ private fun MatchCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = backgroundTint),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE5E7EB)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -269,7 +263,7 @@ private fun MatchCard(
                     text = match.seriesName,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF6B7280),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(end = 8.dp)
@@ -277,14 +271,14 @@ private fun MatchCard(
 
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFFF3E8FF), RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(6.dp))
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = match.format.name,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF9333EA)
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
@@ -334,7 +328,7 @@ private fun TeamRow(name: String, score: String, logoUrl: String?) {
             Card(
                 modifier = Modifier.size(32.dp),
                 shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6))
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 if (logoUrl != null) {
                     AsyncImage(
@@ -350,7 +344,7 @@ private fun TeamRow(name: String, score: String, logoUrl: String?) {
                 text = name,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF111827),
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -361,7 +355,7 @@ private fun TeamRow(name: String, score: String, logoUrl: String?) {
                 text = "Yet to bat",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF111827)
+                color = MaterialTheme.colorScheme.onSurface
             )
         } else {
             val scoreParts = score.split("(")
@@ -373,7 +367,7 @@ private fun TeamRow(name: String, score: String, logoUrl: String?) {
                     text = runsText,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF111827)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 if (oversText.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(4.dp))
@@ -381,7 +375,7 @@ private fun TeamRow(name: String, score: String, logoUrl: String?) {
                         text = oversText,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Normal,
-                        color = Color(0xFF6B7280),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 2.dp)
                     )
                 }

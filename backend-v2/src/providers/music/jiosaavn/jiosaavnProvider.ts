@@ -265,7 +265,8 @@ export class JioSaavnProvider implements MusicProvider {
         albums,
         providerId: this.id,
       };
-    } catch (error) {
+    } catch (error: any) {
+      console.error('getArtist error details:', error.stack || error.message || error);
       logger.error({ error, artistId: id }, 'JioSaavn: failed to fetch artist');
       return null;
     }
@@ -395,18 +396,18 @@ export class JioSaavnProvider implements MusicProvider {
       // Hardcoded popular artists (as JioSaavn API doesn't return them directly in homepage)
       const popularArtists = [
         // Top Indian Artists
-        { id: "459320", name: "Arijit Singh", imageUrl: "https://c.saavncdn.com/artists/Arijit_Singh_002_20230323062147_500x500.jpg" },
-        { id: "2933939", name: "Karan Aujla", imageUrl: "https://c.saavncdn.com/artists/Karan_Aujla_005_20231025062147_500x500.jpg" },
-        { id: "456185", name: "Badshah", imageUrl: "https://c.saavncdn.com/artists/Badshah_005_20230608062147_500x500.jpg" },
-        { id: "456933", name: "Shreya Ghoshal", imageUrl: "https://c.saavncdn.com/artists/Shreya_Ghoshal_002_20230323062147_500x500.jpg" },
-        { id: "459321", name: "A.R. Rahman", imageUrl: "https://c.saavncdn.com/artists/AR_Rahman_002_20230323062147_500x500.jpg" },
-        { id: "464232", name: "Anirudh Ravichander", imageUrl: "https://c.saavncdn.com/artists/Anirudh_Ravichander_002_20230323062147_500x500.jpg" },
+        { id: "459320", name: "Arijit Singh", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558481813846892596/image.png?ex=6acb98cb&is=6aca474b&hm=870868074f56e73bca959930333f1889bf9e4830d4985f4a0a9e4b867df43f06" },
+        { id: "697691", name: "Karan Aujla", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482181578559720/image.png?ex=6acb9923&is=6aca47a3&hm=85fdd7fe42b6e859717dfd7d9a1b455a2273b5ba23ddca80396b37b2c918e7b7&" },
+        { id: "456863", name: "Badshah", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482181213388915/image.png?ex=6acb9923&is=6aca47a3&hm=d191a8cc713980df534dd8f90c3a7e1791e98d984e120daa88c9dd22e6d042a1&" },
+        { id: "455130", name: "Shreya Ghoshal", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482180785840189/image.png?ex=6acb9923&is=6aca47a3&hm=19ca8192aa5e69f859d835b8e369f6dc420620daee9fc1f5f903161496d1bc04&" },
+        { id: "456269", name: "A.R. Rahman", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482180299034674/image.png?ex=6acb9922&is=6aca47a2&hm=94be734d9b9d51286ccabce273625bdb65479359350291eb3bd4f5f791b8c9e2&" },
+        { id: "455663", name: "Anirudh Ravichander", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482179900833953/image.png?ex=6acb9922&is=6aca47a2&hm=0351133008ad7f43608bcdfdabb527afd763dd591b028cffecc99b8653eddff8&" },
         
         // Top Global Artists
-        { id: "3388725", name: "The Weeknd", imageUrl: "https://c.saavncdn.com/artists/The_Weeknd_005_20230821105953_500x500.jpg" },
-        { id: "3235334", name: "Taylor Swift", imageUrl: "https://c.saavncdn.com/artists/Taylor_Swift_005_20240419131627_500x500.jpg" },
-        { id: "3388654", name: "Drake", imageUrl: "https://c.saavncdn.com/artists/Drake_005_20230821105953_500x500.jpg" },
-        { id: "3482352", name: "Billie Eilish", imageUrl: "https://c.saavncdn.com/artists/Billie_Eilish_005_20240517140846_500x500.jpg" }
+        { id: "615155", name: "The Weeknd", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482027563712652/image.png?ex=6acb98fe&is=6aca477e&hm=034c3f0da5679f215ba380d68a04fd090b6adf14f66eb0b8e00363e8495621f3&" },
+        { id: "565990", name: "Taylor Swift", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482027248877578/image.png?ex=6acb98fe&is=6aca477e&hm=45ebb957e67d53bb68a03a4db2a8d4c7b21152d8d3111fbfb537b61632bab5e7&" },
+        { id: "512453", name: "Drake", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482026628251748/image.png?ex=6acb98fe&is=6aca477e&hm=c08e47d5953f82af00b8ea56d41109693bee561756d02cf8c89b9da4d2af8ea6&" },
+        { id: "1918741", name: "Billie Eilish", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482026196115456/image.png?ex=6acb98fe&is=6aca477e&hm=3ecac8b6cb86a543246f8fa6f4ec85c73635e3b0ccb4c537757e75261804f5ba&" }
       ];
 
       return {

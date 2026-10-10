@@ -55,6 +55,9 @@ android {
 }
 
 dependencies {
+    // Socket.IO
+    implementation("io.socket:socket.io-client:2.1.1")
+
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
 

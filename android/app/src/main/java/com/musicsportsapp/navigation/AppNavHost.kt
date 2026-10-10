@@ -41,11 +41,54 @@ fun AppNavHost(
         popExitTransition = { fadeOut(animationSpec = tween(200)) },
     ) {
         composable(Screen.Home.route) {
-            HomeScreen()
+            HomeScreen(
+                onMatchClick = { matchId ->
+                    navController.navigate(Screen.MatchDetails().createRoute(matchId))
+                },
+                onSeeAllSports = {
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            )
         }
 
         composable(Screen.Music.route) {
-            MusicScreen()
+            MusicScreen(
+                onNavigateToSearch = { navController.navigate(Screen.Search.route) },
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
+                onNavigateToPlaylist = { playlistId -> navController.navigate(Screen.Playlist().createRoute(playlistId)) },
+                onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
+            )
+        }
+
+        composable(Screen.Artist().route) { backStackEntry ->
+            val artistId = backStackEntry.arguments?.getString("artistId") ?: ""
+            com.musicsportsapp.features.music.ArtistScreen(
+                artistId = artistId,
+                onBackClick = { navController.popBackStack() },
+                onNavigateToPlaylist = { playlistId -> navController.navigate(Screen.Playlist().createRoute(playlistId)) }
+            )
+        }
+
+        composable(Screen.Playlist().route) { backStackEntry ->
+            val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
+            com.musicsportsapp.features.music.PlaylistScreen(
+                playlistId = playlistId,
+                onBackClick = { navController.popBackStack() },
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) }
+            )
+        }
+
+        composable(Screen.Album().route) { backStackEntry ->
+            val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
+            com.musicsportsapp.features.music.AlbumScreen(
+                albumId = albumId,
+                onBackClick = { navController.popBackStack() },
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) }
+            )
         }
 
         composable(Screen.Sports.route) {
@@ -65,7 +108,9 @@ fun AppNavHost(
         }
 
         composable(Screen.Search.route) {
-            SearchScreen()
+            SearchScreen(
+                onBackClick = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.Library.route) {

@@ -3,6 +3,7 @@ package com.musicsportsapp.di
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.musicsportsapp.BuildConfig
 import com.musicsportsapp.data.remote.AuthInterceptor
+import com.musicsportsapp.data.remote.AuthAuthenticator
 import com.musicsportsapp.data.remote.api.AuthApi
 import dagger.Module
 import dagger.Provides
@@ -38,12 +39,14 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         authInterceptor: AuthInterceptor,
+        authAuthenticator: AuthAuthenticator
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(authInterceptor)
+            .authenticator(authAuthenticator)
 
         if (BuildConfig.DEBUG) {
             val loggingInterceptor = HttpLoggingInterceptor().apply {
