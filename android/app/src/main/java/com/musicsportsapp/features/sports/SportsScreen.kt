@@ -26,13 +26,7 @@ import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -118,7 +112,7 @@ fun SportsScreen(
                             imageVector = Icons.Filled.Circle,
                             contentDescription = null,
                             modifier = Modifier.size(8.dp),
-                            tint = if (uiState.selectedFilter == "live") Color.White else Color(0xFFEF4444)
+                            tint = if (uiState.selectedFilter == "live") MaterialTheme.colorScheme.onPrimary else Color(0xFFEF4444)
                         )
                     }
                 )
@@ -131,7 +125,7 @@ fun SportsScreen(
                             imageVector = Icons.Outlined.CalendarToday,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (uiState.selectedFilter == "upcoming") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (uiState.selectedFilter == "upcoming") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 )
@@ -144,7 +138,7 @@ fun SportsScreen(
                             imageVector = Icons.Outlined.Schedule,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (uiState.selectedFilter == "recent") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (uiState.selectedFilter == "recent") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 )
@@ -200,39 +194,30 @@ private fun FilterPill(
     onClick: () -> Unit,
     icon: @Composable () -> Unit
 ) {
-    val bgModifier = if (isSelected) {
-        Modifier.background(
-            brush = Brush.horizontalGradient(
-                colors = listOf(Color(0xFF3B82F6), Color(0xFF8B5CF6))
-            ),
-            shape = RoundedCornerShape(24.dp)
-        )
-    } else {
-        Modifier
-            .background(Color.Transparent, RoundedCornerShape(24.dp))
-            .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
-    }
-
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick)
-            .then(bgModifier)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        icon()
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text = label,
-            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onBackground,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Clip
-        )
-    }
+    FilterChip(
+        selected = isSelected,
+        onClick = onClick,
+        leadingIcon = icon,
+        label = {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = isSelected,
+            borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        ),
+        shape = RoundedCornerShape(20.dp)
+    )
 }
 
 @Composable

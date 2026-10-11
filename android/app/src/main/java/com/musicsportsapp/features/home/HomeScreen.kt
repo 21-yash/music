@@ -181,17 +181,19 @@ object HomeSampleData {
 fun HomeScreen(
     modifier: Modifier = Modifier,
     darkTheme: Boolean = androidx.compose.material3.MaterialTheme.colorScheme.background == Color(0xFF0F172A),
-    recentlyPlayed: List<SongUi> = HomeSampleData.recentlyPlayed,
     contentPadding: PaddingValues = PaddingValues(bottom = 160.dp),
     onSeeAllSports: () -> Unit = {},
+    onSeeAllRecentlyPlayed: () -> Unit = {},
     onMatchClick: (String) -> Unit = {},
     onSongClick: (SongUi) -> Unit = {},
+    homeViewModel: HomeViewModel = hiltViewModel(),
     musicViewModel: MusicViewModel = hiltViewModel(),
     sportsViewModel: com.musicsportsapp.features.sports.SportsViewModel = hiltViewModel()
 ) {
     val palette = if (darkTheme) DarkPalette else LightPalette
     val uiState by musicViewModel.uiState.collectAsState()
     val sportsUiState by sportsViewModel.uiState.collectAsState()
+    val realRecentlyPlayed by homeViewModel.recentlyPlayed.collectAsState()
     val trending = uiState.trendingSongs
     val matches = sportsUiState.matches.map { it.toMatchUi() }
 
@@ -232,14 +234,36 @@ fun HomeScreen(
                 }
 
                 // Recently Played
-                item { SectionHeader("Recently Played") }
+                item {
+                    SectionHeader(
+                        "Recently Played",
+                        actionText = "See all",
+                        onActionClick = onSeeAllRecentlyPlayed
+                    )
+                }
                 item {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(recentlyPlayed) { song ->
-                            RecentSongTile(song = song, onClick = { onSongClick(song) })
+                        if (realRecentlyPlayed.isNotEmpty()) {
+                            items(realRecentlyPlayed.take(5)) { item ->
+                                RecentSongTile(
+                                    title = item.title,
+                                    artist = item.artist,
+                                    imageUrl = item.imageUrl,
+                                    onClick = { homeViewModel.playSong(item) }
+                                )
+                            }
+                        } else {
+                            items(HomeSampleData.recentlyPlayed.take(5)) { song ->
+                                RecentSongTile(
+                                    title = song.title,
+                                    artist = song.artist,
+                                    imageUrl = song.imageUrl,
+                                    onClick = { onSongClick(song) }
+                                )
+                            }
                         }
                     }
                 }
@@ -492,7 +516,12 @@ private fun StatusBadge(status: MatchStatus) {
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun RecentSongTile(song: SongUi, onClick: () -> Unit) {
+private fun RecentSongTile(
+    title: String,
+    artist: String,
+    imageUrl: String?,
+    onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(20.dp)
     Box(
         modifier = Modifier
@@ -502,8 +531,8 @@ private fun RecentSongTile(song: SongUi, onClick: () -> Unit) {
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = song.imageUrl,
-            contentDescription = song.title,
+            model = imageUrl,
+            contentDescription = title,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
@@ -519,7 +548,7 @@ private fun RecentSongTile(song: SongUi, onClick: () -> Unit) {
                 .padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 16.dp)
         ) {
             Text(
-                text = song.title,
+                text = title,
                 color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
@@ -527,7 +556,7 @@ private fun RecentSongTile(song: SongUi, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = song.artist,
+                text = artist,
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 13.sp,
                 maxLines = 1,

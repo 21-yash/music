@@ -3,6 +3,10 @@ package com.musicsportsapp.di
 import android.content.Context
 import androidx.room.Room
 import com.musicsportsapp.data.local.db.AppDatabase
+import com.musicsportsapp.data.local.db.dao.FollowedTeamDao
+import com.musicsportsapp.data.local.db.dao.LikedSongDao
+import com.musicsportsapp.data.local.db.dao.PlaylistDao
+import com.musicsportsapp.data.local.db.dao.RecentlyPlayedDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -12,8 +16,6 @@ import javax.inject.Singleton
 
 /**
  * Hilt module providing the Room database and its DAOs.
- *
- * DAOs will be added here as entities are created in future phases.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -28,6 +30,20 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "musicsportsapp.db",
-        ).build()
+        )
+            .fallbackToDestructiveMigration()
+            .build()
     }
+
+    @Provides
+    fun provideRecentlyPlayedDao(db: AppDatabase): RecentlyPlayedDao = db.recentlyPlayedDao()
+
+    @Provides
+    fun provideLikedSongDao(db: AppDatabase): LikedSongDao = db.likedSongDao()
+
+    @Provides
+    fun providePlaylistDao(db: AppDatabase): PlaylistDao = db.playlistDao()
+
+    @Provides
+    fun provideFollowedTeamDao(db: AppDatabase): FollowedTeamDao = db.followedTeamDao()
 }

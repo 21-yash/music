@@ -77,4 +77,10 @@ object NetworkModule {
     fun provideAuthApi(retrofit: Retrofit): AuthApi {
         return retrofit.create(AuthApi::class.java)
     }
+
+    @Provides
+    @Singleton
+    fun provideLibraryApi(retrofit: Retrofit): com.musicsportsapp.data.remote.api.LibraryApi {
+        return retrofit.create(com.musicsportsapp.data.remote.api.LibraryApi::class.java)
+    }
 }

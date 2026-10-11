@@ -28,7 +28,7 @@ import com.musicsportsapp.features.sports.SportsScreen
  * slide animations between bottom-nav destinations.
  */
 
-private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search")
+private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -77,6 +77,11 @@ fun AppNavHost(
                         popUpTo(navController.graph.startDestinationId) { saveState = true }
                         launchSingleTop = true
                         restoreState = true
+                    }
+                },
+                onSeeAllRecentlyPlayed = {
+                    navController.navigate(Screen.ListeningHistory.route) {
+                        launchSingleTop = true
                     }
                 }
             )
@@ -141,11 +146,50 @@ fun AppNavHost(
         }
 
         composable(Screen.Library.route) {
-            LibraryScreen()
+            LibraryScreen(
+                onNavigateToLogin = {
+                    navController.navigate(Screen.Auth.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToHistory = {
+                    navController.navigate(Screen.ListeningHistory.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onPlaylistClick = { playlistId ->
+                    navController.navigate(Screen.Playlist().createRoute(playlistId))
+                }
+            )
+        }
+
+        composable(Screen.ListeningHistory.route) {
+            com.musicsportsapp.features.music.history.ListeningHistoryScreen(
+                onBackClick = { navController.popBackStack() },
+                onNavigateToLogin = {
+                    navController.navigate(Screen.Auth.route) {
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
 
         composable(Screen.Profile.route) {
-            ProfileScreen()
+            ProfileScreen(
+                onBackClick = { navController.popBackStack() },
+                onNavigateToAuth = {
+                    navController.navigate(Screen.Auth.route) {
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        composable(Screen.Auth.route) {
+            com.musicsportsapp.features.auth.AuthScreen(
+                onBackClick = { navController.popBackStack() },
+                onAuthSuccess = { navController.popBackStack() }
+            )
         }
     }
 }

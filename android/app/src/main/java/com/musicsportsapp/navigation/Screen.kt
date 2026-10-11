@@ -70,6 +70,13 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Person,
     )
 
+    data object Auth : Screen(
+        route = "auth",
+        label = "Account",
+        selectedIcon = Icons.Filled.Person,
+        unselectedIcon = Icons.Outlined.Person,
+    )
+
     data class MatchDetails(val matchId: String = "{matchId}") : Screen(
         route = "sports/match/$matchId",
         label = "Match Details",
@@ -105,6 +112,13 @@ sealed class Screen(
     ) {
         fun createRoute(id: String) = "music/album/$id"
     }
+
+    data object ListeningHistory : Screen(
+        route = "music/history",
+        label = "Listening History",
+        selectedIcon = Icons.Filled.LibraryMusic,
+        unselectedIcon = Icons.Outlined.LibraryMusic,
+    )
 
     companion object {
         /** Ordered list of bottom navigation tabs. */

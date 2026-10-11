@@ -28,11 +28,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExtractor
+import com.musicsportsapp.data.repository.RecentlyPlayedRepository
 
 @Singleton
 class MusicPlayerManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: MusicRepository
+    private val repository: MusicRepository,
+    private val recentlyPlayedRepository: RecentlyPlayedRepository,
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
@@ -67,6 +69,11 @@ class MusicPlayerManager @Inject constructor(
         _playbackState.update { it.copy(currentSong = song, error = null, isPlaying = true) } // Optimistic
 
         scope.launch {
+            // Record recently played history in Room
+            try {
+                recentlyPlayedRepository.recordPlay(song)
+            } catch (_: Exception) {}
+
             try {
                 // 1. Ask backend to resolve the stream
                 val streamResult = repository.resolveStream(song.id, song.providerId)
@@ -139,6 +146,22 @@ class MusicPlayerManager @Inject constructor(
 
     fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs)
+    }
+
+    fun seekToRatio(ratio: Float) {
+        val duration = controller?.duration ?: (currentSong?.durationSeconds?.toLong()?.times(1000L) ?: 0L)
+        if (duration > 0) {
+            val targetMs = (duration * ratio.coerceIn(0f, 1f)).toLong()
+            controller?.seekTo(targetMs)
+        }
+    }
+
+    fun skipToNext() {
+        controller?.seekToNextMediaItem()
+    }
+
+    fun skipToPrevious() {
+        controller?.seekToPreviousMediaItem()
     }
 
     fun release() {

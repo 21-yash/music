@@ -51,7 +51,10 @@ class AuthAuthenticator @Inject constructor(
                     null
                 }
             } catch (e: Exception) {
-                runBlocking { tokenStorage.clearTokens() }
+                // Do not clear tokens on network connectivity drops (IOException)
+                if (e !is java.io.IOException) {
+                    runBlocking { tokenStorage.clearTokens() }
+                }
                 null
             }
         }

@@ -140,6 +140,8 @@ private val SleepOptions = listOf(
 @Composable
 fun FullPlayerSheet(
     playbackState: PlaybackState,
+    isLiked: Boolean = false,
+    onLikeClick: () -> Unit = {},
     onPlayPauseClick: () -> Unit,
     onNextClick: () -> Unit,
     onPreviousClick: () -> Unit,
@@ -158,7 +160,6 @@ fun FullPlayerSheet(
     var jamCode by remember { mutableStateOf("X7K9") }
 
     // Other UI-only toggles
-    var liked by remember { mutableStateOf(false) }
     var shuffleOn by remember { mutableStateOf(false) }
     var repeatOn by remember { mutableStateOf(false) }
 
@@ -281,11 +282,11 @@ fun FullPlayerSheet(
                                 modifier = Modifier.basicMarquee()
                             )
                         }
-                        IconButton(onClick = { liked = !liked }) {
+                        IconButton(onClick = onLikeClick) {
                             Icon(
-                                imageVector = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = if (liked) "Unlike" else "Like",
-                                tint = Accent,
+                                imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = if (isLiked) "Unlike" else "Like",
+                                tint = if (isLiked) Color(0xFFEC4899) else Accent,
                                 modifier = Modifier.size(24.dp)
                             )
                         }

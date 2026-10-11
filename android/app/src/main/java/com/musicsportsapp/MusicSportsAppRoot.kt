@@ -23,10 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -34,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,10 +84,51 @@ fun MusicSportsAppRoot(
     
     var showFullPlayer by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
-    // Bottom bar is visible on all bottom-nav tabs, hidden on Profile
+    // Bottom bar is visible on all bottom-nav tabs, hidden on sub-pages
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
-    val showTopBar = currentRoute != Screen.MatchDetails().route
+    // Floating avatar is strictly visible ONLY on the 4 primary tabs: Home, Music, Sports, Library
+    val showFloatingAvatar = currentRoute in Screen.bottomNavItems.map { it.route }
     val showMiniPlayer = currentRoute != Screen.MatchDetails().route
+
+    val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
+    val user by rootViewModel.user.collectAsState()
+    var showSignOutConfirmation by remember { mutableStateOf(false) }
+
+    if (showSignOutConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirmation = false },
+            title = {
+                Text(
+                    text = "Sign Out",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to sign out of your account?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSignOutConfirmation = false
+                        rootViewModel.logout()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Sign Out", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -122,31 +168,57 @@ fun MusicSportsAppRoot(
             }
             
             if (showFullPlayer && playbackState.currentSong != null) {
+                val currentSong = playbackState.currentSong!!
+                val isLiked by rootViewModel.isSongLiked(currentSong.id).collectAsState(initial = false)
                 com.musicsportsapp.features.music.FullPlayerSheet(
                     playbackState = playbackState,
+                    isLiked = isLiked,
+                    onLikeClick = { rootViewModel.toggleLike(currentSong) },
                     onPlayPauseClick = { rootViewModel.togglePlayPause() },
-                    onNextClick = { /* TODO: Hook up next */ },
-                    onPreviousClick = { /* TODO: Hook up previous */ },
-                    onSeek = { /* TODO: Hook up seek */ },
+                    onNextClick = { rootViewModel.skipToNext() },
+                    onPreviousClick = { rootViewModel.skipToPrevious() },
+                    onSeek = { ratio -> rootViewModel.seekToRatio(ratio) },
                     onDismiss = { showFullPlayer = false }
                 )
             }
             
             // Floating Profile Avatar at Top End (gradient circle + dropdown menu)
-            if (showTopBar && currentRoute != Screen.Profile.route && currentRoute != Screen.Search.route) {
+            // Rendered exclusively on Home, Music, Sports, and Library
+            if (showFloatingAvatar) {
                 ProfileAvatarMenu(
-                    // TODO: read the real name / plan from your user state (e.g. RootViewModel)
-                    userName = "Yash",
-                    planLabel = "Premium Member",
+                    isLoggedIn = isLoggedIn,
+                    userName = if (isLoggedIn) (user?.username ?: "User") else "Guest",
+                    planLabel = if (isLoggedIn) (user?.email ?: "Account & Profile") else "Tap to sign in",
                     onProfileClick = {
-                        navController.navigate(Screen.Profile.route) {
+                        if (isLoggedIn) {
+                            navController.navigate(Screen.Profile.route) {
+                                launchSingleTop = true
+                            }
+                        } else {
+                            navController.navigate(Screen.Auth.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
+                    onSignInClick = {
+                        navController.navigate(Screen.Auth.route) {
                             launchSingleTop = true
                         }
                     },
                     onToggleTheme = { rootViewModel.toggleTheme() },
-                    onSettingsClick = { /* TODO: navigate to settings */ },
-                    onHistoryClick = { /* TODO: navigate to listening history */ },
-                    onLogoutClick = { /* TODO: log out */ },
+                    onSettingsClick = {
+                        navController.navigate(Screen.Profile.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onHistoryClick = {
+                        navController.navigate(Screen.ListeningHistory.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onLogoutClick = {
+                        showSignOutConfirmation = true
+                    },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .statusBarsPadding()
@@ -167,9 +239,11 @@ private val AvatarGradient = Brush.linearGradient(
 
 @Composable
 private fun ProfileAvatarMenu(
+    isLoggedIn: Boolean,
     userName: String,
     planLabel: String,
     onProfileClick: () -> Unit,
+    onSignInClick: () -> Unit,
     onToggleTheme: () -> Unit,
     onSettingsClick: () -> Unit,
     onHistoryClick: () -> Unit,
@@ -177,7 +251,7 @@ private fun ProfileAvatarMenu(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val initial = userName.firstOrNull()?.uppercase() ?: "?"
+    val initial = if (isLoggedIn) userName.firstOrNull()?.uppercase() ?: "U" else "?"
 
     Box(modifier = modifier) {
         GradientAvatar(initial = initial, onClick = { expanded = true })
@@ -190,7 +264,7 @@ private fun ProfileAvatarMenu(
             containerColor = MaterialTheme.colorScheme.surface,
             modifier = Modifier.width(220.dp)
         ) {
-            // Header row: tapping it opens the Profile screen (keeps the old avatar behaviour)
+            // Header row: tapping it opens the Profile or Auth screen
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -224,13 +298,19 @@ private fun ProfileAvatarMenu(
             )
             Spacer(Modifier.height(4.dp))
 
-            // Swap for DarkMode / History / Logout if you add material-icons-extended
             ProfileMenuItem("Toggle Theme", Icons.Default.Star) { expanded = false; onToggleTheme() }
-            ProfileMenuItem("Settings", Icons.Default.Settings) { expanded = false; onSettingsClick() }
-            ProfileMenuItem("Listening History", Icons.Default.Refresh) { expanded = false; onHistoryClick() }
-            ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
-                expanded = false
-                onLogoutClick()
+            if (isLoggedIn) {
+                ProfileMenuItem("Settings", Icons.Default.Settings) { expanded = false; onSettingsClick() }
+                ProfileMenuItem("Listening History", Icons.Default.Refresh) { expanded = false; onHistoryClick() }
+                ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
+                    expanded = false
+                    onLogoutClick()
+                }
+            } else {
+                ProfileMenuItem("Sign In", Icons.Default.AccountCircle, tint = MaterialTheme.colorScheme.primary) {
+                    expanded = false
+                    onSignInClick()
+                }
             }
         }
     }

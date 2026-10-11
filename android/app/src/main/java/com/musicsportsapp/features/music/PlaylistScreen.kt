@@ -141,7 +141,9 @@ fun PlaylistScreen(
                                         .size(56.dp)
                                         .clip(CircleShape)
                                         .background(MaterialTheme.colorScheme.primary)
-                                        .clickable { /* Play playlist */ },
+                                        .clickable {
+                                            playlist.songs.firstOrNull()?.let { musicViewModel.playSong(it) }
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(

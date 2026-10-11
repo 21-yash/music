@@ -39,12 +39,38 @@ suspend fun <T> safeApiCall(
     } catch (e: IOException) {
         AppResult.Error(AppError.Network())
     } catch (e: HttpException) {
-        AppResult.Error(
-            AppError.Server(
-                code = "HTTP_${e.code()}",
-                message = e.message() ?: "HTTP error ${e.code()}",
-            )
-        )
+        val errorBody = try { e.response()?.errorBody()?.string() } catch (_: Exception) { null }
+        var errorCode = "HTTP_${e.code()}"
+        var errorMessage = if (e.message().isNotBlank()) e.message() else "HTTP error ${e.code()}"
+
+        if (!errorBody.isNullOrBlank()) {
+            try {
+                val jsonObj = org.json.JSONObject(errorBody)
+                if (jsonObj.has("error")) {
+                    val errObj = jsonObj.getJSONObject("error")
+                    if (errObj.has("code")) errorCode = errObj.getString("code")
+                    if (errObj.has("message")) errorMessage = errObj.getString("message")
+                } else if (jsonObj.has("message")) {
+                    errorMessage = jsonObj.getString("message")
+                }
+            } catch (_: Exception) {
+                val codeMatch = """"code"\s*:\s*"([^"]+)"""".toRegex().find(errorBody)
+                if (codeMatch != null) errorCode = codeMatch.groupValues[1]
+                val msgMatch = """"message"\s*:\s*"([^"]+)"""".toRegex().find(errorBody)
+                if (msgMatch != null) errorMessage = msgMatch.groupValues[1]
+            }
+        }
+
+        val friendlyMessage = errorMessage
+            .replace(Regex("""^[a-zA-Z0-9_.]*:\s*"""), "")
+            .replace(Regex(""";\s*[a-zA-Z0-9_.]*:\s*"""), "; ")
+
+        when (errorCode) {
+            "UNAUTHORIZED" -> AppResult.Error(AppError.Unauthorized(friendlyMessage))
+            "NOT_FOUND" -> AppResult.Error(AppError.NotFound(friendlyMessage))
+            "VALIDATION_ERROR" -> AppResult.Error(AppError.Validation(friendlyMessage))
+            else -> AppResult.Error(AppError.Server(errorCode, friendlyMessage))
+        }
     } catch (e: Exception) {
         AppResult.Error(AppError.Unknown(e.message ?: "An unexpected error occurred"))
     }
