@@ -209,7 +209,9 @@ fun ArtistScreen(
                                         song = song,
                                         onClick = {
                                             musicViewModel.playSong(song)
-                                        }
+                                        },
+                                        onPlayNext = { musicViewModel.playNext(song) },
+                                        onAddToQueue = { musicViewModel.addToQueue(song) }
                                     )
                                 }
                             }

@@ -23,13 +23,14 @@ data class SearchUiState(
     val results: SearchResults? = null,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val searchHistory: List<String> = emptyList() // Could be backed by Room/DataStore later
+    val recentSearches: List<String> = emptyList()
 )
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: MusicRepository,
-    private val playerManager: MusicPlayerManager
+    private val playerManager: MusicPlayerManager,
+    private val recentSearchManager: RecentSearchManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -37,18 +38,40 @@ class SearchViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
+    init {
+        loadRecentSearches()
+    }
+
+    private fun loadRecentSearches() {
+        _uiState.update { it.copy(recentSearches = recentSearchManager.getRecentSearches()) }
+    }
+
     fun updateQuery(newQuery: String) {
         _uiState.update { it.copy(query = newQuery) }
-        triggerSearch(newQuery, _uiState.value.provider)
+        triggerSearch(newQuery, _uiState.value.provider, debounceMs = 500)
+    }
+
+    fun onRecentSearchClicked(recentQuery: String) {
+        _uiState.update { it.copy(query = recentQuery) }
+        triggerSearch(recentQuery, _uiState.value.provider, debounceMs = 0)
+    }
+
+    fun removeRecentSearch(query: String) {
+        val updated = recentSearchManager.removeSearch(query)
+        _uiState.update { it.copy(recentSearches = updated) }
+    }
+
+    fun clearRecentSearches() {
+        val updated = recentSearchManager.clearAll()
+        _uiState.update { it.copy(recentSearches = updated) }
     }
 
     fun updateProvider(newProvider: String) {
         _uiState.update { it.copy(provider = newProvider) }
-        triggerSearch(_uiState.value.query, newProvider)
+        triggerSearch(_uiState.value.query, newProvider, debounceMs = 150)
     }
 
-    private fun triggerSearch(query: String, provider: String) {
-        // Debounce search requests
+    private fun triggerSearch(query: String, provider: String, debounceMs: Long = 500) {
         searchJob?.cancel()
         
         if (query.isBlank()) {
@@ -57,17 +80,21 @@ class SearchViewModel @Inject constructor(
         }
 
         searchJob = viewModelScope.launch {
-            // Wait 500ms before triggering the API call
-            delay(500)
+            if (debounceMs > 0) {
+                delay(debounceMs)
+            }
             
             _uiState.update { it.copy(isLoading = true, error = null) }
             
             when (val result = repository.search(query, provider)) {
                 is AppResult.Success -> {
+                    // Record in local recent searches when search succeeds
+                    val updatedRecent = recentSearchManager.addSearch(query)
                     _uiState.update { 
                         it.copy(
                             results = result.data, 
-                            isLoading = false
+                            isLoading = false,
+                            recentSearches = updatedRecent
                         ) 
                     }
                 }
@@ -85,5 +112,13 @@ class SearchViewModel @Inject constructor(
     
     fun playSong(song: Song) {
         playerManager.playSong(song)
+    }
+
+    fun playNext(song: Song) {
+        playerManager.playNext(song)
+    }
+
+    fun addToQueue(song: Song) {
+        playerManager.addToQueue(song)
     }
 }

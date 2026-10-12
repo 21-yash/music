@@ -6,6 +6,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,7 +89,7 @@ fun MusicSportsAppRoot(
     // Bottom bar is visible on all bottom-nav tabs, hidden on sub-pages
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
     // Floating avatar is strictly visible ONLY on the 4 primary tabs: Home, Music, Sports, Library
-    val showFloatingAvatar = currentRoute in Screen.bottomNavItems.map { it.route }
+    val showFloatingAvatar = currentRoute in Screen.bottomNavItems.map { it.route } && !showFullPlayer
     val showMiniPlayer = currentRoute != Screen.MatchDetails().route
 
     val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
@@ -167,24 +169,9 @@ fun MusicSportsAppRoot(
                 }
             }
             
-            if (showFullPlayer && playbackState.currentSong != null) {
-                val currentSong = playbackState.currentSong!!
-                val isLiked by rootViewModel.isSongLiked(currentSong.id).collectAsState(initial = false)
-                com.musicsportsapp.features.music.FullPlayerSheet(
-                    playbackState = playbackState,
-                    isLiked = isLiked,
-                    onLikeClick = { rootViewModel.toggleLike(currentSong) },
-                    onPlayPauseClick = { rootViewModel.togglePlayPause() },
-                    onNextClick = { rootViewModel.skipToNext() },
-                    onPreviousClick = { rootViewModel.skipToPrevious() },
-                    onSeek = { ratio -> rootViewModel.seekToRatio(ratio) },
-                    onDismiss = { showFullPlayer = false }
-                )
-            }
-            
             // Floating Profile Avatar at Top End (gradient circle + dropdown menu)
-            // Rendered exclusively on Home, Music, Sports, and Library
-            if (showFloatingAvatar) {
+            // Rendered exclusively on Home, Music, Sports, and Library (hidden when FullPlayer is open)
+            if (showFloatingAvatar && !showFullPlayer) {
                 ProfileAvatarMenu(
                     isLoggedIn = isLoggedIn,
                     userName = if (isLoggedIn) (user?.username ?: "User") else "Guest",
@@ -223,6 +210,59 @@ fun MusicSportsAppRoot(
                         .align(Alignment.TopEnd)
                         .statusBarsPadding()
                         .padding(top = 16.dp, end = 24.dp)
+                )
+            }
+            
+            AnimatedVisibility(
+                visible = showFullPlayer && playbackState.currentSong != null,
+                enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(320, easing = FastOutSlowInEasing)),
+                exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(280, easing = FastOutSlowInEasing))
+            ) {
+                val currentSong = playbackState.currentSong ?: return@AnimatedVisibility
+                val isLiked by rootViewModel.isSongLiked(currentSong.id).collectAsState(initial = false)
+                val queue by rootViewModel.queue.collectAsState()
+                val currentIndex by rootViewModel.currentIndex.collectAsState()
+                val isRepeatOne by rootViewModel.isRepeatOne.collectAsState()
+                val isShuffle by rootViewModel.isShuffle.collectAsState()
+                val currentLyrics by rootViewModel.currentLyrics.collectAsState()
+                val isLyricsLoading by rootViewModel.isLyricsLoading.collectAsState()
+                val sleepSelected by rootViewModel.sleepSelected.collectAsState()
+                val sleepRemainingSeconds by rootViewModel.sleepRemainingSeconds.collectAsState()
+                val jamState by rootViewModel.jamState.collectAsState()
+
+                com.musicsportsapp.features.music.FullPlayerSheet(
+                    playbackState = playbackState,
+                    queue = queue,
+                    currentIndex = currentIndex,
+                    isRepeatOne = isRepeatOne,
+                    isShuffle = isShuffle,
+                    currentLyrics = currentLyrics,
+                    isLyricsLoading = isLyricsLoading,
+                    sleepSelected = sleepSelected,
+                    sleepRemainingSeconds = sleepRemainingSeconds,
+                    jamState = jamState,
+                    isLiked = isLiked,
+                    onLikeClick = { rootViewModel.toggleLike(currentSong) },
+                    onPlayPauseClick = { rootViewModel.togglePlayPause() },
+                    onNextClick = { rootViewModel.skipToNext() },
+                    onPreviousClick = { rootViewModel.skipToPrevious() },
+                    onSeek = { ratio -> rootViewModel.seekToRatio(ratio) },
+                    onSeekToMs = { ms -> rootViewModel.seekTo(ms) },
+                    onPlayQueueIndex = { idx -> rootViewModel.playQueueIndex(idx) },
+                    onRemoveQueueItem = { idx -> rootViewModel.removeQueueItem(idx) },
+                    onReorderQueue = { from, to -> rootViewModel.reorderQueue(from, to) },
+                    onToggleRepeat = { rootViewModel.toggleRepeat() },
+                    onToggleShuffle = { rootViewModel.toggleShuffle() },
+                    onSelectSleepOption = { opt -> rootViewModel.setSleepTimer(opt) },
+                    onStartJam = { rootViewModel.startJam() },
+                    onJoinJam = { code -> rootViewModel.joinJam(code) },
+                    onLeaveJam = { rootViewModel.leaveJam() },
+                    onRemoveJamSong = { idx -> rootViewModel.removeSongFromJam(idx) },
+                    onReorderJamQueue = { from, to -> rootViewModel.reorderJamQueue(from, to) },
+                    onToggleGuestReorder = { allow -> rootViewModel.setAttendeeReorderPermission(allow) },
+                    onPlayNext = { song -> rootViewModel.playNext(song) },
+                    onAddToQueue = { song -> rootViewModel.addToQueue(song) },
+                    onDismiss = { showFullPlayer = false }
                 )
             }
         }

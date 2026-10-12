@@ -66,4 +66,22 @@ interface MusicApi {
     suspend fun getHomeData(
         @Query("provider") provider: String? = null
     ): ApiResponse<com.musicsportsapp.features.music.data.dto.HomeDataDto>
+
+    @GET("music/related")
+    suspend fun getRelated(
+        @Query("songId") songId: String,
+        @Query("provider") provider: String? = null,
+        @Query("title") title: String? = null,
+        @Query("artist") artist: String? = null,
+        @Query("limit") limit: Int = 10
+    ): ApiResponse<com.musicsportsapp.features.music.data.dto.RelatedSongsResponseDto>
+
+    @GET("music/lyrics")
+    suspend fun getLyrics(
+        @Query("title") title: String,
+        @Query("artist") artist: String,
+        @Query("duration") duration: Int? = null,
+        @Query("songId") songId: String? = null,
+        @Query("provider") provider: String? = null
+    ): ApiResponse<com.musicsportsapp.features.music.data.dto.LyricsResponseDto>
 }

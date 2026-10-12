@@ -50,4 +50,26 @@ class MusicRepository @Inject constructor(
         return safeApiCall { api.getHomeData(provider) }
             .map { it.toDomain() }
     }
+
+    suspend fun getRelatedSongs(
+        songId: String,
+        provider: String? = null,
+        title: String? = null,
+        artist: String? = null,
+        limit: Int = 10
+    ): AppResult<List<Song>> {
+        return safeApiCall { api.getRelated(songId, provider, title, artist, limit) }
+            .map { response -> response.songs.map { it.toDomain() } }
+    }
+
+    suspend fun getLyrics(
+        title: String,
+        artist: String,
+        duration: Int? = null,
+        songId: String? = null,
+        provider: String? = null
+    ): AppResult<Lyrics> {
+        return safeApiCall { api.getLyrics(title, artist, duration, songId, provider) }
+            .map { it.toDomain() }
+    }
 }

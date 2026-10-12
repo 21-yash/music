@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -30,12 +31,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -296,6 +299,8 @@ fun HomeScreen(
                     TrendingSongRow(
                         song = song,
                         onClick = { musicViewModel.playSong(song) },
+                        onPlayNext = { musicViewModel.playNext(song) },
+                        onAddToQueue = { musicViewModel.addToQueue(song) },
                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
                     )
                 }
@@ -421,41 +426,48 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.Bottom)
         ) {
             StatusBadge(match.status)
 
             Text(
                 text = match.title,
                 color = Color.White,
-                fontSize = 22.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.5.sp,
+                maxLines = 1,
+                modifier = Modifier.basicMarquee()
             )
 
             if (match.scores.isNotEmpty()) {
                 Text(
                     text = scoreText(match.scores),
                     color = Color(0xFF94A3B8),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee()
                 )
             } else if (match.subtitle != null) {
                 Text(
                     text = match.subtitle,
                     color = Color(0xFF94A3B8),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee()
                 )
             }
 
             Text(
                 text = match.summary,
                 color = match.status.highlightColor,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 2.dp)
+                maxLines = 1,
+                modifier = Modifier.padding(top = 2.dp).basicMarquee()
             )
         }
     }
@@ -571,9 +583,16 @@ private fun RecentSongTile(
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun TrendingSongRow(song: Song, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun TrendingSongRow(
+    song: Song,
+    onClick: () -> Unit,
+    onPlayNext: () -> Unit = {},
+    onAddToQueue: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val palette = LocalHomePalette.current
     val shape = RoundedCornerShape(16.dp)
+    var showOptions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Row(
         modifier = modifier
@@ -616,16 +635,25 @@ private fun TrendingSongRow(song: Song, onClick: () -> Unit, modifier: Modifier 
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(palette.surfaceHighlight)
-                .clickable(onClick = onClick),
+                .clickable { showOptions = true },
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.PlayArrow,
-                contentDescription = "Play ${song.title}",
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options for ${song.title}",
                 tint = palette.textPrimary,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
+    }
+
+    if (showOptions) {
+        com.musicsportsapp.features.music.components.SongOptionsSheet(
+            song = song,
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onDismiss = { showOptions = false }
+        )
     }
 }
 
@@ -646,11 +674,23 @@ private fun com.musicsportsapp.features.sports.domain.model.MatchSummary.toMatch
         scores.add(ScoreUi(parts[0].trim(), if (parts.size > 1) parts[1].removeSuffix(")") else ""))
     }
 
+    val stadiumDrawables = listOf(
+        com.musicsportsapp.R.drawable.stadium_1,
+        com.musicsportsapp.R.drawable.stadium_2,
+        com.musicsportsapp.R.drawable.stadium_3,
+        com.musicsportsapp.R.drawable.stadium_4,
+        com.musicsportsapp.R.drawable.stadium_5,
+        com.musicsportsapp.R.drawable.stadium_7,
+        com.musicsportsapp.R.drawable.stadium_8,
+        com.musicsportsapp.R.drawable.stadium_9,
+    )
+    val stadiumImg = stadiumDrawables[kotlin.math.abs(id.hashCode()) % stadiumDrawables.size]
+
     return MatchUi(
         id = id,
         title = "${team1.shortName} vs ${team2.shortName}",
         status = status,
-        image = "https://images.unsplash.com/photo-1577223625816-7546f13df25d?w=800&q=80",
+        image = stadiumImg,
         scores = scores,
         subtitle = matchDesc,
         summary = this.status

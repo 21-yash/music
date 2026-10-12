@@ -1,18 +1,21 @@
 package com.musicsportsapp.features.search
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -22,13 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.foundation.Image
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.musicsportsapp.features.music.components.SongItem
+import com.musicsportsapp.features.music.domain.model.Song
 
 @Composable
 fun SearchScreen(
@@ -65,25 +68,43 @@ fun SearchScreen(
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.3f))
                     .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
             ) {
-                BasicTextField(
-                    value = uiState.query,
-                    onValueChange = { viewModel.updateQuery(it) },
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
-                    singleLine = true,
+                Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    decorationBox = { innerTextField ->
-                        if (uiState.query.isEmpty()) {
-                            Text(
-                                text = if (uiState.provider == "jiosaavn") "Searching JioSaavn..." else "Searching YouTube...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 15.sp
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = uiState.query,
+                        onValueChange = { viewModel.updateQuery(it) },
+                        textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (uiState.query.isEmpty()) {
+                                Text(
+                                    text = if (uiState.provider == "jiosaavn") "Searching JioSaavn..." else "Searching YouTube...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (uiState.query.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.updateQuery("") },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear search",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
-                        innerTextField()
                     }
-                )
+                }
             }
             
             Spacer(modifier = Modifier.width(12.dp))
@@ -139,24 +160,161 @@ fun SearchScreen(
             }
         }
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         if (uiState.query.isBlank()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(bottom = 120.dp),
-                contentAlignment = Alignment.TopCenter
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
-                Text(
-                    text = "Type to start searching...",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 40.dp)
-                )
+                if (uiState.recentSearches.isNotEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Recent Searches",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            TextButton(onClick = { viewModel.clearRecentSearches() }) {
+                                Text(
+                                    text = "Clear all",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFFFF2A5F),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    items(uiState.recentSearches) { query ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.onRecentSearchClicked(query) }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = Color(0xFFFF2A5F).copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = query,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { viewModel.removeRecentSearch(query) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f)
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "Browse Categories",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                item {
+                    val categories = listOf(
+                        "Bollywood", "Pop", "Rock", "Hip-Hop",
+                        "Classical", "Jazz", "EDM", "Indie",
+                        "Cricket", "Football", "Tennis", "Basketball",
+                    )
+                    val categoryColors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.secondaryContainer,
+                        MaterialTheme.colorScheme.tertiaryContainer,
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        for (i in categories.indices step 2) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                for (j in 0..1) {
+                                    val idx = i + j
+                                    if (idx < categories.size) {
+                                        Card(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(72.dp)
+                                                .clickable { viewModel.onRecentSearchClicked(categories[idx]) },
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = categoryColors[idx % categoryColors.size].copy(alpha = 0.35f),
+                                            ),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(14.dp),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                Text(
+                                                    text = categories[idx],
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
             SearchResultsContent(
                 uiState = uiState,
-                onSongClick = { viewModel.playSong(it) }
+                onSongClick = { viewModel.playSong(it) },
+                onPlayNext = { viewModel.playNext(it) },
+                onAddToQueue = { viewModel.addToQueue(it) }
             )
         }
     }
@@ -165,11 +323,13 @@ fun SearchScreen(
 @Composable
 fun SearchResultsContent(
     uiState: SearchUiState,
-    onSongClick: (com.musicsportsapp.features.music.domain.model.Song) -> Unit
+    onSongClick: (Song) -> Unit,
+    onPlayNext: (Song) -> Unit = {},
+    onAddToQueue: (Song) -> Unit = {}
 ) {
     if (uiState.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Color.White)
+            CircularProgressIndicator(color = Color(0xFFFF2A5F))
         }
         return
     }
@@ -187,7 +347,7 @@ fun SearchResultsContent(
             Text(
                 text = "No results found for \"${uiState.query}\"",
                 fontSize = 15.sp,
-                color = Color(0xFF94A3B8),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 32.dp)
             )
         }
@@ -203,6 +363,8 @@ fun SearchResultsContent(
                 SongItem(
                     song = song,
                     onClick = { onSongClick(song) },
+                    onPlayNext = { onPlayNext(song) },
+                    onAddToQueue = { onAddToQueue(song) },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
@@ -216,66 +378,7 @@ fun SectionHeader(title: String) {
         text = title,
         fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onBackground,
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
     )
-}
-
-@Composable
-fun BrowseCategories() {
-    Text(
-        text = "Browse Categories",
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(horizontal = 20.dp),
-    )
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    val categories = listOf(
-        "Bollywood", "Pop", "Rock", "Hip-Hop",
-        "Classical", "Jazz", "EDM", "Indie",
-        "Cricket", "Football", "Tennis", "Basketball",
-    )
-
-    val categoryColors = listOf(
-        MaterialTheme.colorScheme.primaryContainer,
-        MaterialTheme.colorScheme.secondaryContainer,
-        MaterialTheme.colorScheme.tertiaryContainer,
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-    )
-
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        items(categories.size) { index ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = categoryColors[index % categoryColors.size].copy(alpha = 0.4f),
-                ),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        text = categories[index],
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-        }
-    }
 }

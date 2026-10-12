@@ -199,3 +199,35 @@ sealed class StreamInfoDto {
         )
     }
 }
+
+@Serializable
+data class RelatedSongsResponseDto(
+    val songs: List<SongDto> = emptyList()
+)
+
+@Serializable
+data class LyricLineDto(
+    val timeMs: Long = 0L,
+    val text: String = ""
+) {
+    fun toDomain() = com.musicsportsapp.features.music.domain.model.LyricLine(
+        timeMs = timeMs,
+        text = text
+    )
+}
+
+@Serializable
+data class LyricsResponseDto(
+    val isSynced: Boolean = false,
+    val lines: List<LyricLineDto> = emptyList(),
+    val plainLyrics: String = "",
+    val source: String = "none"
+) {
+    fun toDomain() = com.musicsportsapp.features.music.domain.model.Lyrics(
+        isSynced = isSynced,
+        lines = lines.map { it.toDomain() },
+        plainLyrics = plainLyrics,
+        source = source
+    )
+}
+

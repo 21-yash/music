@@ -177,6 +177,8 @@ fun PlaylistScreen(
                             com.musicsportsapp.features.music.components.SongItem(
                                 song = song,
                                 onClick = { musicViewModel.playSong(song) },
+                                onPlayNext = { musicViewModel.playNext(song) },
+                                onAddToQueue = { musicViewModel.addToQueue(song) },
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                         }

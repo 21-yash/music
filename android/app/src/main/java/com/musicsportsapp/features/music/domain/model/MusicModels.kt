@@ -104,3 +104,15 @@ sealed class StreamInfo {
         val message: String
     ) : StreamInfo()
 }
+
+data class LyricLine(
+    val timeMs: Long,
+    val text: String
+)
+
+data class Lyrics(
+    val isSynced: Boolean,
+    val lines: List<LyricLine>,
+    val plainLyrics: String,
+    val source: String
+)

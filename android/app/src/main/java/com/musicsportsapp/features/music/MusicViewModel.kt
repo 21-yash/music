@@ -74,6 +74,14 @@ class MusicViewModel @Inject constructor(
         playerManager.playSong(song)
     }
 
+    fun playNext(song: Song) {
+        playerManager.playNext(song)
+    }
+
+    fun addToQueue(song: Song) {
+        playerManager.addToQueue(song)
+    }
+
     fun togglePlayPause() {
         playerManager.togglePlayPause()
     }

@@ -9,26 +9,30 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import com.musicsportsapp.BuildConfig
+import com.musicsportsapp.core.domain.AppResult
+import com.musicsportsapp.data.repository.RecentlyPlayedRepository
+import com.musicsportsapp.features.music.data.repository.MusicRepository
+import com.musicsportsapp.features.music.domain.model.Lyrics
 import com.musicsportsapp.features.music.domain.model.Song
+import com.musicsportsapp.features.music.domain.model.StreamInfo
+import com.musicsportsapp.features.music.util.SongDeduplicator
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import javax.inject.Inject
-import javax.inject.Singleton
-import com.musicsportsapp.features.music.domain.model.StreamInfo
-import com.musicsportsapp.features.music.data.repository.MusicRepository
-import com.musicsportsapp.core.domain.AppResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExtractor
-import com.musicsportsapp.data.repository.RecentlyPlayedRepository
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Singleton
 class MusicPlayerManager @Inject constructor(
@@ -43,7 +47,41 @@ class MusicPlayerManager @Inject constructor(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
-    private var currentSong: Song? = null
+    private val _queue = MutableStateFlow<List<Song>>(emptyList())
+    val queue: StateFlow<List<Song>> = _queue.asStateFlow()
+
+    private val _currentIndex = MutableStateFlow(0)
+    val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
+
+    // Binary repeat mode: false = OFF, true = ON (repeats current song)
+    private val _isRepeatOne = MutableStateFlow(false)
+    val isRepeatOne: StateFlow<Boolean> = _isRepeatOne.asStateFlow()
+
+    private val _isShuffle = MutableStateFlow(false)
+    val isShuffle: StateFlow<Boolean> = _isShuffle.asStateFlow()
+
+    // Lyrics state
+    private val _currentLyrics = MutableStateFlow<Lyrics?>(null)
+    val currentLyrics: StateFlow<Lyrics?> = _currentLyrics.asStateFlow()
+
+    private val _isLyricsLoading = MutableStateFlow(false)
+    val isLyricsLoading: StateFlow<Boolean> = _isLyricsLoading.asStateFlow()
+
+    // Sleep timer stop hook
+    var onTrackEndedListener: (() -> Unit)? = null
+
+    // Session-based deduplication tracker
+    private val sessionPlayedIds = mutableSetOf<String>()
+
+    // Tracks IDs of songs automatically appended as recommendations
+    private val recommendedSongIds = mutableSetOf<String>()
+
+    // Personal queue isolation for Jam sessions
+    private var stashedPersonalQueue: List<Song>? = null
+    private var stashedPersonalIndex: Int? = null
+
+    private var positionTrackerJob: Job? = null
+    private var isFetchingRecommendations = false
 
     init {
         initializeController()
@@ -64,9 +102,49 @@ class MusicPlayerManager @Inject constructor(
         )
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Playback actions
+    // ─────────────────────────────────────────────────────────────
+
     fun playSong(song: Song) {
-        currentSong = song
-        _playbackState.update { it.copy(currentSong = song, error = null, isPlaying = true) } // Optimistic
+        recommendedSongIds.clear()
+        sessionPlayedIds.add(song.id)
+        _queue.value = listOf(song)
+        _currentIndex.value = 0
+        loadAndPlay(song)
+
+        // Instant recommendation pre-population (Spotify-style)
+        prefetchAutoplayRecommendations(song)
+    }
+
+    fun setQueue(songs: List<Song>, startIndex: Int = 0) {
+        if (songs.isEmpty()) return
+        recommendedSongIds.clear()
+        val validIndex = startIndex.coerceIn(0, songs.size - 1)
+        _queue.value = songs
+        _currentIndex.value = validIndex
+        val target = songs[validIndex]
+        sessionPlayedIds.add(target.id)
+        loadAndPlay(target)
+
+        if (songs.size - validIndex <= 2) {
+            prefetchAutoplayRecommendations(target)
+        }
+    }
+
+    private fun loadAndPlay(song: Song) {
+        _playbackState.update { 
+            it.copy(
+                currentSong = song, 
+                error = null, 
+                isPlaying = true,
+                playbackPositionMs = 0L,
+                bufferedPositionMs = 0L
+            ) 
+        }
+
+        // Fetch lyrics
+        fetchLyrics(song)
 
         scope.launch {
             // Record recently played history in Room
@@ -75,14 +153,14 @@ class MusicPlayerManager @Inject constructor(
             } catch (_: Exception) {}
 
             try {
-                // 1. Ask backend to resolve the stream
+                // 1. Resolve stream via backend
                 val streamResult = repository.resolveStream(song.id, song.providerId)
                 if (streamResult !is AppResult.Success) {
                     _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
                     return@launch
                 }
 
-                // 2. Extract final media URI based on provider type
+                // 2. Extract media URI
                 val finalUri = when (val info = streamResult.data) {
                     is StreamInfo.JioSaavn -> info.url
                     is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
@@ -111,8 +189,67 @@ class MusicPlayerManager @Inject constructor(
                     prepare()
                     play()
                 }
+
+                startPositionTracking()
             } catch (e: Exception) {
                 _playbackState.update { it.copy(error = e.message ?: "Unknown playback error", isPlaying = false) }
+            }
+        }
+    }
+
+    private fun fetchLyrics(song: Song) {
+        scope.launch {
+            _isLyricsLoading.value = true
+            _currentLyrics.value = null
+            try {
+                val res = repository.getLyrics(
+                    title = song.title,
+                    artist = song.primaryArtistName,
+                    duration = song.durationSeconds,
+                    songId = song.id,
+                    provider = song.providerId
+                )
+                if (res is AppResult.Success) {
+                    _currentLyrics.value = res.data
+                } else {
+                    _currentLyrics.value = null
+                }
+            } catch (_: Exception) {
+                _currentLyrics.value = null
+            } finally {
+                _isLyricsLoading.value = false
+            }
+        }
+    }
+
+    private fun prefetchAutoplayRecommendations(seedSong: Song) {
+        if (isFetchingRecommendations) return
+        isFetchingRecommendations = true
+        scope.launch {
+            try {
+                val res = repository.getRelatedSongs(
+                    songId = seedSong.id,
+                    provider = seedSong.providerId,
+                    title = seedSong.title,
+                    artist = seedSong.primaryArtistName,
+                    limit = 10
+                )
+                if (res is AppResult.Success) {
+                    val currentList = _queue.value
+                    // Eliminate duplicates, covers, and remixes
+                    val unique = SongDeduplicator.filterDuplicateSongs(
+                        incoming = res.data,
+                        existing = currentList,
+                        sessionHistoryIds = sessionPlayedIds
+                    )
+                    if (unique.isNotEmpty()) {
+                        recommendedSongIds.addAll(unique.map { it.id })
+                        _queue.update { it + unique }
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                isFetchingRecommendations = false
             }
         }
     }
@@ -122,11 +259,8 @@ class MusicPlayerManager @Inject constructor(
             val url = "https://www.youtube.com/watch?v=$videoId"
             val extractor = NewPipe.getService(0).getStreamExtractor(url) as YoutubeStreamExtractor
             extractor.fetchPage()
-            
-            // Get the best audio-only stream
             val audioStreams = extractor.audioStreams
             val bestAudio = audioStreams.maxByOrNull { it.averageBitrate }
-            
             return@withContext bestAudio?.content ?: audioStreams.firstOrNull()?.content
         } catch (e: Exception) {
             e.printStackTrace()
@@ -138,33 +272,223 @@ class MusicPlayerManager @Inject constructor(
         controller?.let {
             if (it.isPlaying) {
                 it.pause()
+                stopPositionTracking()
             } else {
                 it.play()
+                startPositionTracking()
             }
         }
     }
 
+    fun pause() {
+        controller?.pause()
+        stopPositionTracking()
+    }
+
     fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs)
+        _playbackState.update { it.copy(playbackPositionMs = positionMs) }
     }
 
     fun seekToRatio(ratio: Float) {
-        val duration = controller?.duration ?: (currentSong?.durationSeconds?.toLong()?.times(1000L) ?: 0L)
+        val duration = controller?.duration?.takeIf { it > 0 }
+            ?: (playbackState.value.currentSong?.durationSeconds?.toLong()?.times(1000L) ?: 0L)
         if (duration > 0) {
             val targetMs = (duration * ratio.coerceIn(0f, 1f)).toLong()
-            controller?.seekTo(targetMs)
+            seekTo(targetMs)
         }
     }
 
     fun skipToNext() {
-        controller?.seekToNextMediaItem()
+        if (_isRepeatOne.value) {
+            seekTo(0)
+            controller?.play()
+            return
+        }
+
+        val q = _queue.value
+        val nextIdx = _currentIndex.value + 1
+        if (nextIdx in q.indices) {
+            _currentIndex.value = nextIdx
+            loadAndPlay(q[nextIdx])
+            if (q.size - nextIdx <= 2) {
+                prefetchAutoplayRecommendations(q[nextIdx])
+            }
+        } else {
+            // Queue ended, if we have a current song try to fetch more recommendations
+            val curr = playbackState.value.currentSong
+            if (curr != null) {
+                prefetchAutoplayRecommendations(curr)
+            }
+        }
     }
 
     fun skipToPrevious() {
-        controller?.seekToPreviousMediaItem()
+        val currentPos = controller?.currentPosition ?: 0L
+        if (currentPos > 3000L) {
+            seekTo(0)
+            return
+        }
+
+        val prevIdx = _currentIndex.value - 1
+        val q = _queue.value
+        if (prevIdx >= 0 && prevIdx in q.indices) {
+            _currentIndex.value = prevIdx
+            loadAndPlay(q[prevIdx])
+        } else {
+            seekTo(0)
+        }
+    }
+
+    fun playQueueIndex(index: Int) {
+        val q = _queue.value
+        if (index in q.indices) {
+            _currentIndex.value = index
+            loadAndPlay(q[index])
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Queue modifications
+    // ─────────────────────────────────────────────────────────────
+
+    fun addToQueue(song: Song) {
+        if (_queue.value.isEmpty() || playbackState.value.currentSong == null) {
+            playSong(song)
+            return
+        }
+        recommendedSongIds.remove(song.id)
+        _queue.update { current ->
+            val filtered = current.filterNot { SongDeduplicator.areSongsEquivalent(it, song) }.toMutableList()
+            val currIdx = _currentIndex.value
+            // Find the first recommended song after currentIndex so user queue plays first
+            val firstRecIdx = filtered.indices
+                .filter { it > currIdx }
+                .firstOrNull { filtered[it].id in recommendedSongIds }
+
+            val insertAt = firstRecIdx ?: filtered.size
+            filtered.add(insertAt, song)
+            filtered
+        }
+    }
+
+    fun playNext(song: Song) {
+        if (_queue.value.isEmpty() || playbackState.value.currentSong == null) {
+            playSong(song)
+            return
+        }
+        recommendedSongIds.remove(song.id)
+        _queue.update { current ->
+            val filtered = current.filterNot { SongDeduplicator.areSongsEquivalent(it, song) }.toMutableList()
+            val insertAt = (_currentIndex.value + 1).coerceAtMost(filtered.size)
+            filtered.add(insertAt, song)
+            filtered
+        }
+    }
+
+    fun removeQueueItem(index: Int) {
+        val list = _queue.value.toMutableList()
+        if (index !in list.indices) return
+        list.removeAt(index)
+        _queue.value = list
+        if (index < _currentIndex.value) {
+            _currentIndex.value = (_currentIndex.value - 1).coerceAtLeast(0)
+        } else if (index == _currentIndex.value) {
+            if (_currentIndex.value in list.indices) {
+                loadAndPlay(list[_currentIndex.value])
+            }
+        }
+    }
+
+    fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        val list = _queue.value.toMutableList()
+        if (fromIndex !in list.indices || toIndex !in list.indices || fromIndex == toIndex) return
+        val item = list.removeAt(fromIndex)
+        list.add(toIndex, item)
+        _queue.value = list
+
+        val current = _currentIndex.value
+        if (current == fromIndex) {
+            _currentIndex.value = toIndex
+        } else if (fromIndex < current && toIndex >= current) {
+            _currentIndex.value = current - 1
+        } else if (fromIndex > current && toIndex <= current) {
+            _currentIndex.value = current + 1
+        }
+    }
+
+    // Binary repeat mode: OFF vs ON
+    fun toggleRepeat() {
+        _isRepeatOne.update { !it }
+    }
+
+    fun toggleShuffle() {
+        _isShuffle.update { !it }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Queue Isolation for Jam Sessions
+    // ─────────────────────────────────────────────────────────────
+
+    fun stashPersonalQueue() {
+        stashedPersonalQueue = _queue.value
+        stashedPersonalIndex = _currentIndex.value
+    }
+
+    fun restorePersonalQueue() {
+        stashedPersonalQueue?.let { stashed ->
+            _queue.value = stashed
+            _currentIndex.value = stashedPersonalIndex?.coerceIn(0, (stashed.size - 1).coerceAtLeast(0)) ?: 0
+            stashedPersonalQueue = null
+            stashedPersonalIndex = null
+        }
+    }
+
+    fun setJamQueue(jamQueue: List<Song>, targetSong: Song? = null) {
+        _queue.value = jamQueue
+        if (targetSong != null) {
+            val idx = jamQueue.indexOfFirst { it.id == targetSong.id }
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Position Tracker & ExoPlayer Listener
+    // ─────────────────────────────────────────────────────────────
+
+    private fun startPositionTracking() {
+        positionTrackerJob?.cancel()
+        positionTrackerJob = scope.launch {
+            while (isActive) {
+                val c = controller
+                if (c != null && c.isPlaying) {
+                    val pos = c.currentPosition
+                    val dur = c.duration.takeIf { it > 0 }
+                        ?: (playbackState.value.currentSong?.durationSeconds?.toLong()?.times(1000L) ?: 0L)
+                    val buf = c.bufferedPosition
+                    _playbackState.update { 
+                        it.copy(
+                            playbackPositionMs = pos,
+                            durationMs = dur,
+                            bufferedPositionMs = buf,
+                            isPlaying = true
+                        ) 
+                    }
+                }
+                delay(250)
+            }
+        }
+    }
+
+    private fun stopPositionTracking() {
+        positionTrackerJob?.cancel()
+        positionTrackerJob = null
     }
 
     fun release() {
+        stopPositionTracking()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller?.removeListener(playerListener)
     }
@@ -172,11 +496,27 @@ class MusicPlayerManager @Inject constructor(
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playbackState.update { it.copy(isPlaying = isPlaying) }
+            if (isPlaying) {
+                startPositionTracking()
+            } else {
+                stopPositionTracking()
+            }
         }
 
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) {
-                _playbackState.update { it.copy(isPlaying = false) }
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_ENDED) {
+                val listener = onTrackEndedListener
+                if (listener != null) {
+                    onTrackEndedListener = null
+                    listener.invoke()
+                    return
+                }
+                if (_isRepeatOne.value) {
+                    controller?.seekTo(0)
+                    controller?.play()
+                } else {
+                    skipToNext()
+                }
             }
         }
 
@@ -187,9 +527,7 @@ class MusicPlayerManager @Inject constructor(
                     error = error.message ?: "Unknown playback error"
                 ) 
             }
+            stopPositionTracking()
         }
-
-        // Ideally we'd set up a coroutine to poll position when playing
-        // but for simplicity we rely on manual updates or basic state changes here.
     }
 }
