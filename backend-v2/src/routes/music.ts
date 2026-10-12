@@ -31,4 +31,10 @@ router.get('/artists/:id', validate({ params: idParamSchema }), musicController.
 /** Get playlist details */
 router.get('/playlists/:id', validate({ params: idParamSchema }), musicController.getPlaylist);
 
+/** Get related/recommended songs */
+router.get('/related', musicController.getRelated);
+
+/** Get synchronized or plain lyrics */
+router.get('/lyrics', musicController.getLyrics);
+
 export default router;

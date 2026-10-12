@@ -3,6 +3,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { registerSportsHandlers } from './sportsHandler';
+import { registerJamHandlers } from './jamHandler';
 import { SportsWorker } from '../jobs/sportsWorker';
 
 let io: SocketIOServer | null = null;
@@ -14,7 +15,7 @@ let sportsWorker: SportsWorker | null = null;
 export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   const origins = env.CORS_ORIGINS.split(',').map((o) => o.trim());
 
-  io = new SocketIOServer(httpServer, {
+  const server = new SocketIOServer(httpServer, {
     cors: {
       origin: origins.includes('*') ? true : origins,
       methods: ['GET', 'POST'],
@@ -23,16 +24,18 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
     pingInterval: 25_000,
     pingTimeout: 20_000,
   });
+  io = server;
 
   // Start the demand-driven sports worker
-  sportsWorker = new SportsWorker(io, 10_000); // 10 second polling interval
+  sportsWorker = new SportsWorker(server, 15_000); // 15 second polling interval
   sportsWorker.start();
 
-  io.on('connection', (socket) => {
+  server.on('connection', (socket) => {
     logger.info({ socketId: socket.id }, 'Socket.IO client connected');
 
     // Register domain handlers
     registerSportsHandlers(socket);
+    registerJamHandlers(server, socket);
 
     socket.on('disconnect', (reason) => {
       logger.info(

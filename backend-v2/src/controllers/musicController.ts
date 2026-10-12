@@ -138,3 +138,48 @@ export async function stream(req: Request, res: Response, next: NextFunction): P
     next(error);
   }
 }
+
+/**
+ * Get related/recommended songs for a song.
+ */
+export async function getRelated(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const songId = (req.query.songId || req.query.id) as string;
+    const provider = req.query.provider as string | undefined;
+    const seedTitle = req.query.title as string | undefined;
+    const seedArtist = req.query.artist as string | undefined;
+
+    if (!songId) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Song ID is required' } });
+      return;
+    }
+
+    const songs = await musicService.getRelatedSongs(songId, provider, seedTitle, seedArtist);
+    sendSuccess(res, { songs });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get synchronized or plain lyrics for a track.
+ */
+export async function getLyrics(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const title = req.query.title as string;
+    const artist = (req.query.artist as string) || '';
+    const duration = Number(req.query.duration) || undefined;
+    const songId = req.query.songId as string | undefined;
+    const provider = req.query.provider as string | undefined;
+
+    if (!title) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Title is required' } });
+      return;
+    }
+
+    const result = await musicService.getLyrics(title, artist, duration, songId, provider);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+}

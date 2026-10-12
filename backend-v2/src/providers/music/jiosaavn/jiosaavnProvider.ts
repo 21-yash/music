@@ -438,6 +438,56 @@ export class JioSaavnProvider implements MusicProvider {
     }
   }
 
+  // ─── Recommendations & Lyrics ───────────────────────────────────
+
+  async getRelatedSongs(songId: string): Promise<Song[]> {
+    try {
+      const params = new URLSearchParams({
+        __call: 'reco.getreco',
+        api_version: '4',
+        _format: 'json',
+        _marker: '0',
+        pid: songId,
+      });
+
+      const raw = await this.fetch<Record<string, JioSaavnRawSong[]> | JioSaavnRawSong[]>(params);
+      let rawList: JioSaavnRawSong[] = [];
+
+      if (Array.isArray(raw)) {
+        rawList = raw;
+      } else if (raw && typeof raw === 'object') {
+        const firstVal = raw[songId] || Object.values(raw)[0];
+        if (Array.isArray(firstVal)) {
+          rawList = firstVal;
+        }
+      }
+
+      const mapped = rawList.map(mapSong).filter((s): s is Song => s !== null);
+      return deduplicateAndRank(mapped);
+    } catch (error) {
+      logger.error({ error, songId }, 'JioSaavn: failed to get recommendations');
+      return [];
+    }
+  }
+
+  async getLyrics(songId: string): Promise<string | null> {
+    try {
+      const params = new URLSearchParams({
+        __call: 'lyrics.getLyrics',
+        api_version: '4',
+        _format: 'json',
+        _marker: '0',
+        lyrics_id: songId,
+      });
+
+      const data = await this.fetch<{ lyrics?: string }>(params);
+      return data?.lyrics || null;
+    } catch (error) {
+      logger.error({ error, songId }, 'JioSaavn: failed to get lyrics');
+      return null;
+    }
+  }
+
   // ─── Stream URL resolution ───────────────────────────────────────
 
   async resolveStreamUrl(

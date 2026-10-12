@@ -64,6 +64,12 @@ export interface MusicProvider {
   /** Get homepage data (featured releases, playlists, charts) */
   getHomeData(): Promise<HomeData>;
 
+  /** Get recommended/related songs for a given track. */
+  getRelatedSongs?(songId: string): Promise<Song[]>;
+
+  /** Get plain lyrics for a track if available. */
+  getLyrics?(songId: string): Promise<string | null>;
+
   /**
    * Resolve an opaque stream reference to a playable URL.
    *

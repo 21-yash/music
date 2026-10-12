@@ -106,6 +106,53 @@ export class YouTubeProvider implements MusicProvider {
     return [];
   }
 
+  async getRelatedSongs(videoId: string): Promise<Song[]> {
+    try {
+      await this.ensureInitialized();
+      const results = await this.ytmusic.getUpNexts(videoId);
+
+      const parseDurationSeconds = (str?: string) => {
+        if (!str) return 0;
+        const parts = str.split(':').map(Number);
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return 0;
+      };
+
+      return results.map((s: any) => ({
+        id: s.videoId,
+        title: s.title,
+        artists: s.artists ? [{
+          id: '',
+          name: s.artists,
+          imageUrl: null
+        }] : [],
+        album: null,
+        duration: parseDurationSeconds(s.duration),
+        imageUrl: s.thumbnail || null,
+        year: '',
+        language: '',
+        hasLyrics: false,
+        playCount: 0,
+        label: '',
+        streamRef: s.videoId,
+        providerId: this.id
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async getLyrics(videoId: string): Promise<string | null> {
+    try {
+      await this.ensureInitialized();
+      const lyrics = await this.ytmusic.getLyrics(videoId);
+      return lyrics ? lyrics.join('\n') : null;
+    } catch {
+      return null;
+    }
+  }
+
   async resolveStreamUrl(streamRef: string, _quality: 'high' | 'medium' | 'low'): Promise<StreamInfo> {
     // For YouTube, we just return the videoId. The Android client will use NewPipeExtractor to resolve the stream.
     return {

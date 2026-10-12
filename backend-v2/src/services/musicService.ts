@@ -2,6 +2,8 @@ import type { MusicProvider, Song, Album, Artist, Playlist, SearchResults, Strea
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 import { createHash } from 'node:crypto';
+import { deduplicateRelatedSongs } from '../utils/musicFingerprint';
+import { getLyrics as fetchLyrics, LyricsResult } from './lyricsService';
 
 /**
  * Music service — business logic layer.
@@ -24,6 +26,8 @@ const CACHE_TTL = {
   artist: 15 * 60,      // 15 minutes
   playlist: 15 * 60,    // 15 minutes
   trending: 10 * 60,    // 10 minutes
+  related: 15 * 60,     // 15 minutes
+  lyrics: 24 * 60 * 60, // 24 hours
 } as const;
 
 // ─── Cache key prefixes ─────────────────────────────────────────────
@@ -35,6 +39,8 @@ const CACHE_PREFIX = {
   artist: 'music:artist:',
   playlist: 'music:playlist:',
   trending: 'music:trending',
+  related: 'music:related:',
+  lyrics: 'music:lyrics:',
   streamToken: 'music:stoken:', // maps songId → encrypted streamRef
   streamResolved: 'music:sres:', // maps songId:quality → resolved StreamInfo
 } as const;
@@ -193,6 +199,81 @@ export async function getHomeData(providerId?: string): Promise<import('../provi
   const homeData = await provider.getHomeData();
   await setCache(cacheKey, homeData, CACHE_TTL.trending);
   return homeData;
+}
+
+/**
+ * Get related/recommended songs for a given track,
+ * with cover/remix deduplication and stream token storage.
+ */
+export async function getRelatedSongs(
+  songId: string,
+  providerId?: string,
+  seedTitle?: string,
+  seedArtist?: string
+): Promise<Song[]> {
+  const provider = getProvider(providerId);
+  const cacheKey = `${CACHE_PREFIX.related}${songId}:${provider.name}`;
+  const cached = await getFromCache<Song[]>(cacheKey);
+  if (cached) return cached;
+
+  let candidates: Song[] = [];
+  if (typeof provider.getRelatedSongs === 'function') {
+    candidates = await provider.getRelatedSongs(songId);
+  }
+
+  // Fallback if provider didn't return recommendations: search by artist
+  if (candidates.length === 0 && seedArtist) {
+    try {
+      const searchRes = await provider.search(seedArtist, 1, 15);
+      candidates = searchRes.songs;
+    } catch {
+      candidates = [];
+    }
+  }
+
+  // Deduplicate against covers, remixes, and duplicate titles
+  const excludedIds = new Set<string>([songId]);
+  const deduped = deduplicateRelatedSongs(
+    candidates,
+    seedTitle,
+    seedArtist,
+    excludedIds,
+    (s) => s.id
+  );
+
+  await storeStreamTokens(deduped);
+  const sanitized = deduped.map(stripStreamRef);
+
+  await setCache(cacheKey, sanitized, CACHE_TTL.related);
+  return sanitized;
+}
+
+/**
+ * Get synchronized or plain lyrics for a track.
+ */
+export async function getLyrics(
+  title: string,
+  artist: string,
+  duration?: number,
+  songId?: string,
+  providerId?: string
+): Promise<LyricsResult> {
+  const cacheKey = `${CACHE_PREFIX.lyrics}${hashKey(`${title}_${artist}`)}`;
+  const cached = await getFromCache<LyricsResult>(cacheKey);
+  if (cached) return cached;
+
+  const provider = getProvider(providerId);
+  const fallbackGetter = (typeof provider.getLyrics === 'function' && songId)
+    ? () => provider.getLyrics!(songId)
+    : undefined;
+
+  const result = await fetchLyrics(title, artist, duration, fallbackGetter);
+
+  if (result.source !== 'none') {
+    await setCache(cacheKey, result, CACHE_TTL.lyrics);
+  }
+
+  return result;
 }
 
 /**
