@@ -254,6 +254,10 @@ class JamSessionManager @Inject constructor(
 
         if (isHost) {
             startHostSync(code)
+            val currentSong = playerManager.playbackState.value.currentSong
+            if (currentSong != null && queue.none { it.id == currentSong.id }) {
+                addSongToJam(currentSong)
+            }
         }
     }
 

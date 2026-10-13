@@ -27,17 +27,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.musicsportsapp.RootViewModel
 import com.musicsportsapp.features.music.components.SongItem
 import com.musicsportsapp.features.music.domain.model.Song
 
 @Composable
 fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
+    rootViewModel: RootViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val jamState by rootViewModel.jamState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
     Column(
@@ -312,9 +318,30 @@ fun SearchScreen(
         } else {
             SearchResultsContent(
                 uiState = uiState,
-                onSongClick = { viewModel.playSong(it) },
-                onPlayNext = { viewModel.playNext(it) },
-                onAddToQueue = { viewModel.addToQueue(it) }
+                onSongClick = { song ->
+                    if (jamState.isInJam) {
+                        rootViewModel.addSongToJam(song)
+                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.playSong(song)
+                    }
+                },
+                onPlayNext = { song ->
+                    if (jamState.isInJam) {
+                        rootViewModel.addSongToJam(song)
+                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.playNext(song)
+                    }
+                },
+                onAddToQueue = { song ->
+                    if (jamState.isInJam) {
+                        rootViewModel.addSongToJam(song)
+                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.addToQueue(song)
+                    }
+                }
             )
         }
     }

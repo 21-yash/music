@@ -120,6 +120,13 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.LibraryMusic,
     )
 
+    data object Jam : Screen(
+        route = "music/jam",
+        label = "Jam Session",
+        selectedIcon = Icons.Filled.LibraryMusic,
+        unselectedIcon = Icons.Outlined.LibraryMusic,
+    )
+
     companion object {
         /** Ordered list of bottom navigation tabs. */
         val bottomNavItems = listOf(Home, Music, Sports, Library)

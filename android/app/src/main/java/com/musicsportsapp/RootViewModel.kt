@@ -76,6 +76,17 @@ class RootViewModel @Inject constructor(
         }
     }
 
+    private val _showSignOutDialog = MutableStateFlow(false)
+    val showSignOutDialog: StateFlow<Boolean> = _showSignOutDialog.asStateFlow()
+
+    fun promptSignOut() {
+        _showSignOutDialog.value = true
+    }
+
+    fun dismissSignOut() {
+        _showSignOutDialog.value = false
+    }
+
     private val _isDarkTheme = MutableStateFlow(true)
     val isDarkTheme = _isDarkTheme.asStateFlow()
 

@@ -28,11 +28,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.musicsportsapp.features.music.components.SongItem
+import androidx.navigation.NavController
+import com.musicsportsapp.RootViewModel
+import com.musicsportsapp.ui.AppHeader
 import coil.compose.AsyncImage
 
 @Composable
 fun MusicScreen(
+    navController: NavController,
     viewModel: MusicViewModel = hiltViewModel(),
+    rootViewModel: RootViewModel = hiltViewModel(),
     onNavigateToSearch: () -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
@@ -45,26 +50,16 @@ fun MusicScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(top = 16.dp, start = 24.dp, end = 24.dp)
-                .height(44.dp), // Same height as Avatar to align vertically
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Text(
-                text = "Discover Music",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onBackground,
-                letterSpacing = (-0.5).sp
-            )
-        }
+        AppHeader(
+            title = "Discover Music",
+            subtitle = "Explore tracks, artists & playlists",
+            rootViewModel = rootViewModel,
+            navController = navController
+        )
 
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
-            contentPadding = PaddingValues(bottom = 120.dp, top = 24.dp),
+            contentPadding = PaddingValues(bottom = 120.dp, top = 8.dp),
         ) {
             item {
                 Column(modifier = Modifier.padding(horizontal = 24.dp)) {

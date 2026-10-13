@@ -28,6 +28,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
+import com.musicsportsapp.RootViewModel
+import com.musicsportsapp.ui.AppHeader
 import coil.compose.AsyncImage
 import com.musicsportsapp.data.local.db.entity.FollowedTeamEntity
 import com.musicsportsapp.data.local.db.entity.LikedSongEntity
@@ -47,7 +50,9 @@ private val CardGradient = Brush.linearGradient(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
+    navController: NavController,
     viewModel: LibraryViewModel = hiltViewModel(),
+    rootViewModel: RootViewModel = hiltViewModel(),
     onNavigateToLogin: (() -> Unit)? = null,
     onNavigateToHistory: (() -> Unit)? = null,
     onPlaylistClick: ((String) -> Unit)? = null,
@@ -98,31 +103,18 @@ fun LibraryScreen(
 
     Scaffold(
         topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(start = 20.dp, end = 76.dp, top = 12.dp, bottom = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Your Library",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        letterSpacing = (-0.5).sp
-                    )
-                }
-
-                Spacer(Modifier.height(14.dp))
+            Column(modifier = Modifier.fillMaxWidth()) {
+                AppHeader(
+                    title = "Your Library",
+                    subtitle = "Playlists, liked songs & teams",
+                    rootViewModel = rootViewModel,
+                    navController = navController
+                )
 
                 // Filter chips
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(end = 12.dp)
+                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 12.dp)
                 ) {
                     items(LibraryTab.values()) { tab ->
                         val isSelected = selectedTab == tab

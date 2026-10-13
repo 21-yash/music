@@ -28,11 +28,12 @@ import com.musicsportsapp.features.sports.SportsScreen
  * slide animations between bottom-nav destinations.
  */
 
-private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile")
+private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile", "music/jam")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    rootViewModel: com.musicsportsapp.RootViewModel,
 ) {
     NavHost(
         navController = navController,
@@ -69,6 +70,9 @@ fun AppNavHost(
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
+                navController = navController,
+                rootViewModel = rootViewModel,
+                onNavigateToJam = { navController.navigate(Screen.Jam.route) },
                 onMatchClick = { matchId ->
                     navController.navigate(Screen.MatchDetails().createRoute(matchId))
                 },
@@ -89,6 +93,8 @@ fun AppNavHost(
 
         composable(Screen.Music.route) {
             MusicScreen(
+                navController = navController,
+                rootViewModel = rootViewModel,
                 onNavigateToSearch = { navController.navigate(Screen.Search.route) },
                 onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
                 onNavigateToPlaylist = { playlistId -> navController.navigate(Screen.Playlist().createRoute(playlistId)) },
@@ -125,6 +131,8 @@ fun AppNavHost(
 
         composable(Screen.Sports.route) {
             SportsScreen(
+                navController = navController,
+                rootViewModel = rootViewModel,
                 onMatchClick = { matchId ->
                     navController.navigate(Screen.MatchDetails().createRoute(matchId))
                 }
@@ -141,12 +149,15 @@ fun AppNavHost(
 
         composable(Screen.Search.route) {
             SearchScreen(
+                rootViewModel = rootViewModel,
                 onBackClick = { navController.popBackStack() }
             )
         }
 
         composable(Screen.Library.route) {
             LibraryScreen(
+                navController = navController,
+                rootViewModel = rootViewModel,
                 onNavigateToLogin = {
                     navController.navigate(Screen.Auth.route) {
                         launchSingleTop = true
@@ -189,6 +200,14 @@ fun AppNavHost(
             com.musicsportsapp.features.auth.AuthScreen(
                 onBackClick = { navController.popBackStack() },
                 onAuthSuccess = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Jam.route) {
+            com.musicsportsapp.features.music.jam.JamScreen(
+                onBackClick = { navController.popBackStack() },
+                onNavigateToSearch = { navController.navigate(Screen.Search.route) },
+                rootViewModel = rootViewModel
             )
         }
     }

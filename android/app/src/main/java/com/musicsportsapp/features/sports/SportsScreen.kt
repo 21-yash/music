@@ -48,6 +48,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.musicsportsapp.features.sports.domain.model.MatchSummary
 
+import androidx.navigation.NavController
+import com.musicsportsapp.RootViewModel
+import com.musicsportsapp.ui.AppHeader
 import androidx.compose.foundation.layout.statusBarsPadding
 
 /**
@@ -59,7 +62,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
  */
 @Composable
 fun SportsScreen(
+    navController: NavController,
     viewModel: SportsViewModel = hiltViewModel(),
+    rootViewModel: RootViewModel = hiltViewModel(),
     onMatchClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -71,36 +76,20 @@ fun SportsScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // Header
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp)
-            ) {
-                Text(
-                    text = "Cricket",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 28.sp,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    letterSpacing = (-0.5).sp
-                )
-                Spacer(modifier = Modifier.height(0.dp))
-                Text(
-                    text = "Live scores  •  Latest updates",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            // Unified Header
+            AppHeader(
+                title = "Cricket",
+                subtitle = "Live scores  •  Latest updates",
+                rootViewModel = rootViewModel,
+                navController = navController
+            )
 
             // Filter chips — horizontally scrollable
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 12.dp),
+                    .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterPill(

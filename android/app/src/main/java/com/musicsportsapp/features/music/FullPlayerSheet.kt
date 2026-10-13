@@ -90,7 +90,7 @@ private val PinkBrush = Brush.linearGradient(
     listOf(Color(0xFFFF2A5F), Color(0xFFFF5E8A), Color(0xFFE11D48))
 )
 
-private enum class PlayerPanel { Queue, Lyrics, Jam }
+private enum class PlayerPanel { Queue, Lyrics }
 
 private val SleepOptions = listOf(
     listOf("Off", "15 mins"),
@@ -136,6 +136,7 @@ fun FullPlayerSheet(
     onToggleGuestReorder: (Boolean) -> Unit = {},
     onPlayNext: (Song) -> Unit = {},
     onAddToQueue: (Song) -> Unit = {},
+    onNavigateToJam: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val song = playbackState.currentSong ?: return
@@ -150,6 +151,7 @@ fun FullPlayerSheet(
     val surfaceChipBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
 
     var openPanel by remember { mutableStateOf<PlayerPanel?>(null) }
+    var showJamIntro by remember { mutableStateOf(false) }
     var showSleepTimer by remember { mutableStateOf(false) }
     var showMoreOptions by remember { mutableStateOf(false) }
 
@@ -512,7 +514,14 @@ fun FullPlayerSheet(
                         jamState = jamState,
                         onLyricsClick = { togglePanel(PlayerPanel.Lyrics) },
                         onSleepClick = { showSleepTimer = !showSleepTimer },
-                        onJamClick = { togglePanel(PlayerPanel.Jam) },
+                        onJamClick = {
+                            if (jamState.isInJam) {
+                                onDismiss()
+                                onNavigateToJam()
+                            } else {
+                                showJamIntro = true
+                            }
+                        },
                         onQueueClick = { togglePanel(PlayerPanel.Queue) }
                     )
 
@@ -572,31 +581,21 @@ fun FullPlayerSheet(
                 )
             }
 
-            // ── Jam panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
-            BottomPanel(
-                visible = openPanel == PlayerPanel.Jam,
-                title = if (jamState.isInJam) "Jam Session • ${jamState.sessionCode}" else "Start a Jam",
-                isDark = isDark,
-                onClose = { openPanel = null }
-            ) {
-                if (!jamState.isInJam) {
-                    RealJamIntro(
-                        modifier = Modifier.weight(1f),
-                        isDark = isDark,
-                        onStart = onStartJam,
-                        onJoin = onJoinJam
-                    )
-                } else {
-                    RealJamActive(
-                        modifier = Modifier.weight(1f),
-                        jamState = jamState,
-                        isDark = isDark,
-                        onEndOrLeave = onLeaveJam,
-                        onRemoveSong = onRemoveJamSong,
-                        onReorderSong = onReorderJamQueue,
-                        onToggleGuestReorder = onToggleGuestReorder
-                    )
-                }
+            // ── Jam Intro Dialog (Popup) ──
+            if (showJamIntro) {
+                com.musicsportsapp.features.music.jam.JamIntroDialog(
+                    onDismiss = { showJamIntro = false },
+                    onStartJam = {
+                        onStartJam()
+                        onDismiss()
+                        onNavigateToJam()
+                    },
+                    onJoinJam = { code ->
+                        onJoinJam(code)
+                        onDismiss()
+                        onNavigateToJam()
+                    }
+                )
             }
 
             // ── Sleep timer popup (Glassmorphic & Swipeable Downwards) ──
@@ -671,7 +670,12 @@ fun FullPlayerSheet(
                         },
                         onStartJam = {
                             showMoreOptions = false
-                            openPanel = PlayerPanel.Jam
+                            if (jamState.isInJam) {
+                                onDismiss()
+                                onNavigateToJam()
+                            } else {
+                                showJamIntro = true
+                            }
                         },
                         onOpenSleepTimer = {
                             showMoreOptions = false
@@ -751,7 +755,7 @@ private fun FloatingBottomDock(
         DockNavItem(
             label = if (jamState.isInJam) jamState.sessionCode ?: "JAM" else "JAM",
             icon = Icons.Default.Groups,
-            active = openPanel == PlayerPanel.Jam || jamState.isInJam,
+            active = jamState.isInJam,
             isDark = isDark,
             onClick = onJamClick,
             modifier = Modifier.weight(1f)
@@ -1176,327 +1180,6 @@ private fun RealLyricsContent(
             )
             Spacer(Modifier.height(navBarBottom + 24.dp))
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Real Jam Components (Unified Pink Theme)
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun RealJamIntro(
-    modifier: Modifier = Modifier,
-    isDark: Boolean,
-    onStart: () -> Unit,
-    onJoin: (String) -> Unit
-) {
-    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    var enterCode by remember { mutableStateOf("") }
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = navBarBottom + 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .shadow(16.dp, CircleShape, ambientColor = Accent, spotColor = Accent)
-                .background(PinkBrush, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.Groups, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
-        }
-        Spacer(modifier = Modifier.height(18.dp))
-        Text("Listen Together", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = textPrimary)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Invite friends to join a Jam. Everyone can add songs and enjoy synchronized playback.",
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
-            color = textSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Start Jam Button (Pink Gradient)
-        val pill = RoundedCornerShape(100.dp)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(12.dp, pill, ambientColor = Accent, spotColor = Accent)
-                .clip(pill)
-                .background(PinkBrush)
-                .clickable(onClick = onStart)
-                .padding(vertical = 15.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Start a Jam", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("OR JOIN WITH CODE", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = textSecondary, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            OutlinedTextField(
-                value = enterCode,
-                onValueChange = { enterCode = it.take(6).uppercase() },
-                placeholder = { Text("Enter 4-letter code", color = textSecondary.copy(alpha = 0.5f), fontSize = 14.sp) },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.15f),
-                    focusedTextColor = textPrimary,
-                    unfocusedTextColor = textPrimary,
-                    focusedContainerColor = if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.03f),
-                    unfocusedContainerColor = if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.03f)
-                ),
-                modifier = Modifier.weight(1f)
-            )
-
-            Button(
-                onClick = { if (enterCode.isNotBlank()) onJoin(enterCode) },
-                enabled = enterCode.isNotBlank(),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                modifier = Modifier.height(52.dp)
-            ) {
-                Text("Join", fontWeight = FontWeight.Bold, color = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-private fun RealJamActive(
-    modifier: Modifier = Modifier,
-    jamState: JamState,
-    isDark: Boolean,
-    onEndOrLeave: () -> Unit,
-    onRemoveSong: (Int) -> Unit,
-    onReorderSong: (Int, Int) -> Unit,
-    onToggleGuestReorder: (Boolean) -> Unit
-) {
-    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
-    val canReorder = jamState.isHost || jamState.allowAttendeeReorder
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        // Invite code box
-        val boxShape = RoundedCornerShape(16.dp)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(boxShape)
-                .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f))
-                .border(1.dp, if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f), boxShape)
-                .clickable {
-                    jamState.sessionCode?.let {
-                        clipboardManager.setText(AnnotatedString(it))
-                        Toast.makeText(context, "Code copied: $it", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                .padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("TAP TO COPY INVITE CODE", fontSize = 11.sp, color = textSecondary, letterSpacing = 1.sp)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = jamState.sessionCode ?: "----",
-                style = TextStyle(
-                    brush = PinkBrush,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 6.sp
-                )
-            )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Participants row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("In this Jam", fontSize = 13.sp, color = textSecondary)
-            Text(
-                "${jamState.participants.size} listening",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Accent
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            jamState.participants.forEach { user ->
-                RealJamUserBubble(user = user, isDark = isDark)
-            }
-        }
-
-        // Host settings: Allow guest reordering toggle
-        if (jamState.isHost) {
-            Spacer(modifier = Modifier.height(14.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f))
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "Allow guests to reorder queue",
-                    fontSize = 13.sp,
-                    color = textPrimary
-                )
-                Switch(
-                    checked = jamState.allowAttendeeReorder,
-                    onCheckedChange = { onToggleGuestReorder(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Accent
-                    )
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Shared Queue
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Jam Queue (${jamState.queue.size})", fontSize = 13.sp, color = textSecondary)
-            if (!canReorder) {
-                Text("Host controls order", fontSize = 11.sp, color = textSecondary.copy(alpha = 0.6f))
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (jamState.queue.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Queue is empty. Add songs to listen together!", color = textSecondary, fontSize = 13.sp)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                itemsIndexed(jamState.queue) { index, s ->
-                    QueueItemRow(
-                        song = s,
-                        active = false,
-                        isDark = isDark,
-                        canMoveUp = canReorder && index > 0,
-                        canMoveDown = canReorder && index < jamState.queue.size - 1,
-                        showReorderControls = canReorder,
-                        onClick = { /* In jam, host manages play */ },
-                        onMoveUp = { onReorderSong(index, index - 1) },
-                        onMoveDown = { onReorderSong(index, index + 1) },
-                        onRemove = { onRemoveSong(index) }
-                    )
-                }
-            }
-        }
-
-        // Leave / End Jam button
-        val pill = RoundedCornerShape(100.dp)
-        Box(
-            modifier = Modifier
-                .padding(top = 10.dp)
-                .fillMaxWidth()
-                .clip(pill)
-                .background(Accent.copy(alpha = 0.12f))
-                .border(1.dp, Accent.copy(alpha = 0.35f), pill)
-                .clickable(onClick = onEndOrLeave)
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = if (jamState.isHost) "End Jam" else "Leave Jam",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Accent
-            )
-        }
-        Spacer(Modifier.height(navBarBottom + 24.dp))
-    }
-}
-
-@Composable
-private fun RealJamUserBubble(user: JamParticipantUi, isDark: Boolean) {
-    Column(
-        modifier = Modifier.widthIn(min = 52.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .background(if (user.isHost) Accent else Accent.copy(alpha = 0.7f), CircleShape)
-                .padding(2.dp)
-        ) {
-            if (user.avatarUrl.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(if (isDark) Color(0xFF1E1824) else Color(0xFFE2E8F0)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = user.username.take(1).uppercase(),
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color(0xFF0F172A),
-                        fontSize = 15.sp
-                    )
-                }
-            } else {
-                AsyncImage(
-                    model = user.avatarUrl,
-                    contentDescription = user.username,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                )
-            }
-        }
-        Text(
-            text = if (user.isHost) "${user.username} (Host)" else user.username,
-            fontSize = 11.sp,
-            color = if (user.isHost) Accent else (if (isDark) Color.White.copy(alpha = 0.6f) else Color(0xFF64748B)),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
