@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.musicsportsapp.core.domain.AppResult
 import com.musicsportsapp.features.music.data.repository.MusicRepository
+import com.musicsportsapp.features.music.domain.model.Artist
 import com.musicsportsapp.features.music.domain.model.Song
 import com.musicsportsapp.features.music.playback.MusicPlayerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,6 +73,14 @@ class MusicViewModel @Inject constructor(
 
     fun playSong(song: Song) {
         playerManager.playSong(song)
+    }
+
+    fun playQueue(songs: List<Song>, startIndex: Int = 0) {
+        playerManager.setQueue(songs, startIndex)
+    }
+
+    fun startArtistRadio(artist: Artist) {
+        playerManager.startArtistRadio(artist)
     }
 
     fun playNext(song: Song) {

@@ -36,6 +36,7 @@ fun ArtistScreen(
     onNavigateToAlbum: (String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showAllTopSongs by remember { mutableStateOf(false) }
 
     LaunchedEffect(artistId) {
         viewModel.loadArtist(artistId)
@@ -151,7 +152,7 @@ fun ArtistScreen(
                     item {
                         Spacer(modifier = Modifier.height(24.dp))
                         Button(
-                            onClick = { /* TODO: Start Radio */ },
+                            onClick = { musicViewModel.startArtistRadio(artist) },
                             modifier = Modifier
                                 .padding(horizontal = 24.dp)
                                 .fillMaxWidth()
@@ -191,24 +192,27 @@ fun ArtistScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
-                                TextButton(onClick = { /* TODO: See All */ }) {
-                                    Text(
-                                        text = "See All",
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                if (artist.topSongs.size > 5) {
+                                    TextButton(onClick = { showAllTopSongs = !showAllTopSongs }) {
+                                        Text(
+                                            text = if (showAllTopSongs) "Show Less" else "See All",
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             
+                            val displayedSongs = if (showAllTopSongs) artist.topSongs else artist.topSongs.take(5)
                             Column(
                                 modifier = Modifier.padding(vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                artist.topSongs.take(5).forEachIndexed { index, song ->
+                                displayedSongs.forEachIndexed { index, song ->
                                     com.musicsportsapp.features.music.components.SongItem(
                                         song = song,
                                         onClick = {
-                                            musicViewModel.playSong(song)
+                                            musicViewModel.playQueue(artist.topSongs, index)
                                         },
                                         onPlayNext = { musicViewModel.playNext(song) },
                                         onAddToQueue = { musicViewModel.addToQueue(song) }

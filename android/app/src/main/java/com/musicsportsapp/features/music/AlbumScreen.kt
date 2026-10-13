@@ -141,7 +141,11 @@ fun AlbumScreen(
                                         .size(56.dp)
                                         .clip(CircleShape)
                                         .background(MaterialTheme.colorScheme.primary)
-                                        .clickable { /* Play album */ },
+                                        .clickable {
+                                            if (album.songs.isNotEmpty()) {
+                                                musicViewModel.playQueue(album.songs, 0)
+                                            }
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -176,7 +180,7 @@ fun AlbumScreen(
                             val song = album.songs[index]
                             com.musicsportsapp.features.music.components.SongItem(
                                 song = song,
-                                onClick = { musicViewModel.playSong(song) },
+                                onClick = { musicViewModel.playQueue(album.songs, index) },
                                 onPlayNext = { musicViewModel.playNext(song) },
                                 onAddToQueue = { musicViewModel.addToQueue(song) },
                                 modifier = Modifier.padding(horizontal = 8.dp)

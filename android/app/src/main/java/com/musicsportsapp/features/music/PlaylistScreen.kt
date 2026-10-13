@@ -142,7 +142,9 @@ fun PlaylistScreen(
                                         .clip(CircleShape)
                                         .background(MaterialTheme.colorScheme.primary)
                                         .clickable {
-                                            playlist.songs.firstOrNull()?.let { musicViewModel.playSong(it) }
+                                            if (playlist.songs.isNotEmpty()) {
+                                                musicViewModel.playQueue(playlist.songs, 0)
+                                            }
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -176,7 +178,7 @@ fun PlaylistScreen(
                             val song = playlist.songs[index]
                             com.musicsportsapp.features.music.components.SongItem(
                                 song = song,
-                                onClick = { musicViewModel.playSong(song) },
+                                onClick = { musicViewModel.playQueue(playlist.songs, index) },
                                 onPlayNext = { musicViewModel.playNext(song) },
                                 onAddToQueue = { musicViewModel.addToQueue(song) },
                                 modifier = Modifier.padding(horizontal = 8.dp)

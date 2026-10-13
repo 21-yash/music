@@ -140,6 +140,7 @@ fun FullPlayerSheet(
 ) {
     val song = playbackState.currentSong ?: return
     val isDark = isAppDark()
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     // Dynamic Theme Tokens
     val containerBg = if (isDark) Color(0xFF131016) else Color(0xFFF9F7FA)
@@ -405,7 +406,7 @@ fun FullPlayerSheet(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Progress bar
                     PlayerProgressBar(
@@ -413,7 +414,7 @@ fun FullPlayerSheet(
                         onSeek = onSeek,
                         isDark = isDark
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -434,7 +435,7 @@ fun FullPlayerSheet(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Controls (Shuffle, Previous, Play/Pause, Next, Repeat-One)
                     Row(
@@ -500,7 +501,7 @@ fun FullPlayerSheet(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Redesigned Floating Bottom Nav Dock (Lyrics, Sleep, Jam, Queue)
                     FloatingBottomDock(
@@ -515,7 +516,7 @@ fun FullPlayerSheet(
                         onQueueClick = { togglePanel(PlayerPanel.Queue) }
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                 }
             }
 
@@ -533,6 +534,7 @@ fun FullPlayerSheet(
                 } else {
                     LazyColumn(
                         modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(queue) { index, item ->
@@ -556,7 +558,7 @@ fun FullPlayerSheet(
             // ── Lyrics panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
             BottomPanel(
                 visible = openPanel == PlayerPanel.Lyrics,
-                title = "Live Lyrics",
+                title = "Lyrics",
                 isDark = isDark,
                 onClose = { openPanel = null }
             ) {
@@ -1065,6 +1067,7 @@ private fun RealLyricsContent(
     onSeekTo: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.55f) else Color(0xFF64748B)
 
@@ -1123,7 +1126,8 @@ private fun RealLyricsContent(
                         blendMode = BlendMode.DstIn
                     )
                 }
-                .padding(vertical = 12.dp, horizontal = 12.dp),
+                .padding(horizontal = 12.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = navBarBottom + 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -1159,7 +1163,7 @@ private fun RealLyricsContent(
             modifier = modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 16.dp, horizontal = 16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -1170,6 +1174,7 @@ private fun RealLyricsContent(
                 textAlign = TextAlign.Center,
                 color = textPrimary.copy(alpha = 0.88f)
             )
+            Spacer(Modifier.height(navBarBottom + 24.dp))
         }
     }
 }
@@ -1185,6 +1190,7 @@ private fun RealJamIntro(
     onStart: () -> Unit,
     onJoin: (String) -> Unit
 ) {
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var enterCode by remember { mutableStateOf("") }
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
@@ -1193,7 +1199,7 @@ private fun RealJamIntro(
         modifier = modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 20.dp),
+            .padding(bottom = navBarBottom + 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -1283,6 +1289,7 @@ private fun RealJamActive(
     onReorderSong: (Int, Int) -> Unit,
     onToggleGuestReorder: (Boolean) -> Unit
 ) {
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val canReorder = jamState.isHost || jamState.allowAttendeeReorder
@@ -1440,6 +1447,7 @@ private fun RealJamActive(
                 color = Accent
             )
         }
+        Spacer(Modifier.height(navBarBottom + 24.dp))
     }
 }
 
@@ -2053,8 +2061,7 @@ private fun BoxScope.BottomPanel(
                 .clip(glassShape)
                 .background(panelBg)
                 .border(1.dp, panelBorder, glassShape)
-                .navigationBarsPadding()
-                .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 24.dp)
+                .padding(start = 24.dp, end = 24.dp, top = 12.dp)
         ) {
             // Drag handle pill at the very top (swipeable downwards indicator)
             Box(

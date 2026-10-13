@@ -12,6 +12,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.musicsportsapp.core.domain.AppResult
 import com.musicsportsapp.data.repository.RecentlyPlayedRepository
 import com.musicsportsapp.features.music.data.repository.MusicRepository
+import com.musicsportsapp.features.music.domain.model.Artist
 import com.musicsportsapp.features.music.domain.model.Lyrics
 import com.musicsportsapp.features.music.domain.model.Song
 import com.musicsportsapp.features.music.domain.model.StreamInfo
@@ -79,6 +80,21 @@ class MusicPlayerManager @Inject constructor(
     // Personal queue isolation for Jam sessions
     private var stashedPersonalQueue: List<Song>? = null
     private var stashedPersonalIndex: Int? = null
+    private var stashedSourcePlaylist: List<Song>? = null
+    private var stashedNextSourceIndex: Int = 0
+
+    // Artist Radio state tracking (ensures only this artist's songs play during radio)
+    private var activeRadioArtist: String? = null
+    private var stashedActiveRadioArtist: String? = null
+
+    // Lazy paging state for large playlists
+    private var sourcePlaylist: List<Song>? = null
+    private var nextSourceIndex: Int = 0
+
+    companion object {
+        private const val MAX_INITIAL_QUEUE_SIZE = 100
+        private const val QUEUE_PAGE_CHUNK = 50
+    }
 
     private var positionTrackerJob: Job? = null
     private var isFetchingRecommendations = false
@@ -107,6 +123,9 @@ class MusicPlayerManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     fun playSong(song: Song) {
+        activeRadioArtist = null
+        sourcePlaylist = null
+        nextSourceIndex = 0
         recommendedSongIds.clear()
         sessionPlayedIds.add(song.id)
         _queue.value = listOf(song)
@@ -119,16 +138,94 @@ class MusicPlayerManager @Inject constructor(
 
     fun setQueue(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
+        activeRadioArtist = null
         recommendedSongIds.clear()
         val validIndex = startIndex.coerceIn(0, songs.size - 1)
-        _queue.value = songs
-        _currentIndex.value = validIndex
-        val target = songs[validIndex]
-        sessionPlayedIds.add(target.id)
-        loadAndPlay(target)
 
-        if (songs.size - validIndex <= 2) {
-            prefetchAutoplayRecommendations(target)
+        if (songs.size <= MAX_INITIAL_QUEUE_SIZE) {
+            sourcePlaylist = null
+            nextSourceIndex = 0
+            _queue.value = songs
+            _currentIndex.value = validIndex
+            val target = songs[validIndex]
+            sessionPlayedIds.add(target.id)
+            loadAndPlay(target)
+
+            if (songs.size - validIndex <= 2) {
+                prefetchAutoplayRecommendations(target)
+            }
+        } else {
+            // Safe windowing for large playlists to prevent memory spikes & UI lag
+            sourcePlaylist = songs
+            val windowBefore = 15
+            val fromIndex = (validIndex - windowBefore).coerceAtLeast(0)
+            val toIndex = (fromIndex + MAX_INITIAL_QUEUE_SIZE).coerceAtMost(songs.size)
+            val windowedList = songs.subList(fromIndex, toIndex)
+            val targetIndexInWindow = (validIndex - fromIndex).coerceIn(0, windowedList.size - 1)
+
+            nextSourceIndex = toIndex
+            _queue.value = windowedList
+            _currentIndex.value = targetIndexInWindow
+            val target = windowedList[targetIndexInWindow]
+            sessionPlayedIds.add(target.id)
+            loadAndPlay(target)
+        }
+    }
+
+    fun startArtistRadio(artist: Artist) {
+        sourcePlaylist = null
+        nextSourceIndex = 0
+        recommendedSongIds.clear()
+        activeRadioArtist = artist.name
+
+        val initialTracks = if (artist.topSongs.isNotEmpty()) {
+            artist.topSongs.shuffled()
+        } else {
+            emptyList()
+        }
+
+        if (initialTracks.isNotEmpty()) {
+            val seed = initialTracks.first()
+            sessionPlayedIds.add(seed.id)
+            _queue.value = initialTracks
+            _currentIndex.value = 0
+            loadAndPlay(seed)
+        }
+
+        // Expand radio queue with more songs exclusively by this artist via search
+        scope.launch {
+            try {
+                val searchRes = repository.search(
+                    query = artist.name,
+                    provider = artist.providerId,
+                    limit = 50
+                )
+                if (searchRes is AppResult.Success && activeRadioArtist == artist.name) {
+                    val artistLower = artist.name.trim().lowercase()
+                    val artistSongs = searchRes.data.songs.filter { song ->
+                        song.artists.any { it.name.trim().lowercase().contains(artistLower) } ||
+                        song.primaryArtistName.trim().lowercase().contains(artistLower)
+                    }
+
+                    val current = _queue.value
+                    val unique = SongDeduplicator.filterDuplicateSongs(
+                        incoming = artistSongs,
+                        existing = current,
+                        sessionHistoryIds = sessionPlayedIds
+                    )
+
+                    if (unique.isNotEmpty() && activeRadioArtist == artist.name) {
+                        if (current.isEmpty()) {
+                            val shuffled = unique.shuffled()
+                            _queue.value = shuffled
+                            _currentIndex.value = 0
+                            loadAndPlay(shuffled.first())
+                        } else {
+                            _queue.update { it + unique.shuffled() }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -223,6 +320,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun prefetchAutoplayRecommendations(seedSong: Song) {
+        if (activeRadioArtist != null) return // Never add third-party songs during Artist Radio
         if (isFetchingRecommendations) return
         isFetchingRecommendations = true
         scope.launch {
@@ -308,16 +406,58 @@ class MusicPlayerManager @Inject constructor(
 
         val q = _queue.value
         val nextIdx = _currentIndex.value + 1
+        val src = sourcePlaylist
+
         if (nextIdx in q.indices) {
             _currentIndex.value = nextIdx
             loadAndPlay(q[nextIdx])
-            if (q.size - nextIdx <= 2) {
+
+            // If there are more songs in a large playlist source, append the next chunk
+            if (src != null && nextSourceIndex < src.size) {
+                if (q.size - nextIdx <= 5) {
+                    val chunkEnd = (nextSourceIndex + QUEUE_PAGE_CHUNK).coerceAtMost(src.size)
+                    val moreSongs = src.subList(nextSourceIndex, chunkEnd)
+                    nextSourceIndex = chunkEnd
+                    _queue.update { it + moreSongs }
+                    if (nextSourceIndex >= src.size) {
+                        sourcePlaylist = null
+                    }
+                }
+            } else if (activeRadioArtist == null && q.size - nextIdx <= 2) {
                 prefetchAutoplayRecommendations(q[nextIdx])
             }
         } else {
-            // Queue ended, if we have a current song try to fetch more recommendations
+            // Queue ended:
+            if (activeRadioArtist != null) {
+                // Radio should only play songs of the artist: loop & reshuffle artist tracks
+                if (q.isNotEmpty()) {
+                    val reshuffled = q.shuffled()
+                    _queue.value = reshuffled
+                    _currentIndex.value = 0
+                    loadAndPlay(reshuffled.first())
+                    return
+                }
+            }
+
+            // Check if more songs remain in the source playlist
+            if (src != null && nextSourceIndex < src.size) {
+                val chunkEnd = (nextSourceIndex + QUEUE_PAGE_CHUNK).coerceAtMost(src.size)
+                val moreSongs = src.subList(nextSourceIndex, chunkEnd)
+                nextSourceIndex = chunkEnd
+                _queue.update { it + moreSongs }
+                if (nextSourceIndex >= src.size) {
+                    sourcePlaylist = null
+                }
+                if (moreSongs.isNotEmpty()) {
+                    _currentIndex.value = nextIdx
+                    loadAndPlay(moreSongs.first())
+                    return
+                }
+            }
+
+            // Playlist completely ended, fall back to autoplay recommendations
             val curr = playbackState.value.currentSong
-            if (curr != null) {
+            if (curr != null && activeRadioArtist == null) {
                 prefetchAutoplayRecommendations(curr)
             }
         }
@@ -345,6 +485,19 @@ class MusicPlayerManager @Inject constructor(
         if (index in q.indices) {
             _currentIndex.value = index
             loadAndPlay(q[index])
+
+            val src = sourcePlaylist
+            if (src != null && nextSourceIndex < src.size && q.size - index <= 5) {
+                val chunkEnd = (nextSourceIndex + QUEUE_PAGE_CHUNK).coerceAtMost(src.size)
+                val moreSongs = src.subList(nextSourceIndex, chunkEnd)
+                nextSourceIndex = chunkEnd
+                _queue.update { it + moreSongs }
+                if (nextSourceIndex >= src.size) {
+                    sourcePlaylist = null
+                }
+            } else if (activeRadioArtist == null && q.size - index <= 2) {
+                prefetchAutoplayRecommendations(q[index])
+            }
         }
     }
 
@@ -433,14 +586,24 @@ class MusicPlayerManager @Inject constructor(
     fun stashPersonalQueue() {
         stashedPersonalQueue = _queue.value
         stashedPersonalIndex = _currentIndex.value
+        stashedSourcePlaylist = sourcePlaylist
+        stashedNextSourceIndex = nextSourceIndex
+        stashedActiveRadioArtist = activeRadioArtist
+        activeRadioArtist = null
     }
 
     fun restorePersonalQueue() {
         stashedPersonalQueue?.let { stashed ->
             _queue.value = stashed
             _currentIndex.value = stashedPersonalIndex?.coerceIn(0, (stashed.size - 1).coerceAtLeast(0)) ?: 0
+            sourcePlaylist = stashedSourcePlaylist
+            nextSourceIndex = stashedNextSourceIndex
+            activeRadioArtist = stashedActiveRadioArtist
             stashedPersonalQueue = null
             stashedPersonalIndex = null
+            stashedSourcePlaylist = null
+            stashedNextSourceIndex = 0
+            stashedActiveRadioArtist = null
         }
     }
 

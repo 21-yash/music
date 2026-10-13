@@ -6,6 +6,7 @@ import com.musicsportsapp.core.domain.AppResult
 import com.musicsportsapp.data.remote.dto.UserDto
 import com.musicsportsapp.data.repository.AuthRepository
 import com.musicsportsapp.data.repository.LikedSongsRepository
+import com.musicsportsapp.features.music.domain.model.Artist
 import com.musicsportsapp.features.music.domain.model.Song
 import com.musicsportsapp.features.music.jam.JamSessionManager
 import com.musicsportsapp.features.music.playback.MusicPlayerManager
@@ -92,6 +93,14 @@ class RootViewModel @Inject constructor(
 
     fun skipToPrevious() {
         playerManager.skipToPrevious()
+    }
+
+    fun playQueue(songs: List<Song>, startIndex: Int = 0) {
+        playerManager.setQueue(songs, startIndex)
+    }
+
+    fun startArtistRadio(artist: Artist) {
+        playerManager.startArtistRadio(artist)
     }
 
     fun seekToRatio(ratio: Float) {
