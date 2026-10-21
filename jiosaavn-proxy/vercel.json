@@ -2,6 +2,8 @@
   "version": 2,
   "regions": ["bom1"],
   "rewrites": [
+    { "source": "/oembed", "destination": "/api/oembed" },
+    { "source": "/api/oembed", "destination": "/api/oembed" },
     { "source": "/track", "destination": "/api/share?type=track" },
     { "source": "/track/:id*", "destination": "/api/share?type=track&id=:id*" },
     { "source": "/song/:id*", "destination": "/api/share?type=track&id=:id*" },
