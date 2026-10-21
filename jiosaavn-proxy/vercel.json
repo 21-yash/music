@@ -1,4 +1,11 @@
 {
   "version": 2,
-  "regions": ["bom1"]
+  "regions": ["bom1"],
+  "rewrites": [
+    { "source": "/track", "destination": "/api/share?type=track" },
+    { "source": "/track/:id*", "destination": "/api/share?type=track&id=:id*" },
+    { "source": "/song/:id*", "destination": "/api/share?type=track&id=:id*" },
+    { "source": "/playlist", "destination": "/api/share?type=playlist" },
+    { "source": "/playlist/:id*", "destination": "/api/share?type=playlist&id=:id*" }
+  ]
 }

@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MusicSportsApp — Music Streaming & Live Cricket Scores</title>
+  <meta name="description" content="Stream millions of songs with synced lyrics while tracking real-time ball-by-ball cricket scores and commentary in one unified Android app.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="MusicSportsApp — Stream Music & Live Cricket">
+  <meta property="og:description" content="Stream millions of songs with synced lyrics while tracking real-time ball-by-ball cricket scores in one unified Android app.">
+  <meta property="og:image" content="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1200&auto=format&fit=crop&q=80">
+  <meta property="og:site_name" content="MusicSportsApp">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MusicSportsApp — Music Streaming & Live Cricket">
+  <meta name="twitter:description" content="The ultimate dual app: High fidelity audio streaming meets realtime cricket matches.">
+  <meta name="twitter:image" content="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1200&auto=format&fit=crop&q=80">
+
+  <meta name="theme-color" content="#09070E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #09070E;
+      --card-bg: rgba(22, 17, 34, 0.7);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --pink: #EC4899;
+      --pink-glow: rgba(236, 72, 153, 0.35);
+      --indigo: #6366F1;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --green: #10B981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', 'Inter', sans-serif;
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+
+    /* Ambient dynamic glows */
+    .glow-orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .glow-1 {
+      top: -100px;
+      left: 10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, var(--pink-glow) 0%, rgba(99, 102, 241, 0.15) 60%, transparent 80%);
+    }
+
+    .glow-2 {
+      top: 600px;
+      right: 5%;
+      width: 450px;
+      height: 450px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(236, 72, 153, 0.1) 60%, transparent 80%);
+    }
+
+    /* Container */
+    .container {
+      width: 100%;
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Navbar */
+    nav {
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--pink), var(--indigo));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      box-shadow: 0 6px 18px rgba(236, 72, 153, 0.4);
+    }
+
+    .brand-text {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+    }
+
+    .brand-text span {
+      background: linear-gradient(135deg, var(--pink), #A855F7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .nav-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 15px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover {
+      color: #fff;
+    }
+
+    .btn-glow {
+      padding: 10px 22px;
+      border-radius: 100px;
+      background: linear-gradient(135deg, var(--pink), var(--indigo));
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      box-shadow: 0 6px 20px rgba(236, 72, 153, 0.35);
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-glow:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(236, 72, 153, 0.55);
+    }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 100px;
+      background: rgba(236, 72, 153, 0.12);
+      border: 1px solid rgba(236, 72, 153, 0.25);
+      color: #F472B6;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #EC4899;
+      box-shadow: 0 0 10px #EC4899;
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .hero-title {
+      font-size: 56px;
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      line-height: 1.12;
+      max-width: 820px;
+      margin-bottom: 20px;
+    }
+
+    .hero-title span {
+      background: linear-gradient(135deg, #FFF 20%, #F472B6 70%, #A855F7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-sub {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 640px;
+      line-height: 1.6;
+      margin-bottom: 36px;
+    }
+
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 60px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn-outline {
+      padding: 10px 24px;
+      border-radius: 100px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      font-weight: 600;
+      font-size: 15px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Interactive Showcase Section */
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      width: 100%;
+      margin-bottom: 100px;
+    }
+
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--card-border);
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+      transition: transform 0.3s ease, border-color 0.3s ease;
+    }
+
+    .glass-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(236, 72, 153, 0.3);
+    }
+
+    .card-header-tag {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .tag-badge {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 4px 12px;
+      border-radius: 100px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    /* Music Demo Inside Card */
+    .music-demo {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .track-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .demo-artwork {
+      width: 72px;
+      height: 72px;
+      border-radius: 16px;
+      object-fit: cover;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .demo-track-title {
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .demo-track-artist {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    /* Mini player bar */
+    .mini-scrub-bar {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .mini-scrub-fill {
+      width: 58%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--indigo), var(--pink));
+      border-radius: 3px;
+    }
+
+    .demo-controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .demo-time {
+      font-size: 13px;
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+    }
+
+    .demo-play-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--pink), var(--indigo));
+      border: none;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 6px 18px var(--pink-glow);
+    }
+
+    .equalizer-wave {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 22px;
+    }
+
+    .eq-bar-anim {
+      width: 4px;
+      background: var(--pink);
+      border-radius: 2px;
+      animation: eqLoop 0.8s ease-in-out infinite alternate;
+    }
+
+    .eq-bar-anim:nth-child(1) { height: 8px; animation-duration: 0.38s; }
+    .eq-bar-anim:nth-child(2) { height: 18px; animation-duration: 0.52s; }
+    .eq-bar-anim:nth-child(3) { height: 12px; animation-duration: 0.29s; }
+    .eq-bar-anim:nth-child(4) { height: 22px; animation-duration: 0.44s; }
+
+    @keyframes eqLoop {
+      0% { height: 4px; }
+      100% { height: 22px; }
+    }
+
+    /* Cricket Score Inside Card */
+    .match-demo {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .match-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .match-live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #EF4444;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #EF4444;
+      animation: pulse 1.2s infinite;
+    }
+
+    .teams-score-block {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 18px;
+    }
+
+    .team-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .team-code {
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .team-score {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--pink);
+    }
+
+    .vs-pill {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.08);
+      padding: 4px 10px;
+      border-radius: 100px;
+    }
+
+    .ball-timeline {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .ball-chip {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .ball-boundary {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34D399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .ball-six {
+      background: rgba(236, 72, 153, 0.25);
+      color: #F472B6;
+      border: 1px solid rgba(236, 72, 153, 0.5);
+    }
+
+    .ball-wicket {
+      background: rgba(239, 68, 68, 0.25);
+      color: #F87171;
+      border: 1px solid rgba(239, 68, 68, 0.5);
+    }
+
+    /* Features Grid */
+    .features-section {
+      padding: 60px 0 100px;
+      text-align: center;
+    }
+
+    .section-title {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 12px;
+    }
+
+    .section-sub {
+      color: var(--muted);
+      font-size: 16px;
+      margin-bottom: 48px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      text-align: left;
+    }
+
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 22px;
+      padding: 26px;
+      transition: all 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(236, 72, 153, 0.4);
+      transform: translateY(-3px);
+    }
+
+    .feature-icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: rgba(236, 72, 153, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 18px;
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 40px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 820px) {
+      .hero-title { font-size: 38px; }
+      .showcase-grid { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-orb glow-1"></div>
+  <div class="glow-orb glow-2"></div>
+
+  <div class="container">
+    <nav>
+      <a href="/" class="brand" id="nav-brand">
+        <div class="brand-icon">M</div>
+        <div class="brand-text">Music<span>Sports</span></div>
+      </a>
+      <div class="nav-links">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#showcase" class="nav-link">Live Experience</a>
+        <a href="#download" class="nav-link">Download</a>
+      </div>
+      <a href="#download" class="btn-glow" id="nav-cta">Get Android App</a>
+    </nav>
+
+    <section class="hero">
+      <div class="hero-badge">
+        <div class="pulse-dot"></div>
+        <span>Dual Engine: High-Fi Audio + Live Cricket Scores</span>
+      </div>
+      <h1 class="hero-title">
+        Stream Your Favorite Tracks.<br>
+        <span>Never Miss a Wicket.</span>
+      </h1>
+      <p class="hero-sub">
+        MusicSportsApp seamlessly bridges high-fidelity streaming with real-time ball-by-ball cricket scores, time-synced lyrics, collaborative Jam rooms, and offline caching.
+      </p>
+      <div class="hero-actions" id="download">
+        <a href="musicsports://home" class="btn-glow" id="hero-download-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.6 9.48l1.84-3.18a.5.5 0 00-.86-.5l-1.87 3.23A11.5 11.5 0 0012 8a11.5 11.5 0 00-4.71.97L5.42 5.74a.5.5 0 10-.86.5l1.84 3.18C3.55 11.23 1.62 14.34 1.5 18h21c-.12-3.66-2.05-6.77-4.9-8.52zM7 15a1.5 1.5 0 111.5-1.5A1.5 1.5 0 017 15zm10 0a1.5 1.5 0 111.5-1.5 1.5 1.5 0 01-1.5 1.5z"/></svg>
+          <span>Download Android App</span>
+        </a>
+        <a href="#showcase" class="btn-outline" id="hero-preview-btn">Interactive Preview</a>
+      </div>
+    </section>
+
+    <!-- Interactive Showcase Section -->
+    <section class="showcase-grid" id="showcase">
+      <!-- Music Card Preview -->
+      <div class="glass-card">
+        <div class="card-header-tag">
+          <span class="tag-badge" style="background: rgba(236, 72, 153, 0.18); color: #F472B6;">Now Playing</span>
+          <div class="equalizer-wave">
+            <div class="eq-bar-anim"></div>
+            <div class="eq-bar-anim"></div>
+            <div class="eq-bar-anim"></div>
+            <div class="eq-bar-anim"></div>
+          </div>
+        </div>
+        <div class="music-demo">
+          <div class="track-meta-row">
+            <img src="https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300" alt="Track" class="demo-artwork">
+            <div>
+              <div class="demo-track-title">Kesariya (From "Brahmāstra")</div>
+              <div class="demo-track-artist">Arijit Singh, Pritam, Amitabh Bhattacharya</div>
+            </div>
+          </div>
+          <div class="mini-scrub-bar">
+            <div class="mini-scrub-fill"></div>
+          </div>
+          <div class="demo-controls-row">
+            <span class="demo-time">2:38 / 4:28</span>
+            <button class="demo-play-btn" id="demo-play-btn" aria-label="Play">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+            </button>
+            <span class="demo-time" style="color: #F472B6; font-weight: 600;">LRCLIB Synced</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Match Card Preview -->
+      <div class="glass-card">
+        <div class="card-header-tag">
+          <span class="tag-badge" style="background: rgba(99, 102, 241, 0.18); color: #818CF8;">2nd T20I • LIVE</span>
+          <div class="match-live-indicator">
+            <div class="live-dot"></div>
+            <span>LIVE</span>
+          </div>
+        </div>
+        <div class="match-demo">
+          <div class="teams-score-block">
+            <div class="team-item">
+              <span class="team-code">IND</span>
+              <span class="team-score">188/3 (18.4 ov)</span>
+            </div>
+            <span class="vs-pill">vs</span>
+            <div class="team-item" style="text-align: right;">
+              <span class="team-code">AUS</span>
+              <span class="team-score" style="color: var(--muted);">184/8 (20.0 ov)</span>
+            </div>
+          </div>
+          <div class="match-header-row">
+            <span>India need 7 runs in 8 balls</span>
+            <span style="color: #34D399; font-weight: 600;">CRR: 10.07</span>
+          </div>
+          <div class="ball-timeline">
+            <span class="ball-chip">1</span>
+            <span class="ball-chip ball-boundary">4</span>
+            <span class="ball-chip ball-six">6</span>
+            <span class="ball-chip">0</span>
+            <span class="ball-chip ball-wicket">W</span>
+            <span class="ball-chip ball-six">6</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+      <h2 class="section-title">Built for Music Lovers & Sports Fans</h2>
+      <p class="section-sub">Experience the perfect combination of audio entertainment and live sports coverage.</p>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon-box">⚡</div>
+          <h3>Dual Streaming Engine</h3>
+          <p>Seamlessly stream millions of tracks powered by JioSaavn and YouTube Music with high quality audio and zero lag.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">🏏</div>
+          <h3>Realtime Ball-by-Ball</h3>
+          <p>Instant live cricket scores, ball timelines, match stats, and commentary streamed via fast Socket.IO WebSockets.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">🎙️</div>
+          <h3>Time-Synced Lyrics</h3>
+          <p>Millisecond precision scrolling lyrics via LRCLIB. Tap any line to seek directly to that part of the track.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">👥</div>
+          <h3>Collaborative Jam Rooms</h3>
+          <p>Share a 6-digit room code and listen simultaneously with friends in real-time with synchronized queues.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">💾</div>
+          <h3>2 GB Smart Audio Cache</h3>
+          <p>Transparent LRU audio caching allows instant offline playback of recently streamed songs without using data.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon-box">🔗</div>
+          <h3>Universal Sharing</h3>
+          <p>Share tracks and playlists directly to WhatsApp and Telegram with rich social preview cards and instant deep linking.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p>© 2026 MusicSportsApp. All rights reserved. Built for Android.</p>
+    </footer>
+  </div>
+</body>
+</html>
