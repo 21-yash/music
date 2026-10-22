@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLrc } from '../../src/services/lyricsService';
+import { parseLrc, extractArtistNames } from '../../src/services/lyricsService';
 
 describe('Lyrics Service LRC Parser', () => {
   it('correctly parses standard timestamped LRC lines', () => {
@@ -35,5 +35,10 @@ describe('Lyrics Service LRC Parser', () => {
     expect(parsed.length).toBe(2);
     expect(parsed[0].text).toBe('Actual lyrics');
     expect(parsed[1].text).toBe('Another line');
+  });
+
+  it('extracts all individual artist names correctly', () => {
+    const artists = extractArtistNames('Irshad Kamil, Shashwat Sachdev & Arijit Singh feat. Armaan Khan');
+    expect(artists).toEqual(['Irshad Kamil', 'Shashwat Sachdev', 'Arijit Singh', 'Armaan Khan']);
   });
 });
