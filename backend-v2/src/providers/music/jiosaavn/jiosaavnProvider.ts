@@ -36,6 +36,46 @@ import { logger } from '../../../utils/logger';
 const BASE_URL = 'https://music-jiosaavn-proxy.vercel.app/api/index';
 
 /**
+ * Curated list of popular artists with permanent JioSaavn CDN images.
+ * Includes Bollywood icons, golden playback legends, modern hitmakers, and global stars.
+ */
+export const POPULAR_ARTISTS = [
+  // Top Bollywood & Indian Melodies
+  { id: "459320", name: "Arijit Singh", imageUrl: "https://c.saavncdn.com/artists/Arijit_Singh_004_20241118063717_500x500.jpg" },
+  { id: "456323", name: "Pritam", imageUrl: "https://c.saavncdn.com/artists/Pritam_Chakraborty-20170711073326_500x500.jpg" },
+  { id: "455782", name: "KK", imageUrl: "https://c.saavncdn.com/artists/KK_500x500.jpg" },
+  { id: "455124", name: "Mohit Chauhan", imageUrl: "https://c.saavncdn.com/artists/Mohit_Chauhan_500x500.jpg" },
+  { id: "455125", name: "Sonu Nigam", imageUrl: "https://c.saavncdn.com/artists/Sonu_Nigam_003_20260813182013_500x500.jpg" },
+  { id: "455135", name: "Shaan", imageUrl: "https://c.saavncdn.com/artists/Shaan_006_20261012091314_500x500.jpg" },
+  { id: "455130", name: "Shreya Ghoshal", imageUrl: "https://c.saavncdn.com/artists/Shreya_Ghoshal_007_20241101074144_500x500.jpg" },
+  { id: "455129", name: "Sunidhi Chauhan", imageUrl: "https://c.saavncdn.com/artists/Sunidhi_Chauhan_005_20250515061617_500x500.jpg" },
+  { id: "456269", name: "A.R. Rahman", imageUrl: "https://c.saavncdn.com/artists/AR_Rahman_002_20210120084455_500x500.jpg" },
+  
+  // Golden Playback Legends
+  { id: "455144", name: "Kishore Kumar", imageUrl: "https://c.saavncdn.com/artists/Kishore_Kumar_500x500.jpg" },
+  { id: "505312", name: "Mohammed Rafi", imageUrl: "https://c.saavncdn.com/artists/Mohammed_Rafi_500x500.jpg" },
+  { id: "455109", name: "Lata Mangeshkar", imageUrl: "https://c.saavncdn.com/artists/Lata_Mangeshkar_004_20230623105323_500x500.jpg" },
+  { id: "455142", name: "Kumar Sanu", imageUrl: "https://c.saavncdn.com/artists/Kumar_Sanu_500x500.jpg" },
+  { id: "455127", name: "Udit Narayan", imageUrl: "https://c.saavncdn.com/artists/Udit_Narayan_004_20241029065120_500x500.jpg" },
+
+  // Composers & Modern Hits
+  { id: "459880", name: "Vishal-Shekhar", imageUrl: "https://c.saavncdn.com/artists/Vishal-Shekhar_20191130071357_500x500.jpg" },
+  { id: "457145", name: "Salim Merchant", imageUrl: "https://c.saavncdn.com/artists/Salim_Merchant_002_20231030074556_500x500.jpg" },
+  { id: "461968", name: "Sachin-Jigar", imageUrl: "https://c.saavncdn.com/artists/Sachin_Jigar_003_20251222093820_500x500.jpg" },
+  { id: "3623110", name: "Sachet Tandon", imageUrl: "https://c.saavncdn.com/artists/Sachet_Tandon_20191129105330_500x500.jpg" },
+  { id: "531639", name: "Neeti Mohan", imageUrl: "https://c.saavncdn.com/artists/Neeti_Mohan_009_20260821092757_500x500.jpg" },
+  { id: "456863", name: "Badshah", imageUrl: "https://c.saavncdn.com/artists/Badshah_006_20241118064015_500x500.jpg" },
+  { id: "697691", name: "Karan Aujla", imageUrl: "https://c.saavncdn.com/artists/Karan_Aujla_005_20260925061936_500x500.jpg" },
+  { id: "455663", name: "Anirudh Ravichander", imageUrl: "https://c.saavncdn.com/artists/Anirudh_Ravichander_003_20260121134149_500x500.jpg" },
+
+  // Top Global Artists
+  { id: "615155", name: "The Weeknd", imageUrl: "https://c.saavncdn.com/artists/The_Weeknd_002_20241003071400_500x500.jpg" },
+  { id: "565990", name: "Taylor Swift", imageUrl: "https://c.saavncdn.com/artists/Taylor_Swift_003_20200226074119_500x500.jpg" },
+  { id: "512453", name: "Drake", imageUrl: "https://c.saavncdn.com/artists/Drake_006_20260520062317_500x500.jpg" },
+  { id: "1918741", name: "Billie Eilish", imageUrl: "https://c.saavncdn.com/artists/Billie_Eilish_20190211151539_500x500.jpg" }
+];
+
+/**
  * Build request headers for the Vercel proxy.
  * Includes the API key for proxy authentication.
  */
@@ -288,10 +328,54 @@ export class JioSaavnProvider implements MusicProvider {
         .filter(Boolean)
         .join(' ');
 
+      // If topSongs is empty and artist has a name, use lightweight search.getResults
+      if (topSongs.length === 0 && data.name) {
+        try {
+          const searchParams = new URLSearchParams({
+            __call: 'search.getResults',
+            _format: 'json',
+            _marker: '0',
+            cc: 'in',
+            q: cleanText(data.name),
+            p: '1',
+            n: '20',
+          });
+          const searchData = await this.fetch<JioSaavnSearchResponse>(searchParams);
+          const rawSearchSongs = searchData.results || [];
+          for (const rawS of rawSearchSongs) {
+            const mapped = mapSong(rawS);
+            if (!mapped) continue;
+            const cleanTitle = mapped.title
+              .toLowerCase()
+              .replace(/\(.*?\)/g, '')
+              .replace(/\[.*?\]/g, '')
+              .replace(/-.*/g, '')
+              .replace(/[^a-z0-9]/g, '');
+            if (!seenTitles.has(cleanTitle)) {
+              seenTitles.add(cleanTitle);
+              topSongs.push(mapped);
+            }
+          }
+        } catch (searchErr) {
+          logger.warn({ error: searchErr, artist: data.name }, 'JioSaavn: fallback song search failed');
+        }
+      }
+
+      // Fallback artist image if JioSaavn API returned no valid image
+      let artistImageUrl = upgradeImageUrl(data.image);
+      if (!artistImageUrl) {
+        const found = POPULAR_ARTISTS.find(
+          (a) => a.id === artistId || a.name.toLowerCase() === cleanText(data.name || '').toLowerCase()
+        );
+        if (found) {
+          artistImageUrl = found.imageUrl;
+        }
+      }
+
       return {
         id: data.artistId || data.id || id,
         name: cleanText(data.name || ''),
-        imageUrl: upgradeImageUrl(data.image),
+        imageUrl: artistImageUrl,
         bio,
         followerCount:
           parseInt(String(data.fan_count || data.follower_count || '0'), 10) ||
@@ -428,29 +512,12 @@ export class JioSaavnProvider implements MusicProvider {
         imageUrl: upgradeImageUrl(c.image),
       })).filter((c: any) => c.id);
 
-      // Hardcoded popular artists (as JioSaavn API doesn't return them directly in homepage)
-      const popularArtists = [
-        // Top Indian Artists
-        { id: "459320", name: "Arijit Singh", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558481813846892596/image.png?ex=6acb98cb&is=6aca474b&hm=870868074f56e73bca959930333f1889bf9e4830d4985f4a0a9e4b867df43f06" },
-        { id: "697691", name: "Karan Aujla", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482181578559720/image.png?ex=6acb9923&is=6aca47a3&hm=85fdd7fe42b6e859717dfd7d9a1b455a2273b5ba23ddca80396b37b2c918e7b7&" },
-        { id: "456863", name: "Badshah", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482181213388915/image.png?ex=6acb9923&is=6aca47a3&hm=d191a8cc713980df534dd8f90c3a7e1791e98d984e120daa88c9dd22e6d042a1&" },
-        { id: "455130", name: "Shreya Ghoshal", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482180785840189/image.png?ex=6acb9923&is=6aca47a3&hm=19ca8192aa5e69f859d835b8e369f6dc420620daee9fc1f5f903161496d1bc04&" },
-        { id: "456269", name: "A.R. Rahman", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482180299034674/image.png?ex=6acb9922&is=6aca47a2&hm=94be734d9b9d51286ccabce273625bdb65479359350291eb3bd4f5f791b8c9e2&" },
-        { id: "455663", name: "Anirudh Ravichander", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482179900833953/image.png?ex=6acb9922&is=6aca47a2&hm=0351133008ad7f43608bcdfdabb527afd763dd591b028cffecc99b8653eddff8&" },
-        
-        // Top Global Artists
-        { id: "615155", name: "The Weeknd", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482027563712652/image.png?ex=6acb98fe&is=6aca477e&hm=034c3f0da5679f215ba380d68a04fd090b6adf14f66eb0b8e00363e8495621f3&" },
-        { id: "565990", name: "Taylor Swift", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482027248877578/image.png?ex=6acb98fe&is=6aca477e&hm=45ebb957e67d53bb68a03a4db2a8d4c7b21152d8d3111fbfb537b61632bab5e7&" },
-        { id: "512453", name: "Drake", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482026628251748/image.png?ex=6acb98fe&is=6aca477e&hm=c08e47d5953f82af00b8ea56d41109693bee561756d02cf8c89b9da4d2af8ea6&" },
-        { id: "1918741", name: "Billie Eilish", imageUrl: "https://cdn.discordapp.com/attachments/960596190238498901/1558482026196115456/image.png?ex=6acb98fe&is=6aca477e&hm=3ecac8b6cb86a543246f8fa6f4ec85c73635e3b0ccb4c537757e75261804f5ba&" }
-      ];
-
       return {
         featuredReleases,
         topPlaylists,
         charts,
         bestOf,
-        popularArtists,
+        popularArtists: POPULAR_ARTISTS,
       };
     } catch (error) {
       logger.error({ error }, 'JioSaavn: failed to fetch home data');
