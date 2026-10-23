@@ -67,8 +67,6 @@ export default async function handler(req, res) {
     provider_name: 'MusicSports',
     provider_url: 'https://21yash.online',
     title: title,
-    author_name: author,
-    author_url: 'https://21yash.online',
     thumbnail_url: imageUrl,
     thumbnail_width: 500,
     thumbnail_height: 500

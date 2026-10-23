@@ -9,7 +9,6 @@ export default async function handler(req, res) {
   let album = '';
   let year = '';
   let imageUrl = qImg || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80';
-  let audioUrl = '';
   let durationSeconds = 0;
   let playlistSongs = [];
   let playlistCount = 0;
@@ -37,12 +36,11 @@ export default async function handler(req, res) {
             : (Array.isArray(data.list) ? data.list : Object.values(data).filter(v => v && typeof v === 'object' && (v.song || v.title)));
 
           playlistCount = parseInt(data.list_count || rawSongs.length || '0', 10);
-          playlistSongs = rawSongs.slice(0, 15).map(s => ({
+          playlistSongs = rawSongs.slice(0, 30).map(s => ({
             id: s.id,
             title: cleanEntity(s.song || s.title || 'Untitled Track'),
             artist: cleanEntity(s.primary_artists || s.singers || 'Unknown Artist'),
             duration: parseInt(s.duration || '0', 10),
-            previewUrl: s.media_preview_url ? s.media_preview_url.replace('http://', 'https://') : '',
             image: s.image ? s.image.replace(/150x150/, '250x250') : ''
           }));
         }
@@ -63,9 +61,6 @@ export default async function handler(req, res) {
             if (songData.image) {
               imageUrl = songData.image.replace(/150x150/, '500x500');
             }
-            if (songData.media_preview_url) {
-              audioUrl = songData.media_preview_url.replace('http://', 'https://');
-            }
             if (songData.duration) {
               durationSeconds = parseInt(songData.duration, 10) || 0;
             }
@@ -82,14 +77,13 @@ export default async function handler(req, res) {
   const cleanArtist = escapeHtml(artist);
   const cleanAlbum = escapeHtml(album);
   const cleanImage = escapeHtml(imageUrl);
-  const cleanAudio = escapeHtml(audioUrl);
   const cleanId = encodeURIComponent(id || 'sample');
 
   const domain = '21yash.online';
   const canonicalUrl = `https://${domain}/${type}/${cleanId}`;
   const deepLink = `musicsports://${type}/${cleanId}`;
 
-  // Clean Spotify-style description (NO quotes, no spam sentences)
+  // Clean description for social previews
   const metaDescription = type === 'playlist'
     ? `${playlistCount || (playlistSongs.length || 'Curated')} songs • Playlist by ${creator}`
     : `${cleanArtist} • ${cleanAlbum || 'Song'}`;
@@ -99,14 +93,14 @@ export default async function handler(req, res) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>${cleanTitle} · ${cleanArtist} | MusicSports</title>
-  <meta name="description" content="${metaDescription}">
+  <title>${cleanTitle} | MusicSports</title>
+  <meta name="description" content="${escapeHtml(metaDescription)}">
 
-  <!-- Open Graph / WhatsApp / Discord / Telegram -->
+  <!-- Open Graph -->
   <meta property="og:site_name" content="MusicSports">
   <meta property="og:type" content="${type === 'playlist' ? 'music.playlist' : 'music.song'}">
   <meta property="og:title" content="${cleanTitle}">
-  <meta property="og:description" content="${metaDescription}">
+  <meta property="og:description" content="${escapeHtml(metaDescription)}">
   <meta property="og:image" content="${cleanImage}">
   <meta property="og:image:width" content="500">
   <meta property="og:image:height" content="500">
@@ -115,11 +109,8 @@ export default async function handler(req, res) {
   <!-- Twitter / Discord Horizontal Compact Card -->
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="${cleanTitle}">
-  <meta name="twitter:description" content="${metaDescription}">
+  <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
   <meta name="twitter:image" content="${cleanImage}">
-
-  <!-- Accent Color (Discord embed border & mobile browser bar) -->
-  <meta name="theme-color" content="#EC4899">
 
   <!-- oEmbed Discovery -->
   <link rel="alternate" type="application/json+oembed" href="https://${domain}/api/oembed?type=${type}&id=${cleanId}" title="${cleanTitle}">
@@ -131,15 +122,23 @@ export default async function handler(req, res) {
 
   <style>
     :root {
-      --bg-dark: #0D0C13;
-      --card-bg: #15131C;
+      /* App Theme Tokens directly from FullPlayerSheet.kt */
+      --bg-dark: #131016;
+      --card-bg: #1B1722;
+      --card-surface: #221D2C;
       --card-border: rgba(255, 255, 255, 0.08);
-      --pink-primary: #EC4899;
-      --pink-hover: #DB2777;
-      --pink-glow: rgba(236, 72, 153, 0.35);
+      --card-border-hover: rgba(255, 42, 95, 0.35);
+
+      /* Brand Pink Palette (from FullPlayerSheet.kt) */
+      --brand-pink: #FF2A5F;
+      --pink-accent: #FF3366;
+      --pink-light: #FF5E8A;
+      --pink-dark: #E11D48;
+      --pink-glow: rgba(255, 42, 95, 0.35);
+
       --text-white: #FFFFFF;
-      --text-gray: #A1A1AA;
-      --text-dim: #71717A;
+      --text-gray: rgba(255, 255, 255, 0.65);
+      --text-dim: rgba(255, 255, 255, 0.4);
       --item-hover: rgba(255, 255, 255, 0.06);
     }
 
@@ -162,6 +161,10 @@ export default async function handler(req, res) {
       padding: 24px 16px 48px;
       overflow-x: hidden;
       position: relative;
+      background-image: 
+        radial-gradient(ellipse 65% 50% at 50% -10%, rgba(255, 42, 95, 0.14), transparent),
+        radial-gradient(circle 380px at 85% 35%, rgba(255, 42, 95, 0.08), transparent);
+      background-repeat: no-repeat;
     }
 
     /* Ambient Subtle Blur */
@@ -172,8 +175,8 @@ export default async function handler(req, res) {
       transform: translate(-50%, -50%);
       width: 440px;
       height: 440px;
-      background: radial-gradient(circle, var(--pink-glow) 0%, rgba(99, 102, 241, 0.12) 50%, transparent 75%);
-      filter: blur(100px);
+      background: radial-gradient(circle, var(--pink-glow) 0%, rgba(225, 29, 72, 0.08) 50%, transparent 75%);
+      filter: blur(120px);
       z-index: 0;
       pointer-events: none;
     }
@@ -198,34 +201,34 @@ export default async function handler(req, res) {
     }
 
     .brand-logo {
-      width: 32px;
-      height: 32px;
-      border-radius: 9px;
-      background: linear-gradient(135deg, #EC4899, #6366F1);
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      background: linear-gradient(135deg, var(--brand-pink), var(--pink-dark));
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
-      font-size: 16px;
-      box-shadow: 0 4px 12px var(--pink-glow);
+      font-size: 18px;
+      box-shadow: 0 4px 14px var(--pink-glow);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
     }
 
     .brand-name {
-      font-weight: 700;
-      font-size: 17px;
+      font-weight: 800;
+      font-size: 18px;
       letter-spacing: -0.3px;
     }
 
     .brand-name span {
-      background: linear-gradient(135deg, #EC4899, #F43F5E);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--brand-pink);
     }
 
     .nav-app-btn {
-      padding: 7px 15px;
+      padding: 7px 16px;
       border-radius: 18px;
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
       border: 1px solid var(--card-border);
       color: #fff;
       font-size: 13px;
@@ -238,30 +241,30 @@ export default async function handler(req, res) {
     }
 
     .nav-app-btn:hover {
-      background: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.12);
       border-color: rgba(255, 255, 255, 0.2);
     }
 
-    /* Spotify-Style Player Card */
+    /* Player Card */
     .player-card {
       width: 100%;
       max-width: 580px;
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 20px;
-      padding: 22px;
+      border-radius: 24px;
+      padding: 24px;
       z-index: 10;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 20px;
     }
 
-    /* Horizontal Track Hero (Spotify style) */
+    /* Horizontal Track Hero */
     .track-hero {
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 20px;
     }
 
     .hero-art-wrapper {
@@ -269,10 +272,10 @@ export default async function handler(req, res) {
       flex-shrink: 0;
       width: 130px;
       height: 130px;
-      border-radius: 14px;
+      border-radius: 18px;
       overflow: hidden;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     .hero-art {
@@ -295,13 +298,13 @@ export default async function handler(req, res) {
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: var(--text-dim);
+      color: var(--brand-pink);
       margin-bottom: 4px;
     }
 
     .track-title {
       font-size: 21px;
-      font-weight: 700;
+      font-weight: 800;
       color: #fff;
       line-height: 1.25;
       margin-bottom: 4px;
@@ -317,13 +320,14 @@ export default async function handler(req, res) {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
     .meta-tags {
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .preview-pill {
@@ -331,38 +335,42 @@ export default async function handler(req, res) {
       align-items: center;
       gap: 4px;
       font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.1);
-      color: #E4E4E7;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 8px;
+      background: rgba(255, 42, 95, 0.14);
+      color: var(--pink-light);
+      border: 1px solid rgba(255, 42, 95, 0.28);
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
 
-    /* Scrubber Row */
+    .meta-info-tag {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    /* Scrubber / Progress Visualizer (Static representation pointing to App) */
     .scrubber-section {
       display: flex;
       flex-direction: column;
       gap: 6px;
+      cursor: pointer;
     }
 
     .progress-bar {
       width: 100%;
-      height: 5px;
-      background: rgba(255, 255, 255, 0.12);
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
       border-radius: 4px;
-      cursor: pointer;
-      position: relative;
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #EC4899, #F43F5E);
+      width: 45%;
+      background: linear-gradient(90deg, var(--brand-pink), var(--pink-light));
       border-radius: 4px;
-      transition: width 0.1s linear;
     }
 
     .time-row {
@@ -378,33 +386,34 @@ export default async function handler(req, res) {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding-top: 4px;
+      padding-top: 2px;
     }
 
     .left-controls {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
     }
 
+    /* Big Pink Play Button modeled after FullPlayerSheet.kt */
     .play-btn {
-      width: 48px;
-      height: 48px;
+      width: 52px;
+      height: 52px;
       border-radius: 50%;
-      background: var(--pink-primary);
+      background: linear-gradient(135deg, var(--brand-pink) 0%, var(--pink-light) 50%, var(--pink-dark) 100%);
       border: none;
       color: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      box-shadow: 0 4px 16px var(--pink-glow);
-      transition: transform 0.18s ease, background-color 0.18s ease;
+      box-shadow: 0 6px 20px var(--pink-glow);
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
     }
 
     .play-btn:hover {
       transform: scale(1.06);
-      background: var(--pink-hover);
+      box-shadow: 0 10px 26px rgba(255, 42, 95, 0.6);
     }
 
     .play-btn:active {
@@ -412,9 +421,10 @@ export default async function handler(req, res) {
     }
 
     .play-btn svg {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       fill: currentColor;
+      margin-left: 2px;
     }
 
     /* Animated Equalizer */
@@ -422,61 +432,67 @@ export default async function handler(req, res) {
       display: flex;
       align-items: flex-end;
       gap: 3px;
-      height: 18px;
+      height: 20px;
     }
 
     .eq-bar {
-      width: 3px;
-      background: var(--pink-primary);
+      width: 3.5px;
+      background: var(--brand-pink);
       border-radius: 2px;
       height: 4px;
-    }
-
-    .eq-bar.active {
       animation: eqDance 0.8s ease-in-out infinite alternate;
     }
 
-    .eq-bar:nth-child(1) { animation-duration: 0.4s; }
-    .eq-bar:nth-child(2) { animation-duration: 0.28s; height: 8px; }
-    .eq-bar:nth-child(3) { animation-duration: 0.45s; }
+    .eq-bar:nth-child(1) { height: 6px; animation-duration: 0.38s; }
+    .eq-bar:nth-child(2) { height: 16px; animation-duration: 0.5s; }
+    .eq-bar:nth-child(3) { height: 10px; animation-duration: 0.3s; }
+    .eq-bar:nth-child(4) { height: 18px; animation-duration: 0.42s; }
 
     @keyframes eqDance {
-      0% { height: 3px; }
-      100% { height: 18px; }
+      0% { height: 4px; }
+      100% { height: 20px; }
+    }
+
+    .app-only-pill {
+      font-size: 12px;
+      color: var(--text-gray);
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     /* CTA Buttons */
     .cta-row {
       display: flex;
-      gap: 10px;
+      gap: 12px;
     }
 
     .btn-open-app {
       flex: 1;
-      padding: 12px 18px;
+      padding: 13px 20px;
       border-radius: 14px;
-      background: linear-gradient(135deg, #EC4899, #F43F5E);
+      background: linear-gradient(135deg, var(--brand-pink) 0%, var(--pink-light) 50%, var(--pink-dark) 100%);
       border: none;
       color: #fff;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 700;
       text-decoration: none;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      box-shadow: 0 4px 16px var(--pink-glow);
+      box-shadow: 0 6px 20px var(--pink-glow);
       cursor: pointer;
       transition: all 0.2s ease;
     }
 
     .btn-open-app:hover {
-      box-shadow: 0 6px 22px rgba(236, 72, 153, 0.55);
-      transform: translateY(-1px);
+      box-shadow: 0 10px 28px rgba(255, 42, 95, 0.6);
+      transform: translateY(-2px);
     }
 
     .btn-share {
-      padding: 12px 16px;
+      padding: 13px 18px;
       border-radius: 14px;
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid var(--card-border);
@@ -487,7 +503,7 @@ export default async function handler(req, res) {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 8px;
       transition: all 0.2s ease;
     }
 
@@ -495,11 +511,11 @@ export default async function handler(req, res) {
       background: rgba(255, 255, 255, 0.14);
     }
 
-    /* Playlist Tracklist (Exact Spotify Style) */
+    /* Playlist Tracklist */
     .tracklist-container {
       margin-top: 10px;
       border-top: 1px solid var(--card-border);
-      padding-top: 14px;
+      padding-top: 16px;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -513,37 +529,39 @@ export default async function handler(req, res) {
       color: var(--text-dim);
       padding: 4px 10px;
       margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
     }
 
     .track-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px;
-      border-radius: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
       transition: background 0.15s ease;
       cursor: pointer;
       text-decoration: none;
       color: inherit;
     }
 
-    .track-row:hover, .track-row.active {
+    .track-row:hover {
       background: var(--item-hover);
     }
 
     .track-left {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
       min-width: 0;
       flex: 1;
     }
 
     .track-num {
-      width: 20px;
+      width: 22px;
       font-size: 13px;
       color: var(--text-dim);
-      font-weight: 600;
+      font-weight: 700;
       text-align: center;
       flex-shrink: 0;
     }
@@ -585,8 +603,8 @@ export default async function handler(req, res) {
       margin-top: 18px;
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 12px 16px;
+      border-radius: 18px;
+      padding: 14px 18px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -597,7 +615,7 @@ export default async function handler(req, res) {
     .cricket-footer-text {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       font-size: 13px;
       color: var(--text-gray);
     }
@@ -612,14 +630,14 @@ export default async function handler(req, res) {
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%) translateY(80px);
-      background: #27272A;
+      background: #231E2C;
       color: #fff;
-      padding: 10px 20px;
-      border-radius: 20px;
+      padding: 10px 22px;
+      border-radius: 100px;
       font-size: 13px;
       font-weight: 600;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      border: 1px solid rgba(255, 42, 95, 0.35);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
       transition: transform 0.25s ease;
       z-index: 100;
       pointer-events: none;
@@ -658,7 +676,7 @@ export default async function handler(req, res) {
     </a>
   </header>
 
-  <!-- Player Preview Card -->
+  <!-- Player Preview Card (No Web Audio - Directs to App) -->
   <main class="player-card">
     <div class="track-hero">
       <div class="hero-art-wrapper">
@@ -668,38 +686,40 @@ export default async function handler(req, res) {
       <div class="hero-meta">
         <div class="type-pill">${type === 'playlist' ? 'PLAYLIST' : 'SONG'}</div>
         <h1 class="track-title" title="${cleanTitle}">${cleanTitle}</h1>
-        <div class="track-artist">${type === 'playlist' ? `By ${creator} • ${playlistCount || playlistSongs.length} songs` : cleanArtist}</div>
+        <div class="track-artist">${type === 'playlist' ? `Curated by ${creator} • ${playlistCount || playlistSongs.length} songs` : cleanArtist}</div>
         <div class="meta-tags">
-          <span class="preview-pill">Preview</span>
-          ${cleanAlbum && type !== 'playlist' ? `<span style="font-size: 12px; color: var(--text-dim);">${cleanAlbum}</span>` : ''}
+          <span class="preview-pill">320 KBPS LOSSLESS</span>
+          ${cleanAlbum && type !== 'playlist' ? `<span class="meta-info-tag">${cleanAlbum}${year ? ' • ' + year : ''}</span>` : ''}
         </div>
       </div>
     </div>
 
-    <!-- Scrubber -->
-    <div class="scrubber-section">
-      <div class="progress-bar" id="progress-bar">
-        <div class="progress-fill" id="progress-fill"></div>
+    <!-- Scrubber Row (Metadata representation) -->
+    <div class="scrubber-section" onclick="triggerAppAction()">
+      <div class="progress-bar">
+        <div class="progress-fill"></div>
       </div>
       <div class="time-row">
-        <span id="current-time">0:00</span>
-        <span id="total-time">${durationSeconds > 0 ? formatDuration(durationSeconds) : '0:30'}</span>
+        <span>0:00</span>
+        <span>${durationSeconds > 0 ? formatDuration(durationSeconds) : '4:15'}</span>
       </div>
     </div>
 
     <!-- Controls Row -->
     <div class="controls-row">
       <div class="left-controls">
-        <button class="play-btn" id="play-pause-btn" aria-label="Play Preview">
-          <svg id="play-icon" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
-          <svg id="pause-icon" viewBox="0 0 24 24" style="display:none;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+        <button class="play-btn" id="play-pause-btn" onclick="triggerAppAction()" aria-label="Listen in App">
+          <svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
         </button>
 
-        <div class="eq-bars" id="eq-bars">
+        <div class="eq-bars">
+          <div class="eq-bar"></div>
           <div class="eq-bar"></div>
           <div class="eq-bar"></div>
           <div class="eq-bar"></div>
         </div>
+
+        <span class="app-only-pill">Lossless audio in app</span>
       </div>
 
       <button class="btn-share" id="share-btn" aria-label="Share">
@@ -708,12 +728,15 @@ export default async function handler(req, res) {
       </button>
     </div>
 
-    <!-- Playlist Track List (Exact Spotify Preview Style) -->
+    <!-- Playlist Track List -->
     ${type === 'playlist' && playlistSongs.length > 0 ? `
     <div class="tracklist-container">
-      <div class="tracklist-header">Tracklist Preview</div>
+      <div class="tracklist-header">
+        <span>Tracklist (${playlistSongs.length} Tracks)</span>
+        <span>Duration</span>
+      </div>
       ${playlistSongs.map((song, i) => `
-        <div class="track-row" data-preview="${escapeHtml(song.previewUrl)}" data-id="${escapeHtml(song.id)}">
+        <div class="track-row" onclick="triggerSongDeepLink('${escapeHtml(song.id)}')">
           <div class="track-left">
             <span class="track-num">${i + 1}</span>
             <div class="track-text">
@@ -731,7 +754,7 @@ export default async function handler(req, res) {
     <div class="cta-row">
       <a href="${deepLink}" class="btn-open-app" id="open-app-btn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
-        <span>Open in MusicSports</span>
+        <span>Listen in MusicSports App</span>
       </a>
     </div>
   </main>
@@ -745,128 +768,53 @@ export default async function handler(req, res) {
         <div style="font-size: 11px; color: var(--text-dim);">Live ball-by-ball cricket scores synced with high-fi music</div>
       </div>
     </div>
-    <a href="${deepLink}" style="color: var(--pink-primary); text-decoration: none; font-size: 12px; font-weight: 700;">Get App →</a>
+    <a href="musicsports://sports" style="color: var(--brand-pink); text-decoration: none; font-size: 12px; font-weight: 700;">View Live →</a>
   </aside>
 
   <div id="toast">Link copied to clipboard!</div>
 
-  <audio id="audio-player" preload="none">
-    ${cleanAudio ? `<source src="${cleanAudio}" type="audio/mp4">` : ''}
-  </audio>
-
   <script>
-    const audio = document.getElementById('audio-player');
-    const playBtn = document.getElementById('play-pause-btn');
-    const playIcon = document.getElementById('play-icon');
-    const pauseIcon = document.getElementById('pause-icon');
-    const progressBar = document.getElementById('progress-bar');
-    const progressFill = document.getElementById('progress-fill');
-    const currentTimeEl = document.getElementById('current-time');
-    const totalTimeEl = document.getElementById('total-time');
-    const eqBars = document.querySelectorAll('.eq-bar');
+    const deepLink = "${deepLink}";
+    const canonicalUrl = "${canonicalUrl}";
     const shareBtn = document.getElementById('share-btn');
     const toast = document.getElementById('toast');
-    const deepLink = "${deepLink}";
-
-    let isPlaying = false;
-    let hasAudio = ${cleanAudio ? 'true' : 'false'};
 
     function showToast(msg) {
       toast.innerText = msg;
       toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 2200);
+      setTimeout(() => toast.classList.remove('show'), 2400);
     }
 
-    function formatSecs(sec) {
-      const m = Math.floor(sec / 60);
-      const s = Math.floor(sec % 60);
-      return m + ':' + (s < 10 ? '0' : '') + s;
+    function triggerAppAction() {
+      showToast('Opening in MusicSports App...');
+      window.location.href = deepLink;
     }
 
-    function setPlayState(playing) {
-      isPlaying = playing;
-      if (playing) {
-        playIcon.style.display = 'none';
-        pauseIcon.style.display = 'block';
-        eqBars.forEach(b => b.classList.add('active'));
+    function triggerSongDeepLink(songId) {
+      if (songId) {
+        window.location.href = "musicsports://track/" + songId;
       } else {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
-        eqBars.forEach(b => b.classList.remove('active'));
+        triggerAppAction();
       }
     }
-
-    playBtn.addEventListener('click', () => {
-      if (!hasAudio && !audio.src) {
-        window.location.href = deepLink;
-        return;
-      }
-      if (audio.paused) {
-        audio.play().then(() => setPlayState(true)).catch(() => {
-          window.location.href = deepLink;
-        });
-      } else {
-        audio.pause();
-        setPlayState(false);
-      }
-    });
-
-    audio.addEventListener('timeupdate', () => {
-      if (audio.duration) {
-        const pct = (audio.currentTime / audio.duration) * 100;
-        progressFill.style.width = pct + '%';
-        currentTimeEl.innerText = formatSecs(audio.currentTime);
-        totalTimeEl.innerText = formatSecs(audio.duration);
-      }
-    });
-
-    audio.addEventListener('ended', () => {
-      setPlayState(false);
-      progressFill.style.width = '0%';
-      currentTimeEl.innerText = '0:00';
-    });
-
-    progressBar.addEventListener('click', (e) => {
-      if (!audio.duration) return;
-      const rect = progressBar.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const pct = clickX / rect.width;
-      audio.currentTime = pct * audio.duration;
-    });
-
-    // Playlist interactive row preview
-    const rows = document.querySelectorAll('.track-row');
-    rows.forEach(row => {
-      row.addEventListener('click', () => {
-        const previewUrl = row.getAttribute('data-preview');
-        if (previewUrl) {
-          audio.src = previewUrl;
-          hasAudio = true;
-          rows.forEach(r => r.classList.remove('active'));
-          row.classList.add('active');
-          audio.play().then(() => setPlayState(true)).catch(() => {});
-        } else {
-          window.location.href = deepLink;
-        }
-      });
-    });
 
     shareBtn.addEventListener('click', () => {
-      const shareUrl = "${canonicalUrl}";
       if (navigator.share) {
         navigator.share({
-          url: shareUrl
+          title: "${cleanTitle}",
+          text: "Listen to ${cleanTitle} on MusicSports",
+          url: canonicalUrl
         }).catch(() => {});
       } else {
-        navigator.clipboard.writeText(shareUrl).then(() => {
-          showToast('Link copied!');
+        navigator.clipboard.writeText(canonicalUrl).then(() => {
+          showToast('Share link copied!');
         }).catch(() => {
           showToast('Could not copy link');
         });
       }
     });
 
-    // On Android devices, prompt or redirect to app
+    // On Android devices, attempt opening app directly
     const isAndroid = /Android/i.test(navigator.userAgent);
     if (isAndroid) {
       setTimeout(() => {
@@ -903,7 +851,7 @@ function escapeHtml(str) {
 }
 
 function formatDuration(totalSeconds) {
-  if (!totalSeconds || isNaN(totalSeconds)) return '0:30';
+  if (!totalSeconds || isNaN(totalSeconds)) return '3:45';
   const m = Math.floor(totalSeconds / 60);
   const s = Math.floor(totalSeconds % 60);
   return `${m}:${s < 10 ? '0' : ''}${s}`;
