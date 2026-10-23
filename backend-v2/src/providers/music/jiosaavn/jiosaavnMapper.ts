@@ -50,29 +50,51 @@ export function upgradeImageUrl(url: string | undefined | null): string | null {
  *
  * Priority: artistMap.primary_artists > primary_artists string > singers > music
  */
-export function extractArtists(raw: JioSaavnRawSong): ArtistCredit[] {
-  // Structured artist data (best case)
-  if (raw.artistMap?.primary_artists?.length) {
-    return raw.artistMap.primary_artists.map((a) => ({
-      id: a.id,
+export function extractArtists(raw: any): ArtistCredit[] {
+  // Case 1: Structured artist data (array in artistMap.primary_artists or artistMap.artists)
+  const artistArray = raw.artistMap?.primary_artists || raw.artistMap?.artists;
+  if (Array.isArray(artistArray) && artistArray.length > 0) {
+    return artistArray.map((a: any) => ({
+      id: String(a.id || ''),
       name: cleanText(a.name),
       imageUrl: upgradeImageUrl(a.image),
     }));
   }
 
-  // Comma-separated string fallback
-  const artistString = raw.primary_artists || raw.singers || raw.music || '';
-  if (!artistString) return [];
+  // Case 2: artistMap as a dictionary { [artistName]: artistId }
+  if (raw.artistMap && typeof raw.artistMap === 'object' && !Array.isArray(raw.artistMap)) {
+    const entries = Object.entries(raw.artistMap).filter(
+      ([k, v]) => typeof v === 'string' || typeof v === 'number'
+    );
+    if (entries.length > 0) {
+      return entries.map(([name, id]) => ({
+        id: String(id),
+        name: cleanText(name),
+        imageUrl: null,
+      }));
+    }
+  }
 
-  return cleanText(artistString)
+  // Case 3: Comma-separated strings with primary_artists_id
+  const artistNames = cleanText(raw.primary_artists || raw.singers || raw.music || '')
     .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .map((name) => ({
-      id: '', // No ID available from string format
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const artistIds = String(raw.primary_artists_id || raw.music_id || '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+
+  if (artistNames.length > 0) {
+    return artistNames.map((name, index) => ({
+      id: artistIds[index] || '',
       name,
       imageUrl: null,
     }));
+  }
+
+  return [];
 }
 
 // ─── Album extraction ───────────────────────────────────────────────

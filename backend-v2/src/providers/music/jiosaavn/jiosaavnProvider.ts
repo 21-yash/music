@@ -219,12 +219,32 @@ export class JioSaavnProvider implements MusicProvider {
 
   async getArtist(id: string): Promise<Artist | null> {
     try {
+      let artistId = id.trim();
+      // If id is not numeric (e.g. an artist name), look up the real JioSaavn artist ID
+      if (!/^\d+$/.test(artistId)) {
+        try {
+          const searchParams = new URLSearchParams({
+            __call: 'search.getArtistResults',
+            _format: 'json',
+            _marker: '0',
+            cc: 'in',
+            q: artistId,
+          });
+          const searchData = await this.fetch<{ results?: Array<{ id: string; name: string }> }>(searchParams);
+          if (searchData?.results?.[0]?.id) {
+            artistId = String(searchData.results[0].id);
+          }
+        } catch (searchErr) {
+          logger.warn({ error: searchErr, query: artistId }, 'JioSaavn: failed to search artist by name');
+        }
+      }
+
       const params = new URLSearchParams({
         __call: 'artist.getArtistPageDetails',
         _format: 'json',
         _marker: '0',
         cc: 'in',
-        artistId: id,
+        artistId: artistId,
         n_song: '20',
         n_album: '10',
       });

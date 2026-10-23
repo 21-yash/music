@@ -3,7 +3,7 @@ import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 import { createHash } from 'node:crypto';
 import { deduplicateRelatedSongs } from '../utils/musicFingerprint';
-import { getLyrics as fetchLyrics, LyricsResult } from './lyricsService';
+import { getLyricsWithMeta, LyricsResult } from './lyricsService';
 
 /**
  * Music service — business logic layer.
@@ -27,7 +27,9 @@ const CACHE_TTL = {
   playlist: 15 * 60,    // 15 minutes
   trending: 10 * 60,    // 10 minutes
   related: 15 * 60,     // 15 minutes
-  lyrics: 24 * 60 * 60, // 24 hours
+  lyrics: 30 * 24 * 60 * 60, // 30 days (synced)
+  lyricsPlain: 7 * 24 * 60 * 60, // 7 days (plain-only)
+  lyricsNone: 6 * 60 * 60, // 6 hours (nothing found)
 } as const;
 
 // ─── Cache key prefixes ─────────────────────────────────────────────
@@ -40,7 +42,7 @@ const CACHE_PREFIX = {
   playlist: 'music:playlist:',
   trending: 'music:trending',
   related: 'music:related:',
-  lyrics: 'music:lyrics:',
+  lyrics: 'music:lyrics:v3:',
   streamToken: 'music:stoken:', // maps songId → encrypted streamRef
   streamResolved: 'music:sres:', // maps songId:quality → resolved StreamInfo
 } as const;
@@ -248,6 +250,8 @@ export async function getRelatedSongs(
   return sanitized;
 }
 
+const inflightLyrics = new Map<string, Promise<LyricsResult>>();
+
 /**
  * Get synchronized or plain lyrics for a track.
  */
@@ -258,22 +262,35 @@ export async function getLyrics(
   songId?: string,
   providerId?: string
 ): Promise<LyricsResult> {
-  const cacheKey = `${CACHE_PREFIX.lyrics}${hashKey(`${title}_${artist}`)}`;
+  const durSuffix = duration && duration > 0 ? `_${Math.round(duration)}` : '';
+  const cacheKey = `${CACHE_PREFIX.lyrics}${hashKey(`${title}_${artist}${durSuffix}`)}`;
   const cached = await getFromCache<LyricsResult>(cacheKey);
   if (cached) return cached;
 
-  const provider = getProvider(providerId);
-  const fallbackGetter = (typeof provider.getLyrics === 'function' && songId)
-    ? () => provider.getLyrics!(songId)
-    : undefined;
+  const pending = inflightLyrics.get(cacheKey); // coalesce identical in-flight requests
+  if (pending) return pending;
 
-  const result = await fetchLyrics(title, artist, duration, fallbackGetter);
+  const task = (async () => {
+    let provider: MusicProvider | undefined;
+    try { provider = getProvider(providerId); } catch { provider = undefined; }
+    const p = provider;
+    const fallbackGetter = (p && typeof p.getLyrics === 'function' && songId)
+      ? () => p.getLyrics!(songId)
+      : undefined;
 
-  if (result.source !== 'none') {
-    await setCache(cacheKey, result, CACHE_TTL.lyrics);
-  }
+    const { result, cacheable } = await getLyricsWithMeta(title, artist, duration, fallbackGetter);
 
-  return result;
+    if (cacheable) {
+      const ttl = result.isSynced ? CACHE_TTL.lyrics
+        : result.source === 'none' ? CACHE_TTL.lyricsNone
+        : CACHE_TTL.lyricsPlain;
+      await setCache(cacheKey, result, ttl);
+    }
+    return result;
+  })().finally(() => inflightLyrics.delete(cacheKey));
+
+  inflightLyrics.set(cacheKey, task);
+  return task;
 }
 
 /**
