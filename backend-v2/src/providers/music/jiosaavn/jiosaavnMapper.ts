@@ -64,7 +64,7 @@ export function extractArtists(raw: any): ArtistCredit[] {
   // Case 2: artistMap as a dictionary { [artistName]: artistId }
   if (raw.artistMap && typeof raw.artistMap === 'object' && !Array.isArray(raw.artistMap)) {
     const entries = Object.entries(raw.artistMap).filter(
-      ([k, v]) => typeof v === 'string' || typeof v === 'number'
+      ([, v]) => typeof v === 'string' || typeof v === 'number'
     );
     if (entries.length > 0) {
       return entries.map(([name, id]) => ({
