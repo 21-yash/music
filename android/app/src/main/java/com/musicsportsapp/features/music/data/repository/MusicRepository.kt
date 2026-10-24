@@ -31,9 +31,33 @@ class MusicRepository @Inject constructor(
             .map { it.toDomain() }
     }
 
+    private val artistCache = java.util.concurrent.ConcurrentHashMap<String, Artist>()
+
     suspend fun getArtist(id: String, provider: String? = null): AppResult<Artist> {
-        return safeApiCall { api.getArtist(id, provider) }
+        val trimmed = id.trim()
+        val lower = trimmed.lowercase()
+        artistCache[lower]?.let { return AppResult.Success(it) }
+        artistCache[trimmed]?.let { return AppResult.Success(it) }
+
+        val result = safeApiCall { api.getArtist(id, provider) }
             .map { it.toDomain() }
+
+        if (result is AppResult.Success) {
+            val artist = result.data
+            if (artistCache.size > 200) {
+                artistCache.clear()
+            }
+            if (artist.id.isNotBlank()) {
+                artistCache[artist.id.trim()] = artist
+                artistCache[artist.id.trim().lowercase()] = artist
+            }
+            if (artist.name.isNotBlank()) {
+                artistCache[artist.name.trim().lowercase()] = artist
+            }
+            artistCache[trimmed] = artist
+            artistCache[lower] = artist
+        }
+        return result
     }
 
     suspend fun getPlaylist(id: String, provider: String? = null): AppResult<Playlist> {

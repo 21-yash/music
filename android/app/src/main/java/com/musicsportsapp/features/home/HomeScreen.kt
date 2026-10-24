@@ -77,6 +77,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.musicsportsapp.features.music.domain.model.Song
+import com.musicsportsapp.features.music.domain.model.ArtistCredit
 import androidx.compose.material3.CircularProgressIndicator
 
 // ─────────────────────────────────────────────────────────────
@@ -274,20 +275,54 @@ fun HomeScreen(
                         ) {
                             if (realRecentlyPlayed.isNotEmpty()) {
                                 items(realRecentlyPlayed.take(5)) { item ->
+                                    val song = remember(item) {
+                                        Song(
+                                            id = item.songId,
+                                            title = item.title,
+                                            artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
+                                            album = null,
+                                            durationSeconds = item.durationSeconds,
+                                            imageUrl = item.imageUrl,
+                                            year = "",
+                                            language = "",
+                                            hasLyrics = false,
+                                            playCount = 0,
+                                            label = "",
+                                            streamRef = item.songId,
+                                            providerId = item.providerId
+                                        )
+                                    }
                                     RecentSongTile(
-                                        title = item.title,
-                                        artist = item.artist,
-                                        imageUrl = item.imageUrl,
-                                        onClick = { homeViewModel.playSong(item) }
+                                        song = song,
+                                        onClick = { homeViewModel.playSong(item) },
+                                        onPlayNext = { musicViewModel.playNext(song) },
+                                        onAddToQueue = { musicViewModel.addToQueue(song) }
                                     )
                                 }
                             } else {
-                                items(HomeSampleData.recentlyPlayed.take(5)) { song ->
+                                items(HomeSampleData.recentlyPlayed.take(5)) { sampleSong ->
+                                    val song = remember(sampleSong) {
+                                        Song(
+                                            id = sampleSong.title.lowercase().replace(" ", "_"),
+                                            title = sampleSong.title,
+                                            artists = listOf(ArtistCredit(id = sampleSong.artist, name = sampleSong.artist, imageUrl = null)),
+                                            album = null,
+                                            durationSeconds = 180,
+                                            imageUrl = sampleSong.imageUrl,
+                                            year = "",
+                                            language = "",
+                                            hasLyrics = false,
+                                            playCount = 0,
+                                            label = "",
+                                            streamRef = sampleSong.title.lowercase().replace(" ", "_"),
+                                            providerId = "saavn"
+                                        )
+                                    }
                                     RecentSongTile(
-                                        title = song.title,
-                                        artist = song.artist,
-                                        imageUrl = song.imageUrl,
-                                        onClick = { onSongClick(song) }
+                                        song = song,
+                                        onClick = { onSongClick(sampleSong) },
+                                        onPlayNext = { musicViewModel.playNext(song) },
+                                        onAddToQueue = { musicViewModel.addToQueue(song) }
                                     )
                                 }
                             }
@@ -575,12 +610,14 @@ private fun StatusBadge(status: MatchStatus) {
 
 @Composable
 private fun RecentSongTile(
-    title: String,
-    artist: String,
-    imageUrl: String?,
-    onClick: () -> Unit
+    song: Song,
+    onClick: () -> Unit,
+    onPlayNext: () -> Unit = {},
+    onAddToQueue: () -> Unit = {}
 ) {
     val shape = RoundedCornerShape(20.dp)
+    var showOptions by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .width(140.dp)
@@ -589,11 +626,29 @@ private fun RecentSongTile(
             .clickable(onClick = onClick)
     ) {
         AsyncImage(
-            model = imageUrl,
-            contentDescription = title,
+            model = song.imageUrl,
+            contentDescription = song.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
+        // 3-dots button at top-end
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable { showOptions = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Options for ${song.title}",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -606,7 +661,7 @@ private fun RecentSongTile(
                 .padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 16.dp)
         ) {
             Text(
-                text = title,
+                text = song.title,
                 color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
@@ -614,13 +669,22 @@ private fun RecentSongTile(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = artist,
+                text = song.primaryArtistName,
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+
+    if (showOptions) {
+        com.musicsportsapp.features.music.components.SongOptionsSheet(
+            song = song,
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onDismiss = { showOptions = false }
+        )
     }
 }
 

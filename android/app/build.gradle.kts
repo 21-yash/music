@@ -21,7 +21,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Base URL for the backend API — configurable per build type
-        buildConfigField("String", "API_BASE_URL", "\"https://music-l0wf.onrender.com/api/v1/\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://api.21yash.online/api/v1/\"")
     }
 
     buildTypes {
@@ -32,7 +32,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            buildConfigField("String", "API_BASE_URL", "\"https://music-l0wf.onrender.com/api/v1/\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://api.21yash.online/api/v1/\"")
         }
         debug {
             isDebuggable = true
@@ -108,6 +108,12 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.media3.ui)
+    implementation(libs.media3.datasource)
+
+    // WorkManager & Background Sync
+    implementation(libs.work.runtime.ktx)
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.work.compiler)
 
     // Coil for Compose (Image Loading)
     implementation(libs.coil.compose)

@@ -27,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.musicsportsapp.data.local.db.entity.PlaylistEntity
 import com.musicsportsapp.data.local.db.entity.RecentlyPlayedEntity
+import com.musicsportsapp.features.music.components.LocalAddToPlaylist
 import com.musicsportsapp.features.music.domain.model.ArtistCredit
 import com.musicsportsapp.features.music.domain.model.Song
 
@@ -41,6 +42,7 @@ fun ListeningHistoryScreen(
     onBackClick: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
 ) {
+    val addToPlaylist = LocalAddToPlaylist.current
     val context = LocalContext.current
     val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
     val likedSongs by viewModel.likedSongs.collectAsState()
@@ -48,7 +50,6 @@ fun ListeningHistoryScreen(
     val isLoggedIn by viewModel.isLoggedIn.collectAsState()
 
     val likedSongIds = remember(likedSongs) { likedSongs.map { it.songId }.toSet() }
-    var songToAddToPlaylist by remember { mutableStateOf<Song?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
 
     if (showClearDialog) {
@@ -204,9 +205,12 @@ fun ListeningHistoryScreen(
 
                     HistorySongItem(
                         item = item,
+                        song = songModel,
                         isLoggedIn = isLoggedIn,
                         isLiked = isLiked,
                         onPlay = { viewModel.playRecentlyPlayed(item) },
+                        onPlayNext = { viewModel.playNext(songModel) },
+                        onAddToQueue = { viewModel.addToQueue(songModel) },
                         onToggleLike = {
                             viewModel.toggleLike(songModel)
                             Toast.makeText(
@@ -216,7 +220,7 @@ fun ListeningHistoryScreen(
                             ).show()
                         },
                         onAddToPlaylist = {
-                            songToAddToPlaylist = songModel
+                            addToPlaylist(songModel)
                         }
                     )
                 }
@@ -232,14 +236,17 @@ fun ListeningHistoryScreen(
 @Composable
 private fun HistorySongItem(
     item: RecentlyPlayedEntity,
+    song: Song,
     isLoggedIn: Boolean,
     isLiked: Boolean,
     onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
 ) {
     val context = LocalContext.current
-    var showMenu by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -280,66 +287,40 @@ private fun HistorySongItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Box {
-                IconButton(
-                    onClick = {
-                        if (!isLoggedIn) {
-                            Toast.makeText(
-                                context,
-                                "Please log in to like songs or add to playlists",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            showMenu = true
-                        }
-                    }
-                ) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "Options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(if (isLiked) "Unlike song" else "Like song") },
-                        leadingIcon = {
-                            Icon(
-                                if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = null,
-                                tint = if (isLiked) Color(0xFFEC4899) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onToggleLike()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to playlist") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.PlaylistAdd,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onAddToPlaylist()
-                        }
-                    )
-                }
+            IconButton(
+                onClick = { showOptions = true }
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
+    }
+
+    if (showOptions) {
+        com.musicsportsapp.features.music.components.SongOptionsSheet(
+            song = song,
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onAddToPlaylist = {
+                if (!isLoggedIn) {
+                    Toast.makeText(context, "Please log in to add to playlist", Toast.LENGTH_SHORT).show()
+                } else {
+                    onAddToPlaylist()
+                }
+            },
+            onLike = {
+                if (!isLoggedIn) {
+                    Toast.makeText(context, "Please log in to like songs", Toast.LENGTH_SHORT).show()
+                } else {
+                    onToggleLike()
+                }
+            },
+            onDismiss = { showOptions = false }
+        )
     }
 }
 

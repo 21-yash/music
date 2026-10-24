@@ -1,13 +1,26 @@
 package com.musicsportsapp.features.music.playback
 
 import android.content.Intent
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.musicsportsapp.R
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@OptIn(UnstableApi::class)
+@AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
+
+    @Inject
+    lateinit var audioCacheProvider: AudioCacheProvider
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
@@ -20,13 +33,42 @@ class PlaybackService : MediaSessionService() {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
+        val cacheDataSourceFactory = audioCacheProvider.buildCacheDataSourceFactory()
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(cacheDataSourceFactory)
+
         player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
 
+        val callback = object : MediaSession.Callback {
+            override fun onAddMediaItems(
+                mediaSession: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                mediaItems: MutableList<MediaItem>
+            ): com.google.common.util.concurrent.ListenableFuture<MutableList<MediaItem>> {
+                val updatedItems = mediaItems.map { item ->
+                    val customKey = item.localConfiguration?.customCacheKey ?: item.mediaId
+                    item.buildUpon()
+                        .setCustomCacheKey(customKey)
+                        .build()
+                }.toMutableList()
+                return com.google.common.util.concurrent.Futures.immediateFuture(updatedItems)
+            }
+        }
+
         mediaSession = MediaSession.Builder(this, player!!)
+            .setCallback(callback)
             .build()
+
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .build()
+            .apply {
+                setSmallIcon(R.drawable.ic_stat_synq)
+            }
+        setMediaNotificationProvider(notificationProvider)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

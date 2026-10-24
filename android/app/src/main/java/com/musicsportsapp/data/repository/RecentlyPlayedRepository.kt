@@ -2,6 +2,7 @@ package com.musicsportsapp.data.repository
 
 import com.musicsportsapp.data.local.db.dao.RecentlyPlayedDao
 import com.musicsportsapp.data.local.db.entity.RecentlyPlayedEntity
+import com.musicsportsapp.features.music.domain.model.ArtistCredit
 import com.musicsportsapp.features.music.domain.model.Song
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -12,6 +13,26 @@ class RecentlyPlayedRepository @Inject constructor(
     private val recentlyPlayedDao: RecentlyPlayedDao,
 ) {
     val recentlyPlayed: Flow<List<RecentlyPlayedEntity>> = recentlyPlayedDao.getAll()
+
+    suspend fun getRecentSongsList(): List<Song> {
+        return recentlyPlayedDao.getRecentList().map { entity ->
+            Song(
+                id = entity.songId,
+                title = entity.title,
+                artists = listOf(ArtistCredit(id = entity.artist, name = entity.artist, imageUrl = null)),
+                album = null,
+                durationSeconds = entity.durationSeconds,
+                imageUrl = entity.imageUrl,
+                year = "",
+                language = "",
+                hasLyrics = false,
+                playCount = 0,
+                label = "",
+                streamRef = entity.songId,
+                providerId = entity.providerId,
+            )
+        }
+    }
 
     suspend fun recordPlay(song: Song) {
         val entity = RecentlyPlayedEntity(

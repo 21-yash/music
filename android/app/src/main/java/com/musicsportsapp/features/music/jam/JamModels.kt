@@ -21,3 +21,6 @@ data class JamState(
     val queue: List<Song> = emptyList(),
     val error: String? = null
 )
+
+val LocalIsInJam = androidx.compose.runtime.compositionLocalOf { false }
+

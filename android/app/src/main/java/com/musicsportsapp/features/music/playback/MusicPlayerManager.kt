@@ -35,12 +35,24 @@ import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExt
 import javax.inject.Inject
 import javax.inject.Singleton
 
+interface JamPlaybackInterceptor {
+    fun onPlaySong(song: Song): Boolean
+    fun onPlayNext(song: Song): Boolean
+    fun onAddToQueue(song: Song): Boolean
+    fun onPlayQueue(songs: List<Song>, startIndex: Int): Boolean
+    fun onStartArtistRadio(artist: Artist): Boolean
+}
+
 @Singleton
 class MusicPlayerManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: MusicRepository,
     private val recentlyPlayedRepository: RecentlyPlayedRepository,
+    private val audioCacheProvider: AudioCacheProvider,
+    private val streamCacheStorage: StreamCacheStorage,
+    private val networkMonitor: com.musicsportsapp.core.network.NetworkMonitor,
 ) {
+    var jamInterceptor: JamPlaybackInterceptor? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -75,7 +87,8 @@ class MusicPlayerManager @Inject constructor(
     private val sessionPlayedIds = mutableSetOf<String>()
 
     // Tracks IDs of songs automatically appended as recommendations
-    private val recommendedSongIds = mutableSetOf<String>()
+    private val _recommendedSongIds = MutableStateFlow<Set<String>>(emptySet())
+    val recommendedSongIds: StateFlow<Set<String>> = _recommendedSongIds.asStateFlow()
 
     // Personal queue isolation for Jam sessions
     private var stashedPersonalQueue: List<Song>? = null
@@ -90,6 +103,9 @@ class MusicPlayerManager @Inject constructor(
     // Lazy paging state for large playlists
     private var sourcePlaylist: List<Song>? = null
     private var nextSourceIndex: Int = 0
+
+    // Tracks original unshuffled queue for restoring sequence when shuffle is disabled
+    private var unshuffledQueue: List<Song>? = null
 
     companion object {
         private const val MAX_INITIAL_QUEUE_SIZE = 100
@@ -123,10 +139,12 @@ class MusicPlayerManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     fun playSong(song: Song) {
+        if (jamInterceptor?.onPlaySong(song) == true) return
         activeRadioArtist = null
         sourcePlaylist = null
         nextSourceIndex = 0
-        recommendedSongIds.clear()
+        unshuffledQueue = null
+        _recommendedSongIds.value = emptySet()
         sessionPlayedIds.add(song.id)
         _queue.value = listOf(song)
         _currentIndex.value = 0
@@ -138,30 +156,45 @@ class MusicPlayerManager @Inject constructor(
 
     fun setQueue(songs: List<Song>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
+        if (jamInterceptor?.onPlayQueue(songs, startIndex) == true) return
         activeRadioArtist = null
-        recommendedSongIds.clear()
+        _recommendedSongIds.value = emptySet()
         val validIndex = startIndex.coerceIn(0, songs.size - 1)
+        unshuffledQueue = songs
 
-        if (songs.size <= MAX_INITIAL_QUEUE_SIZE) {
+        val finalQueue: List<Song>
+        val finalIndex: Int
+
+        if (_isShuffle.value && songs.size > 1) {
+            val target = songs[validIndex]
+            val others = songs.filterIndexed { index, _ -> index != validIndex }.shuffled()
+            finalQueue = listOf(target) + others
+            finalIndex = 0
+        } else {
+            finalQueue = songs
+            finalIndex = validIndex
+        }
+
+        if (finalQueue.size <= MAX_INITIAL_QUEUE_SIZE) {
             sourcePlaylist = null
             nextSourceIndex = 0
-            _queue.value = songs
-            _currentIndex.value = validIndex
-            val target = songs[validIndex]
+            _queue.value = finalQueue
+            _currentIndex.value = finalIndex
+            val target = finalQueue[finalIndex]
             sessionPlayedIds.add(target.id)
             loadAndPlay(target)
 
-            if (songs.size - validIndex <= 2) {
+            if (finalQueue.size - finalIndex <= 2) {
                 prefetchAutoplayRecommendations(target)
             }
         } else {
             // Safe windowing for large playlists to prevent memory spikes & UI lag
-            sourcePlaylist = songs
+            sourcePlaylist = finalQueue
             val windowBefore = 15
-            val fromIndex = (validIndex - windowBefore).coerceAtLeast(0)
-            val toIndex = (fromIndex + MAX_INITIAL_QUEUE_SIZE).coerceAtMost(songs.size)
-            val windowedList = songs.subList(fromIndex, toIndex)
-            val targetIndexInWindow = (validIndex - fromIndex).coerceIn(0, windowedList.size - 1)
+            val fromIndex = (finalIndex - windowBefore).coerceAtLeast(0)
+            val toIndex = (fromIndex + MAX_INITIAL_QUEUE_SIZE).coerceAtMost(finalQueue.size)
+            val windowedList = finalQueue.subList(fromIndex, toIndex)
+            val targetIndexInWindow = (finalIndex - fromIndex).coerceIn(0, windowedList.size - 1)
 
             nextSourceIndex = toIndex
             _queue.value = windowedList
@@ -173,9 +206,10 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun startArtistRadio(artist: Artist) {
+        if (jamInterceptor?.onStartArtistRadio(artist) == true) return
         sourcePlaylist = null
         nextSourceIndex = 0
-        recommendedSongIds.clear()
+        _recommendedSongIds.value = emptySet()
         activeRadioArtist = artist.name
 
         val initialTracks = if (artist.topSongs.isNotEmpty()) {
@@ -229,13 +263,29 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private fun loadAndPlay(song: Song) {
+    private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L) {
+        // If this song was part of recommended songs, push it above the separator
+        if (song.id in _recommendedSongIds.value) {
+            _recommendedSongIds.update { recs ->
+                val currentIdx = _currentIndex.value
+                val q = _queue.value
+                val idsToRemove = q.subList(0, (currentIdx + 1).coerceAtMost(q.size))
+                    .map { it.id }
+                    .toSet()
+                recs - idsToRemove
+            }
+        }
+
+        // Immediately stop existing playback so previous song never keeps playing
+        controller?.stop()
+        stopPositionTracking()
+
         _playbackState.update { 
             it.copy(
                 currentSong = song, 
                 error = null, 
                 isPlaying = true,
-                playbackPositionMs = 0L,
+                playbackPositionMs = initialPositionMs,
                 bufferedPositionMs = 0L
             ) 
         }
@@ -249,15 +299,38 @@ class MusicPlayerManager @Inject constructor(
                 recentlyPlayedRepository.recordPlay(song)
             } catch (_: Exception) {}
 
+            // 1. Check if song is already cached in local SimpleCache
+            val isCached = audioCacheProvider.isSongCached(song.id)
+            val cachedStreamUri = streamCacheStorage.getStreamUri(song.id)
+
+            if (isCached) {
+                val streamUri = cachedStreamUri ?: "https://audio.cache/${song.id}.mp4"
+                playMediaUri(song, streamUri, initialPositionMs)
+                return@launch
+            }
+
+            // 2. If not cached, check if offline
+            if (!networkMonitor.isOnline.value) {
+                notifyOfflineUnavailable()
+                return@launch
+            }
+
             try {
-                // 1. Resolve stream via backend
+                // 3. Resolve stream via backend
                 val streamResult = repository.resolveStream(song.id, song.providerId)
                 if (streamResult !is AppResult.Success) {
-                    _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
+                    if (!networkMonitor.isOnline.value) {
+                        notifyOfflineUnavailable()
+                    } else {
+                        controller?.stop()
+                        controller?.clearMediaItems()
+                        stopPositionTracking()
+                        _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
+                    }
                     return@launch
                 }
 
-                // 2. Extract media URI
+                // 4. Extract media URI
                 val finalUri = when (val info = streamResult.data) {
                     is StreamInfo.JioSaavn -> info.url
                     is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
@@ -265,33 +338,84 @@ class MusicPlayerManager @Inject constructor(
                 }
 
                 if (finalUri.isNullOrBlank()) {
-                    _playbackState.update { it.copy(error = "Stream not available for this song", isPlaying = false) }
+                    if (!networkMonitor.isOnline.value) {
+                        notifyOfflineUnavailable()
+                    } else {
+                        controller?.stop()
+                        controller?.clearMediaItems()
+                        stopPositionTracking()
+                        _playbackState.update { it.copy(error = "Stream not available for this song", isPlaying = false) }
+                    }
                     return@launch
                 }
 
-                val mediaMetadata = MediaMetadata.Builder()
-                    .setTitle(song.title)
-                    .setArtist(song.primaryArtistName)
-                    .setArtworkUri(android.net.Uri.parse(song.imageUrl ?: ""))
-                    .build()
+                // 5. Store resolved stream URI for future offline playback from SimpleCache
+                streamCacheStorage.saveStreamUri(song.id, finalUri)
 
-                val mediaItem = MediaItem.Builder()
-                    .setMediaId(song.id)
-                    .setUri(finalUri)
-                    .setMediaMetadata(mediaMetadata)
-                    .build()
+                // 6. Play media item
+                playMediaUri(song, finalUri, initialPositionMs)
 
-                controller?.apply {
-                    setMediaItem(mediaItem)
-                    prepare()
-                    play()
-                }
-
-                startPositionTracking()
             } catch (e: Exception) {
-                _playbackState.update { it.copy(error = e.message ?: "Unknown playback error", isPlaying = false) }
+                if (!networkMonitor.isOnline.value) {
+                    notifyOfflineUnavailable()
+                } else {
+                    controller?.stop()
+                    controller?.clearMediaItems()
+                    stopPositionTracking()
+                    _playbackState.update { it.copy(error = e.message ?: "Unknown playback error", isPlaying = false) }
+                }
             }
         }
+    }
+
+    private suspend fun notifyOfflineUnavailable() {
+        controller?.stop()
+        controller?.clearMediaItems()
+        stopPositionTracking()
+        val errorMsg = "This song is not available for offline playback"
+        _playbackState.update { 
+            it.copy(
+                error = errorMsg, 
+                isPlaying = false
+            ) 
+        }
+        withContext(Dispatchers.Main) {
+            android.widget.Toast.makeText(context, errorMsg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L) {
+        val mediaMetadata = MediaMetadata.Builder()
+            .setTitle(song.title)
+            .setArtist(song.primaryArtistName)
+            .setArtworkUri(android.net.Uri.parse(song.imageUrl ?: ""))
+            .build()
+
+        val cacheKey = if (audioCacheProvider.hasSpansForKey(song.id)) {
+            song.id
+        } else if (audioCacheProvider.hasSpansForKey(uri)) {
+            uri
+        } else {
+            song.id
+        }
+
+        val mediaItem = MediaItem.Builder()
+            .setMediaId(song.id)
+            .setCustomCacheKey(cacheKey)
+            .setUri(uri)
+            .setMediaMetadata(mediaMetadata)
+            .build()
+
+        controller?.apply {
+            setMediaItem(mediaItem)
+            if (initialPositionMs > 0L) {
+                seekTo(initialPositionMs)
+            }
+            prepare()
+            play()
+        }
+
+        startPositionTracking()
     }
 
     private fun fetchLyrics(song: Song) {
@@ -299,9 +423,14 @@ class MusicPlayerManager @Inject constructor(
             _isLyricsLoading.value = true
             _currentLyrics.value = null
             try {
+                val allArtists = if (song.artists.isNotEmpty()) {
+                    song.artists.joinToString(", ") { it.name }
+                } else {
+                    song.primaryArtistName
+                }
                 val res = repository.getLyrics(
                     title = song.title,
-                    artist = song.primaryArtistName,
+                    artist = allArtists,
                     duration = song.durationSeconds,
                     songId = song.id,
                     provider = song.providerId
@@ -341,8 +470,16 @@ class MusicPlayerManager @Inject constructor(
                         sessionHistoryIds = sessionPlayedIds
                     )
                     if (unique.isNotEmpty()) {
-                        recommendedSongIds.addAll(unique.map { it.id })
+                        val wasAtEnd = _currentIndex.value >= currentList.size - 1 && !_playbackState.value.isPlaying
+                        _recommendedSongIds.update { it + unique.map { s -> s.id } }
                         _queue.update { it + unique }
+                        if (wasAtEnd && currentList.isNotEmpty()) {
+                            val nextIdx = _currentIndex.value + 1
+                            if (nextIdx in _queue.value.indices) {
+                                _currentIndex.value = nextIdx
+                                loadAndPlay(_queue.value[nextIdx])
+                            }
+                        }
                     }
                 }
             } catch (_: Exception) {
@@ -378,9 +515,33 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
+    fun play() {
+        controller?.let {
+            if (!it.isPlaying) {
+                it.play()
+                startPositionTracking()
+            }
+        }
+    }
+
     fun pause() {
         controller?.pause()
         stopPositionTracking()
+    }
+
+    fun stop() {
+        controller?.stop()
+        controller?.clearMediaItems()
+        stopPositionTracking()
+        _playbackState.update {
+            it.copy(
+                isPlaying = false,
+                currentSong = null,
+                playbackPositionMs = 0L,
+                bufferedPositionMs = 0L,
+                error = null
+            )
+        }
     }
 
     fun seekTo(positionMs: Long) {
@@ -405,6 +566,45 @@ class MusicPlayerManager @Inject constructor(
         }
 
         val q = _queue.value
+        val isOffline = !networkMonitor.isOnline.value
+
+        if (isOffline) {
+            // 1. Look for next cached song in current queue (forward or wrap-around)
+            val nextCachedIdx = ((_currentIndex.value + 1) until q.size)
+                .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                ?: (0 until _currentIndex.value)
+                    .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+
+            if (nextCachedIdx != null && nextCachedIdx != _currentIndex.value) {
+                _currentIndex.value = nextCachedIdx
+                loadAndPlay(q[nextCachedIdx])
+                return
+            }
+
+            // 2. If no other cached song in current queue, look for any cached song in recent history
+            scope.launch {
+                val currentSongId = _playbackState.value.currentSong?.id
+                val recentCached = try {
+                    recentlyPlayedRepository.getRecentSongsList()
+                        .firstOrNull { it.id != currentSongId && audioCacheProvider.isSongCached(it.id) }
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (recentCached != null) {
+                    _queue.update { current ->
+                        val withoutDup = current.filterNot { it.id == recentCached.id }
+                        withoutDup + recentCached
+                    }
+                    _currentIndex.value = _queue.value.size - 1
+                    loadAndPlay(recentCached)
+                } else {
+                    notifyOfflineUnavailable()
+                }
+            }
+            return
+        }
+
         val nextIdx = _currentIndex.value + 1
         val src = sourcePlaylist
 
@@ -470,8 +670,45 @@ class MusicPlayerManager @Inject constructor(
             return
         }
 
-        val prevIdx = _currentIndex.value - 1
         val q = _queue.value
+        val isOffline = !networkMonitor.isOnline.value
+
+        if (isOffline) {
+            val prevCachedIdx = ((_currentIndex.value - 1) downTo 0)
+                .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                ?: (q.size - 1 downTo _currentIndex.value + 1)
+                    .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+
+            if (prevCachedIdx != null && prevCachedIdx != _currentIndex.value) {
+                _currentIndex.value = prevCachedIdx
+                loadAndPlay(q[prevCachedIdx])
+                return
+            }
+
+            scope.launch {
+                val currentSongId = _playbackState.value.currentSong?.id
+                val recentCached = try {
+                    recentlyPlayedRepository.getRecentSongsList()
+                        .firstOrNull { it.id != currentSongId && audioCacheProvider.isSongCached(it.id) }
+                } catch (_: Exception) {
+                    null
+                }
+
+                if (recentCached != null) {
+                    _queue.update { current ->
+                        val withoutDup = current.filterNot { it.id == recentCached.id }
+                        withoutDup + recentCached
+                    }
+                    _currentIndex.value = _queue.value.size - 1
+                    loadAndPlay(recentCached)
+                } else {
+                    seekTo(0)
+                }
+            }
+            return
+        }
+
+        val prevIdx = _currentIndex.value - 1
         if (prevIdx >= 0 && prevIdx in q.indices) {
             _currentIndex.value = prevIdx
             loadAndPlay(q[prevIdx])
@@ -506,18 +743,19 @@ class MusicPlayerManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     fun addToQueue(song: Song) {
+        if (jamInterceptor?.onAddToQueue(song) == true) return
         if (_queue.value.isEmpty() || playbackState.value.currentSong == null) {
             playSong(song)
             return
         }
-        recommendedSongIds.remove(song.id)
+        _recommendedSongIds.update { it - song.id }
         _queue.update { current ->
             val filtered = current.filterNot { SongDeduplicator.areSongsEquivalent(it, song) }.toMutableList()
             val currIdx = _currentIndex.value
             // Find the first recommended song after currentIndex so user queue plays first
             val firstRecIdx = filtered.indices
                 .filter { it > currIdx }
-                .firstOrNull { filtered[it].id in recommendedSongIds }
+                .firstOrNull { filtered[it].id in _recommendedSongIds.value }
 
             val insertAt = firstRecIdx ?: filtered.size
             filtered.add(insertAt, song)
@@ -526,11 +764,12 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun playNext(song: Song) {
+        if (jamInterceptor?.onPlayNext(song) == true) return
         if (_queue.value.isEmpty() || playbackState.value.currentSong == null) {
             playSong(song)
             return
         }
-        recommendedSongIds.remove(song.id)
+        _recommendedSongIds.update { it - song.id }
         _queue.update { current ->
             val filtered = current.filterNot { SongDeduplicator.areSongsEquivalent(it, song) }.toMutableList()
             val insertAt = (_currentIndex.value + 1).coerceAtMost(filtered.size)
@@ -542,7 +781,8 @@ class MusicPlayerManager @Inject constructor(
     fun removeQueueItem(index: Int) {
         val list = _queue.value.toMutableList()
         if (index !in list.indices) return
-        list.removeAt(index)
+        val removed = list.removeAt(index)
+        _recommendedSongIds.update { it - removed.id }
         _queue.value = list
         if (index < _currentIndex.value) {
             _currentIndex.value = (_currentIndex.value - 1).coerceAtLeast(0)
@@ -576,7 +816,52 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun toggleShuffle() {
-        _isShuffle.update { !it }
+        val willBeShuffle = !_isShuffle.value
+        _isShuffle.value = willBeShuffle
+
+        val currentQueue = _queue.value
+        if (currentQueue.isEmpty()) return
+
+        val currentIdx = _currentIndex.value
+        if (currentIdx !in currentQueue.indices) return
+
+        val playedHistoryAndCurrent = currentQueue.subList(0, currentIdx + 1)
+        val recIds = _recommendedSongIds.value
+        val firstRecIdx = currentQueue.indices
+            .filter { it > currentIdx }
+            .firstOrNull { currentQueue[it].id in recIds }
+
+        val endOfUpcoming = firstRecIdx ?: currentQueue.size
+        val upcomingUserSongs = currentQueue.subList(currentIdx + 1, endOfUpcoming)
+        val recommendedPart = if (firstRecIdx != null) currentQueue.subList(firstRecIdx, currentQueue.size) else emptyList()
+
+        if (willBeShuffle) {
+            // Turning shuffle ON: stash current queue as unshuffled if not already stashed
+            if (unshuffledQueue == null) {
+                unshuffledQueue = currentQueue
+            }
+            if (upcomingUserSongs.size > 1) {
+                val shuffledUpcoming = upcomingUserSongs.shuffled()
+                _queue.value = playedHistoryAndCurrent + shuffledUpcoming + recommendedPart
+            }
+        } else {
+            // Turning shuffle OFF: restore original sequence of upcoming songs
+            val orig = unshuffledQueue
+            if (orig != null && upcomingUserSongs.isNotEmpty()) {
+                val playedIds = playedHistoryAndCurrent.map { it.id }.toSet()
+                val restoredUpcoming = orig.filterNot { it.id in playedIds }
+                if (restoredUpcoming.isNotEmpty()) {
+                    _queue.value = playedHistoryAndCurrent + restoredUpcoming + recommendedPart
+                }
+            }
+            unshuffledQueue = null
+        }
+    }
+
+    fun setShuffle(enabled: Boolean) {
+        if (_isShuffle.value != enabled) {
+            toggleShuffle()
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -615,6 +900,19 @@ class MusicPlayerManager @Inject constructor(
                 _currentIndex.value = idx
             }
         }
+    }
+
+    fun playJamSyncSong(song: Song, initialPositionMs: Long = 0L) {
+        activeRadioArtist = null
+        sourcePlaylist = null
+        nextSourceIndex = 0
+        _recommendedSongIds.value = emptySet()
+        sessionPlayedIds.add(song.id)
+        val idx = _queue.value.indexOfFirst { it.id == song.id }
+        if (idx >= 0) {
+            _currentIndex.value = idx
+        }
+        loadAndPlay(song, initialPositionMs)
     }
 
     // ─────────────────────────────────────────────────────────────

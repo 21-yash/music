@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Override Media3's default small icon for media notification -->
+    <drawable name="media3_notification_small_icon">@drawable/ic_stat_synq</drawable>
+</resources>

@@ -1,8 +1,8 @@
 package com.musicsportsapp.features.music
 
 import android.os.Build
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import com.musicsportsapp.features.music.components.SongOptionsSheet
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -76,6 +76,9 @@ import com.musicsportsapp.features.music.domain.model.Song
 import com.musicsportsapp.features.music.jam.JamParticipantUi
 import com.musicsportsapp.features.music.jam.JamState
 import com.musicsportsapp.features.music.playback.PlaybackState
+import android.content.Intent
+import android.widget.Toast
+import com.musicsportsapp.features.music.components.AnimatedEqualizerBars
 import com.musicsportsapp.ui.isAppDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -86,9 +89,10 @@ val BrandPink = Color(0xFFFF2A5F)
 val Accent = Color(0xFFFF3366)
 
 // Cohesive vibrant Pink Gradient used across all tabs & actions
-private val PinkBrush = Brush.linearGradient(
+val PinkGradient = Brush.linearGradient(
     listOf(Color(0xFFFF2A5F), Color(0xFFFF5E8A), Color(0xFFE11D48))
 )
+val PinkBrush = PinkGradient
 
 private enum class PlayerPanel { Queue, Lyrics }
 
@@ -136,6 +140,9 @@ fun FullPlayerSheet(
     onToggleGuestReorder: (Boolean) -> Unit = {},
     onPlayNext: (Song) -> Unit = {},
     onAddToQueue: (Song) -> Unit = {},
+    recommendedSongIds: Set<String> = emptySet(),
+    onAddToPlaylist: (Song) -> Unit = {},
+    onSongLike: (Song) -> Unit = {},
     onNavigateToJam: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
@@ -154,6 +161,7 @@ fun FullPlayerSheet(
     var showJamIntro by remember { mutableStateOf(false) }
     var showSleepTimer by remember { mutableStateOf(false) }
     var showMoreOptions by remember { mutableStateOf(false) }
+    var selectedQueueSongForOptions by remember { mutableStateOf<Song?>(null) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -445,7 +453,11 @@ fun FullPlayerSheet(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onToggleShuffle) {
+                        IconButton(onClick = {
+                            val willBeShuffle = !isShuffle
+                            onToggleShuffle()
+                            Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
+                        }) {
                             Icon(
                                 Icons.Default.Shuffle,
                                 contentDescription = "Shuffle",
@@ -493,7 +505,11 @@ fun FullPlayerSheet(
                             )
                         }
                         // Repeat toggle: binary OFF vs ON (loops current song)
-                        IconButton(onClick = onToggleRepeat) {
+                        IconButton(onClick = {
+                            val willBeRepeat = !isRepeatOne
+                            onToggleRepeat()
+                            Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
+                        }) {
                             Icon(
                                 Icons.Default.RepeatOne,
                                 contentDescription = "Repeat",
@@ -541,6 +557,7 @@ fun FullPlayerSheet(
                         Text("Queue is empty", color = textSecondary, fontSize = 15.sp)
                     }
                 } else {
+                    val firstRecommendedIdx = queue.indexOfFirst { it.id in recommendedSongIds }
                     LazyColumn(
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
@@ -548,16 +565,45 @@ fun FullPlayerSheet(
                     ) {
                         itemsIndexed(queue) { index, item ->
                             val isPlayingThis = index == currentIndex
+                            val isRec = item.id in recommendedSongIds
+
+                            // Visual separator before first recommended song
+                            if (index == firstRecommendedIdx) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "RECOMMENDED",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Accent,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    HorizontalDivider(
+                                        modifier = Modifier.weight(1f),
+                                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+
                             QueueItemRow(
                                 song = item,
                                 active = isPlayingThis,
                                 isDark = isDark,
-                                canMoveUp = index > 0,
-                                canMoveDown = index < queue.size - 1,
+                                isPlaying = isPlayingThis && playbackState.isPlaying,
+                                isRecommended = isRec,
+                                canMoveUp = index > 0 && queue[index - 1].id !in recommendedSongIds,
+                                canMoveDown = index < queue.size - 1 && queue[index + 1].id !in recommendedSongIds,
                                 onClick = { onPlayQueueIndex(index) },
                                 onMoveUp = { onReorderQueue(index, index - 1) },
                                 onMoveDown = { onReorderQueue(index, index + 1) },
-                                onRemove = { onRemoveQueueItem(index) }
+                                onRemove = { onRemoveQueueItem(index) },
+                                onOptionsClick = { selectedQueueSongForOptions = item }
                             )
                         }
                     }
@@ -681,9 +727,38 @@ fun FullPlayerSheet(
                             showMoreOptions = false
                             showSleepTimer = true
                         },
+                        onAddToPlaylist = {
+                            onAddToPlaylist(song)
+                            showMoreOptions = false
+                        },
                         onDismiss = { showMoreOptions = false }
                     )
                 }
+            }
+
+            // Song options bottom sheet for recommended queue songs
+            selectedQueueSongForOptions?.let { recSong ->
+                SongOptionsSheet(
+                    song = recSong,
+                    isInJam = jamState.isInJam,
+                    onPlayNext = {
+                        onPlayNext(recSong)
+                        selectedQueueSongForOptions = null
+                    },
+                    onAddToQueue = {
+                        onAddToQueue(recSong)
+                        selectedQueueSongForOptions = null
+                    },
+                    onAddToPlaylist = {
+                        onAddToPlaylist(recSong)
+                        selectedQueueSongForOptions = null
+                    },
+                    onLike = {
+                        onSongLike(recSong)
+                        selectedQueueSongForOptions = null
+                    },
+                    onDismiss = { selectedQueueSongForOptions = null }
+                )
             }
         }
     }
@@ -841,6 +916,7 @@ private fun PlayerMoreOptionsSheet(
     onLikeClick: () -> Unit,
     onStartJam: () -> Unit,
     onOpenSleepTimer: () -> Unit,
+    onAddToPlaylist: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
@@ -957,6 +1033,14 @@ private fun PlayerMoreOptionsSheet(
         )
 
         OptionRowItem(
+            icon = Icons.Default.PlaylistAdd,
+            title = "Add to Playlist",
+            subtitle = "Save track to your custom playlist",
+            isDark = isDark,
+            onClick = onAddToPlaylist
+        )
+
+        OptionRowItem(
             icon = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
             title = if (isLiked) "Remove from Liked" else "Add to Liked Songs",
             subtitle = null,
@@ -983,11 +1067,15 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.Share,
             title = "Share Song",
-            subtitle = "Copy track details to clipboard",
+            subtitle = "Share via apps or copy link",
             isDark = isDark,
             onClick = {
-                clipboardManager.setText(AnnotatedString("${song.title} - ${song.primaryArtistName}"))
-                Toast.makeText(context, "Copied track info to clipboard", Toast.LENGTH_SHORT).show()
+                val shareUrl = "https://21yash.online/track/${song.id}"
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    putExtra(Intent.EXTRA_TEXT, shareUrl)
+                    type = "text/plain"
+                }
+                context.startActivity(Intent.createChooser(sendIntent, "Share Song"))
                 onDismiss()
             }
         )
@@ -1192,13 +1280,16 @@ private fun QueueItemRow(
     song: Song,
     active: Boolean,
     isDark: Boolean,
+    isPlaying: Boolean = true,
     canMoveUp: Boolean = false,
     canMoveDown: Boolean = false,
     showReorderControls: Boolean = true,
+    isRecommended: Boolean = false,
     onClick: () -> Unit = {},
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
-    onRemove: () -> Unit = {}
+    onRemove: () -> Unit = {},
+    onOptionsClick: (() -> Unit)? = null
 ) {
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
@@ -1243,12 +1334,32 @@ private fun QueueItemRow(
         }
 
         if (active) {
-            Icon(
-                Icons.Default.BarChart,
-                contentDescription = "Playing",
-                tint = Accent,
-                modifier = Modifier.size(22.dp)
+            AnimatedEqualizerBars(
+                color = Accent,
+                isPlaying = isPlaying,
+                barCount = 3,
+                modifier = Modifier.padding(end = 4.dp)
             )
+        } else if (isRecommended) {
+            // Recommended song controls: Three dots menu + cross to remove (no reorder)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { onOptionsClick?.invoke() }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "More Options",
+                        tint = textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove from Queue",
+                        tint = textSecondary.copy(alpha = 0.6f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         } else if (showReorderControls) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (canMoveUp) {

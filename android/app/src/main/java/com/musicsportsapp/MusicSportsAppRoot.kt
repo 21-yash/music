@@ -21,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,12 +57,25 @@ fun MusicSportsAppRoot(
     val currentRoute = navBackStackEntry?.destination?.route
     
     val playbackState by rootViewModel.playbackState.collectAsState()
+    val jamState by rootViewModel.jamState.collectAsState()
+    val recommendedSongIds by rootViewModel.recommendedSongIds.collectAsState()
+    val playlists by rootViewModel.playlists.collectAsState()
+    val songForPlaylistAdd by rootViewModel.songForPlaylistAdd.collectAsState()
+    val likedSongIds by rootViewModel.likedSongIds.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     
     var showFullPlayer by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
+    LaunchedEffect(playbackState.error) {
+        playbackState.error?.let { err ->
+            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Bottom bar is visible on all bottom-nav tabs, hidden on sub-pages
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
-    val showMiniPlayer = currentRoute != Screen.MatchDetails().route
+    val isPlaylistEditing by rootViewModel.isPlaylistEditing.collectAsState()
+    val showMiniPlayer = currentRoute != Screen.MatchDetails().route && !isPlaylistEditing
 
     val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
     val user by rootViewModel.user.collectAsState()
@@ -103,10 +117,48 @@ fun MusicSportsAppRoot(
         )
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background
-    ) { innerPadding ->
+    songForPlaylistAdd?.let { song ->
+        com.musicsportsapp.features.music.components.AddToPlaylistSheet(
+            song = song,
+            playlists = playlists,
+            onSelectPlaylist = { playlist ->
+                rootViewModel.addSongToExistingPlaylist(playlist.serverId, song) { success, msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onCreatePlaylist = { name ->
+                rootViewModel.createPlaylistAndAddSong(name, song) { success, msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { rootViewModel.dismissAddToPlaylist() }
+        )
+    }
+
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.musicsportsapp.features.music.jam.LocalIsInJam provides jamState.isInJam,
+        com.musicsportsapp.features.music.components.LocalAddToPlaylist provides { song ->
+            rootViewModel.showAddToPlaylist(song)
+        },
+        com.musicsportsapp.features.music.components.LocalOnNavigateToSongDetails provides { songId ->
+            showFullPlayer = false
+            navController.navigate(com.musicsportsapp.navigation.Screen.SongDetails().createRoute(songId))
+        },
+        com.musicsportsapp.features.music.components.LocalLikedSongIds provides likedSongIds,
+        com.musicsportsapp.features.music.components.LocalToggleLike provides { song ->
+            val wasLiked = likedSongIds.contains(song.id)
+            rootViewModel.toggleLike(song)
+            android.widget.Toast.makeText(
+                context,
+                if (wasLiked) "Removed from Liked Songs" else "Added to Liked Songs",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background
+        ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize()) {
             AppNavHost(
                 navController = navController,
@@ -128,7 +180,8 @@ fun MusicSportsAppRoot(
                         MiniPlayer(
                             playbackState = playbackState,
                             onPlayPauseClick = { rootViewModel.togglePlayPause() },
-                            onNavigateToNowPlaying = { showFullPlayer = true }
+                            onNavigateToNowPlaying = { showFullPlayer = true },
+                            onDismiss = { rootViewModel.stopPlayback() }
                         )
                     }
                     AnimatedVisibility(
@@ -190,10 +243,14 @@ fun MusicSportsAppRoot(
                     onToggleGuestReorder = { allow -> rootViewModel.setAttendeeReorderPermission(allow) },
                     onPlayNext = { song -> rootViewModel.playNext(song) },
                     onAddToQueue = { song -> rootViewModel.addToQueue(song) },
+                    recommendedSongIds = recommendedSongIds,
+                    onAddToPlaylist = { song -> rootViewModel.showAddToPlaylist(song) },
+                    onSongLike = { song -> rootViewModel.toggleLike(song) },
                     onNavigateToJam = { navController.navigate(Screen.Jam.route) },
                     onDismiss = { showFullPlayer = false }
                 )
             }
         }
     }
+}
 }

@@ -22,14 +22,19 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
+import android.content.Context
+import android.widget.Toast
+import com.musicsportsapp.features.music.playback.JamPlaybackInterceptor
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class JamSessionManager @Inject constructor(
-    private val playerManager: MusicPlayerManager
-) {
+    private val playerManager: MusicPlayerManager,
+    @ApplicationContext private val context: Context
+) : JamPlaybackInterceptor {
     private var socket: Socket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var syncJob: Job? = null
@@ -40,6 +45,8 @@ class JamSessionManager @Inject constructor(
     val jamState: StateFlow<JamState> = _jamState.asStateFlow()
 
     private var myUserId: String = ""
+
+
 
     private fun connectSocket() {
         if (socket?.connected() == true) return
@@ -141,6 +148,12 @@ class JamSessionManager @Inject constructor(
         }
     }
 
+    fun onNetworkRestored() {
+        if (_jamState.value.isInJam && socket?.connected() != true) {
+            socket?.connect()
+        }
+    }
+
     fun createJam(userId: String, username: String, avatarUrl: String? = null) {
         myUserId = userId
         connectSocket()
@@ -175,11 +188,19 @@ class JamSessionManager @Inject constructor(
 
         stopHostSync()
         playerManager.restorePersonalQueue()
+        playerManager.jamInterceptor = null
         _jamState.value = JamState()
     }
 
-    fun addSongToJam(song: Song) {
-        val code = _jamState.value.sessionCode ?: return
+    companion object {
+        const val MAX_JAM_QUEUE_SIZE = 50
+    }
+
+    fun addSongToJam(song: Song): Boolean {
+        if (_jamState.value.queue.size >= MAX_JAM_QUEUE_SIZE) {
+            return false
+        }
+        val code = _jamState.value.sessionCode ?: return false
         try {
             val dto = song.toDto()
             val songJson = JSONObject(json.encodeToString(dto))
@@ -188,9 +209,76 @@ class JamSessionManager @Inject constructor(
                 put("song", songJson)
             }
             socket?.emit("jam:add_to_queue", payload)
+            return true
         } catch (e: Exception) {
             e.printStackTrace()
+            return false
         }
+    }
+
+    fun addSongsToJam(songs: List<Song>, limit: Int = 20): Int {
+        val code = _jamState.value.sessionCode ?: return 0
+        val currentSize = _jamState.value.queue.size
+        val availableSlots = (MAX_JAM_QUEUE_SIZE - currentSize).coerceAtLeast(0)
+        val songsToAdd = songs.take(limit).take(availableSlots)
+
+        songsToAdd.forEach { song ->
+            try {
+                val dto = song.toDto()
+                val songJson = JSONObject(json.encodeToString(dto))
+                val payload = JSONObject().apply {
+                    put("code", code)
+                    put("song", songJson)
+                }
+                socket?.emit("jam:add_to_queue", payload)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        return songsToAdd.size
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // JamPlaybackInterceptor implementations
+    // ─────────────────────────────────────────────────────────────
+
+    override fun onPlaySong(song: Song): Boolean {
+        if (!_jamState.value.isInJam) return false
+        val added = addSongToJam(song)
+        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    override fun onPlayNext(song: Song): Boolean {
+        if (!_jamState.value.isInJam) return false
+        val added = addSongToJam(song)
+        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    override fun onAddToQueue(song: Song): Boolean {
+        if (!_jamState.value.isInJam) return false
+        val added = addSongToJam(song)
+        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    override fun onPlayQueue(songs: List<Song>, startIndex: Int): Boolean {
+        if (!_jamState.value.isInJam) return false
+        val toAdd = songs.drop(startIndex).ifEmpty { songs }
+        val count = addSongsToJam(toAdd, limit = 20)
+        val msg = if (count > 0) "Added top $count songs to Jam queue" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    override fun onStartArtistRadio(artist: com.musicsportsapp.features.music.domain.model.Artist): Boolean {
+        if (!_jamState.value.isInJam) return false
+        Toast.makeText(context, "Artist Radio is disabled during a Jam session", Toast.LENGTH_SHORT).show()
+        return true
     }
 
     fun removeSongFromJam(index: Int) {
@@ -234,7 +322,8 @@ class JamSessionManager @Inject constructor(
         val participants = parseParticipants(session.optJSONArray("participants"))
         val queue = parseSongs(session.optJSONArray("queue"))
 
-        // Stash personal queue when entering jam
+        // Stash personal queue and activate jam playback interceptor when entering jam
+        playerManager.jamInterceptor = this
         playerManager.stashPersonalQueue()
 
         val isHost = isHostCreated || (hostUserId == myUserId)
@@ -273,20 +362,20 @@ class JamSessionManager @Inject constructor(
             } catch (_: Exception) { null }
         }
 
-        val myPlayback = playerManager.playbackState.value
+        val isNewSong = hostSong != null && hostSong.id != myPlayback.currentSong?.id
 
-        if (hostSong != null && hostSong.id != myPlayback.currentSong?.id) {
-            playerManager.playSong(hostSong)
-        }
-
-        val drift = Math.abs(positionMs - myPlayback.playbackPositionMs)
-        if (drift > 1500) {
-            playerManager.seekTo(positionMs)
+        if (isNewSong) {
+            playerManager.playJamSyncSong(hostSong, positionMs)
+        } else {
+            val drift = Math.abs(positionMs - myPlayback.playbackPositionMs)
+            if (drift > 1500) {
+                playerManager.seekTo(positionMs)
+            }
         }
 
         if (isPlaying != myPlayback.isPlaying) {
             if (isPlaying) {
-                playerManager.togglePlayPause()
+                playerManager.play()
             } else {
                 playerManager.pause()
             }

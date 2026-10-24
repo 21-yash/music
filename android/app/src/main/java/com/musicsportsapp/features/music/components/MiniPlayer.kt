@@ -39,6 +39,17 @@ import com.musicsportsapp.ui.GlassProgressBrush
 import com.musicsportsapp.ui.glassContentColors
 import com.musicsportsapp.ui.glassSurface
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+
 /**
  * Floating glass mini-player (prototype style).
  *
@@ -52,7 +63,8 @@ fun MiniPlayer(
     onNavigateToNowPlaying: () -> Unit,
     modifier: Modifier = Modifier,
     onPreviousClick: () -> Unit = {},
-    onNextClick: () -> Unit = {}
+    onNextClick: () -> Unit = {},
+    onDismiss: () -> Unit = {}
 ) {
     AnimatedVisibility(
         visible = playbackState.currentSong != null,
@@ -63,10 +75,35 @@ fun MiniPlayer(
         val colors = glassContentColors()
         val shape = RoundedCornerShape(16.dp)
 
+        var dragOffsetY by remember { mutableStateOf(0f) }
+        val density = LocalDensity.current
+        val dismissThresholdPx = with(density) { 60.dp.toPx() }
+
         Box(
             modifier = modifier
                 .fillMaxWidth()
                 .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                .offset { IntOffset(0, dragOffsetY.roundToInt()) }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { dragOffsetY = 0f },
+                        onVerticalDrag = { change, dragAmount ->
+                            if (dragAmount > 0 || dragOffsetY > 0) {
+                                change.consume()
+                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                            }
+                        },
+                        onDragEnd = {
+                            if (dragOffsetY > dismissThresholdPx) {
+                                onDismiss()
+                            }
+                            dragOffsetY = 0f
+                        },
+                        onDragCancel = {
+                            dragOffsetY = 0f
+                        }
+                    )
+                }
                 .glassSurface(shape)
                 .clickable(onClick = onNavigateToNowPlaying)
         ) {

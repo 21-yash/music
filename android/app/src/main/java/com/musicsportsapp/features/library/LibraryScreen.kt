@@ -68,8 +68,46 @@ fun LibraryScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val showCreateDialog by viewModel.showCreatePlaylistDialog.collectAsState()
     var songToAddToPlaylist by remember { mutableStateOf<Song?>(null) }
+    var playlistToDelete by remember { mutableStateOf<PlaylistEntity?>(null) }
 
     val likedSongIds = remember(likedSongs) { likedSongs.map { it.songId }.toSet() }
+
+    if (playlistToDelete != null) {
+        val targetPlaylist = playlistToDelete!!
+        AlertDialog(
+            onDismissRequest = { playlistToDelete = null },
+            title = {
+                Text(
+                    text = "Delete Playlist",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete \"${targetPlaylist.name}\"? This action cannot be undone.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deletePlaylist(targetPlaylist.serverId)
+                        playlistToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     if (showCreateDialog) {
         CreatePlaylistDialog(
@@ -167,14 +205,23 @@ fun LibraryScreen(
                 }
             }
 
-            // Liked Songs Row (if All or Liked)
+            // 1. Liked Songs Row (if All or Liked)
             if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.LIKED) && isLoggedIn) {
                 item {
                     SectionHeader("Liked Songs", subtitle = "$likedCount songs in cloud library")
                     Spacer(Modifier.height(8.dp))
                     LikedSongsCard(
                         count = likedCount,
-                        onClick = { viewModel.setTab(LibraryTab.LIKED) }
+                        onClick = {
+                            if (onPlaylistClick != null) {
+                                onPlaylistClick("liked")
+                            } else {
+                                viewModel.setTab(LibraryTab.LIKED)
+                            }
+                        },
+                        onChevronClick = {
+                            onPlaylistClick?.invoke("liked")
+                        }
                     )
                     Spacer(Modifier.height(16.dp))
                 }
@@ -190,10 +237,31 @@ fun LibraryScreen(
                         }
                     } else {
                         items(likedSongs) { song ->
+                            val songModel = remember(song) {
+                                Song(
+                                    id = song.songId,
+                                    title = song.title,
+                                    artists = listOf(ArtistCredit(id = song.artist, name = song.artist, imageUrl = null)),
+                                    album = null,
+                                    durationSeconds = song.durationSeconds,
+                                    imageUrl = song.imageUrl,
+                                    year = "",
+                                    language = "",
+                                    hasLyrics = false,
+                                    playCount = 0,
+                                    label = "",
+                                    streamRef = song.songId,
+                                    providerId = song.providerId,
+                                    addedAt = song.likedAt
+                                )
+                            }
                             LikedSongItem(
                                 song = song,
                                 onPlay = { viewModel.playLikedSong(song) },
-                                onUnlike = { viewModel.unlikeSong(song.songId, song.providerId) }
+                                onUnlike = { viewModel.unlikeSong(song.songId, song.providerId) },
+                                onPlayNext = { rootViewModel.playNext(songModel) },
+                                onAddToQueue = { rootViewModel.addToQueue(songModel) },
+                                onAddToPlaylist = { rootViewModel.showAddToPlaylist(songModel) }
                             )
                             Spacer(Modifier.height(8.dp))
                         }
@@ -201,7 +269,69 @@ fun LibraryScreen(
                 }
             }
 
-            // Recently Played History (Available offline and for guests!)
+            // 2. User Playlists (if All or Playlists)
+            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.PLAYLISTS) && isLoggedIn) {
+                item {
+                    SectionHeader(
+                        title = "Your Playlists",
+                        subtitle = "${playlists.size} created",
+                        actionText = "New Playlist",
+                        onAction = { viewModel.setCreatePlaylistDialogVisible(true) }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (playlists.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.PlaylistPlay,
+                            title = "No playlists created",
+                            subtitle = "Create customized playlists to organize your favorite music"
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+                } else {
+                    items(playlists) { playlist ->
+                        PlaylistItem(
+                            playlist = playlist,
+                            onClick = { onPlaylistClick?.invoke(playlist.serverId) },
+                            onDelete = { playlistToDelete = playlist }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+
+            // 3. Followed Teams (if All or Teams)
+            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) && isLoggedIn) {
+                item {
+                    SectionHeader("Followed Teams", subtitle = "Cricket notifications and updates")
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (followedTeams.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = Icons.Default.SportsCricket,
+                            title = "No teams followed",
+                            subtitle = "Follow cricket teams from match screens to stay informed"
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+                } else {
+                    items(followedTeams) { team ->
+                        FollowedTeamItem(
+                            team = team,
+                            onUnfollow = { viewModel.unfollowTeam(team.teamId) }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+
+            // 4. Recently Played History (Available offline and for guests!) - Below Playlists and Teams
             if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.HISTORY) {
                 item {
                     SectionHeader(
@@ -254,8 +384,10 @@ fun LibraryScreen(
                                 ).show()
                             },
                             onAddToPlaylist = {
-                                songToAddToPlaylist = songModel
-                            }
+                                rootViewModel.showAddToPlaylist(songModel)
+                            },
+                            onPlayNext = { rootViewModel.playNext(songModel) },
+                            onAddToQueue = { rootViewModel.addToQueue(songModel) }
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -274,71 +406,9 @@ fun LibraryScreen(
                 }
             }
 
-            // User Playlists (if All or Playlists)
-            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.PLAYLISTS) && isLoggedIn) {
-                item {
-                    SectionHeader(
-                        title = "Your Playlists",
-                        subtitle = "${playlists.size} created",
-                        actionText = "New Playlist",
-                        onAction = { viewModel.setCreatePlaylistDialogVisible(true) }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                if (playlists.isEmpty()) {
-                    item {
-                        EmptyState(
-                            icon = Icons.Default.PlaylistPlay,
-                            title = "No playlists created",
-                            subtitle = "Create customized playlists to organize your favorite music"
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
-                } else {
-                    items(playlists) { playlist ->
-                        PlaylistItem(
-                            playlist = playlist,
-                            onClick = { onPlaylistClick?.invoke(playlist.serverId) },
-                            onDelete = { viewModel.deletePlaylist(playlist.serverId) }
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    item { Spacer(Modifier.height(16.dp)) }
-                }
-            }
-
-            // Followed Teams (if All or Teams)
-            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) && isLoggedIn) {
-                item {
-                    SectionHeader("Followed Teams", subtitle = "Cricket notifications and updates")
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                if (followedTeams.isEmpty()) {
-                    item {
-                        EmptyState(
-                            icon = Icons.Default.SportsCricket,
-                            title = "No teams followed",
-                            subtitle = "Follow cricket teams from match screens to stay informed"
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
-                } else {
-                    items(followedTeams) { team ->
-                        FollowedTeamItem(
-                            team = team,
-                            onUnfollow = { viewModel.unfollowTeam(team.teamId) }
-                        )
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    item { Spacer(Modifier.height(16.dp)) }
-                }
-            }
-
-            // Bottom padding for player bar
+            // Bottom padding for player bar & bottom nav
             item {
-                Spacer(Modifier.height(100.dp))
+                Spacer(Modifier.height(180.dp))
             }
         }
     }
@@ -439,7 +509,11 @@ private fun GuestLoginBanner(onLoginClick: () -> Unit) {
 }
 
 @Composable
-private fun LikedSongsCard(count: Int, onClick: () -> Unit) {
+private fun LikedSongsCard(
+    count: Int,
+    onClick: () -> Unit,
+    onChevronClick: (() -> Unit)? = null
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -467,7 +541,13 @@ private fun LikedSongsCard(count: Int, onClick: () -> Unit) {
                 Text("Liked Songs", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text("$count tracks saved", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = { (onChevronClick ?: onClick).invoke() }) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "Open as playlist",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -476,8 +556,31 @@ private fun LikedSongsCard(count: Int, onClick: () -> Unit) {
 private fun LikedSongItem(
     song: LikedSongEntity,
     onPlay: () -> Unit,
-    onUnlike: () -> Unit
+    onUnlike: () -> Unit,
+    onPlayNext: () -> Unit = {},
+    onAddToQueue: () -> Unit = {},
+    onAddToPlaylist: () -> Unit = {}
 ) {
+    var showOptionsSheet by remember { mutableStateOf(false) }
+    val songModel = remember(song) {
+        Song(
+            id = song.songId,
+            title = song.title,
+            artists = listOf(ArtistCredit(id = song.artist, name = song.artist, imageUrl = null)),
+            album = null,
+            durationSeconds = song.durationSeconds,
+            imageUrl = song.imageUrl,
+            year = "",
+            language = "",
+            hasLyrics = false,
+            playCount = 0,
+            label = "",
+            streamRef = song.songId,
+            providerId = song.providerId,
+            addedAt = song.likedAt
+        )
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -525,7 +628,27 @@ private fun LikedSongItem(
                     modifier = Modifier.size(20.dp)
                 )
             }
+            IconButton(onClick = { showOptionsSheet = true }) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Song options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
+    }
+
+    if (showOptionsSheet) {
+        com.musicsportsapp.features.music.components.SongOptionsSheet(
+            song = songModel,
+            isLiked = true,
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onAddToPlaylist = onAddToPlaylist,
+            onLike = onUnlike,
+            onDismiss = { showOptionsSheet = false }
+        )
     }
 }
 
@@ -537,9 +660,28 @@ private fun RecentlyPlayedItem(
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onPlayNext: () -> Unit = {},
+    onAddToQueue: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    var showMenu by remember { mutableStateOf(false) }
+    var showOptionsSheet by remember { mutableStateOf(false) }
+    val songModel = remember(item) {
+        Song(
+            id = item.songId,
+            title = item.title,
+            artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
+            album = null,
+            durationSeconds = item.durationSeconds,
+            imageUrl = item.imageUrl,
+            year = "",
+            language = "",
+            hasLyrics = false,
+            playCount = 0,
+            label = "",
+            streamRef = item.songId,
+            providerId = item.providerId,
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -580,66 +722,39 @@ private fun RecentlyPlayedItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Box {
-                IconButton(
-                    onClick = {
-                        if (!isLoggedIn) {
-                            Toast.makeText(
-                                context,
-                                "Please log in to like songs or add to playlists",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            showMenu = true
-                        }
+            IconButton(
+                onClick = {
+                    if (!isLoggedIn) {
+                        Toast.makeText(
+                            context,
+                            "Please log in to use song options",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        showOptionsSheet = true
                     }
-                ) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "Options",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
-                    )
                 }
-
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(if (isLiked) "Unlike song" else "Like song") },
-                        leadingIcon = {
-                            Icon(
-                                if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = null,
-                                tint = if (isLiked) Color(0xFFEC4899) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onToggleLike()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to playlist") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.PlaylistAdd,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            showMenu = false
-                            onAddToPlaylist()
-                        }
-                    )
-                }
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
+    }
+
+    if (showOptionsSheet) {
+        com.musicsportsapp.features.music.components.SongOptionsSheet(
+            song = songModel,
+            isLiked = isLiked,
+            onPlayNext = onPlayNext,
+            onAddToQueue = onAddToQueue,
+            onAddToPlaylist = onAddToPlaylist,
+            onLike = onToggleLike,
+            onDismiss = { showOptionsSheet = false }
+        )
     }
 }
 

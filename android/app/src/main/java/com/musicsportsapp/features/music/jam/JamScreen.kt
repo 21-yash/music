@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.musicsportsapp.RootViewModel
+import com.musicsportsapp.features.music.components.AnimatedEqualizerBars
 import com.musicsportsapp.features.music.domain.model.Song
 import com.musicsportsapp.ui.isAppDark
 
@@ -401,6 +402,7 @@ fun JamScreen(
                                 JamQueueRow(
                                     song = s,
                                     active = playbackState.currentSong?.id == s.id,
+                                    isPlaying = playbackState.currentSong?.id == s.id && playbackState.isPlaying,
                                     isDark = isDark,
                                     canMoveUp = canReorder && index > 0,
                                     canMoveDown = canReorder && index < jamState.queue.size - 1,
@@ -525,6 +527,7 @@ private fun JamQueueRow(
     song: Song,
     active: Boolean,
     isDark: Boolean,
+    isPlaying: Boolean = true,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     showReorderControls: Boolean,
@@ -576,11 +579,11 @@ private fun JamQueueRow(
         }
 
         if (active) {
-            Icon(
-                imageVector = Icons.Default.BarChart,
-                contentDescription = "Playing",
-                tint = Accent,
-                modifier = Modifier.size(20.dp)
+            AnimatedEqualizerBars(
+                color = Accent,
+                isPlaying = isPlaying,
+                barCount = 3,
+                modifier = Modifier.padding(end = 4.dp)
             )
         } else if (showReorderControls) {
             Row(verticalAlignment = Alignment.CenterVertically) {

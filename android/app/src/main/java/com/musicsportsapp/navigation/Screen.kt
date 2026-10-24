@@ -92,7 +92,7 @@ sealed class Screen(
         selectedIcon = Icons.Filled.Person,
         unselectedIcon = Icons.Outlined.Person,
     ) {
-        fun createRoute(id: String) = "music/artist/$id"
+        fun createRoute(id: String) = "music/artist/${android.net.Uri.encode(id)}"
     }
 
     data class Playlist(val playlistId: String = "{playlistId}") : Screen(
@@ -101,7 +101,7 @@ sealed class Screen(
         selectedIcon = Icons.Filled.LibraryMusic,
         unselectedIcon = Icons.Outlined.LibraryMusic,
     ) {
-        fun createRoute(id: String) = "music/playlist/$id"
+        fun createRoute(id: String) = "music/playlist/${android.net.Uri.encode(id)}"
     }
 
     data class Album(val albumId: String = "{albumId}") : Screen(
@@ -110,7 +110,16 @@ sealed class Screen(
         selectedIcon = Icons.Filled.LibraryMusic,
         unselectedIcon = Icons.Outlined.LibraryMusic,
     ) {
-        fun createRoute(id: String) = "music/album/$id"
+        fun createRoute(id: String) = "music/album/${android.net.Uri.encode(id)}"
+    }
+
+    data class SongDetails(val songId: String = "{songId}") : Screen(
+        route = "music/song/$songId",
+        label = "Song Details",
+        selectedIcon = Icons.Filled.MusicNote,
+        unselectedIcon = Icons.Outlined.MusicNote,
+    ) {
+        fun createRoute(id: String) = "music/song/${android.net.Uri.encode(id)}"
     }
 
     data object ListeningHistory : Screen(
@@ -125,6 +134,13 @@ sealed class Screen(
         label = "Jam Session",
         selectedIcon = Icons.Filled.LibraryMusic,
         unselectedIcon = Icons.Outlined.LibraryMusic,
+    )
+
+    data object PopularArtists : Screen(
+        route = "music/popular_artists",
+        label = "Popular Artists",
+        selectedIcon = Icons.Filled.Person,
+        unselectedIcon = Icons.Outlined.Person,
     )
 
     companion object {

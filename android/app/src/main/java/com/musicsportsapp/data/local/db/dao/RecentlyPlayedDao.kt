@@ -17,6 +17,9 @@ interface RecentlyPlayedDao {
     @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 50")
     fun getAll(): Flow<List<RecentlyPlayedEntity>>
 
+    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 50")
+    suspend fun getRecentList(): List<RecentlyPlayedEntity>
+
     @Query("DELETE FROM recently_played WHERE id NOT IN (SELECT id FROM recently_played ORDER BY playedAt DESC LIMIT 50)")
     suspend fun trimOldEntries()
 

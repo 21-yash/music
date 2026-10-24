@@ -23,6 +23,7 @@ class AuthRepository @Inject constructor(
 ) {
     val isLoggedIn: Flow<Boolean> = tokenStorage.isLoggedIn
     val currentUserId: Flow<String?> = tokenStorage.userId
+    val cachedUser: Flow<UserDto?> = tokenStorage.cachedUser
 
     suspend fun register(request: RegisterRequest): AppResult<AuthResult> {
         return safeApiCall { authApi.register(request) }
@@ -32,6 +33,7 @@ class AuthRepository @Inject constructor(
                     refreshToken = result.tokens.refreshToken,
                     userId = result.user.id
                 )
+                tokenStorage.saveUser(result.user)
             }
     }
 
@@ -43,11 +45,25 @@ class AuthRepository @Inject constructor(
                     refreshToken = result.tokens.refreshToken,
                     userId = result.user.id
                 )
+                tokenStorage.saveUser(result.user)
             }
     }
 
     suspend fun getCurrentUser(): AppResult<UserDto> {
-        return safeApiCall { authApi.getCurrentUser() }
+        val cached = tokenStorage.getCachedUserSync()
+        return when (val remote = safeApiCall { authApi.getCurrentUser() }) {
+            is AppResult.Success -> {
+                tokenStorage.saveUser(remote.data)
+                remote
+            }
+            is AppResult.Error -> {
+                if (cached != null) {
+                    AppResult.Success(cached)
+                } else {
+                    remote
+                }
+            }
+        }
     }
 
     suspend fun logout(): AppResult<Unit?> {

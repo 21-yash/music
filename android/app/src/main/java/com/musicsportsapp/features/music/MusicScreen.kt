@@ -10,11 +10,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,7 +42,8 @@ fun MusicScreen(
     onNavigateToSearch: () -> Unit = {},
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToPlaylist: (String) -> Unit = {},
-    onNavigateToAlbum: (String) -> Unit = {}
+    onNavigateToAlbum: (String) -> Unit = {},
+    onNavigateToPopularArtists: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -159,40 +161,95 @@ fun MusicScreen(
             if (!popularArtists.isNullOrEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(32.dp))
-                    SectionTitle("Popular Artists")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SectionTitle("Popular Artists", modifier = Modifier)
+                        if (popularArtists.size > 8) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onNavigateToPopularArtists() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "See More",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrandPink
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward,
+                                    contentDescription = "See More",
+                                    tint = BrandPink,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
+
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
-                        items(popularArtists.size) { index ->
-                            val artist = popularArtists[index]
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .width(90.dp)
-                                    .clickable {
-                                        onNavigateToArtist(artist.id)
-                                    }
-                            ) {
-                                AsyncImage(
-                                    model = artist.imageUrl,
-                                    contentDescription = artist.name,
-                                    contentScale = ContentScale.Crop,
+                        val initialArtists = popularArtists.take(10)
+                        items(initialArtists.size) { index ->
+                            val artist = initialArtists[index]
+                            ArtistCircleItem(
+                                name = artist.name,
+                                imageUrl = artist.imageUrl,
+                                onClick = { onNavigateToArtist(artist.id) }
+                            )
+                        }
+
+                        if (popularArtists.size > 10) {
+                            item {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .size(90.dp)
-                                        .clip(CircleShape)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = artist.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
+                                        .width(90.dp)
+                                        .clickable { onNavigateToPopularArtists() }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(90.dp)
+                                            .clip(CircleShape)
+                                            .background(BrandPink.copy(alpha = 0.12f))
+                                            .border(1.5.dp, BrandPink.copy(alpha = 0.45f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                imageVector = Icons.Default.ArrowForward,
+                                                contentDescription = "See All",
+                                                tint = BrandPink,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "+${popularArtists.size - 10}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = BrandPink
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "See All",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = BrandPink,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
                         }
                     }
@@ -200,42 +257,25 @@ fun MusicScreen(
             } else {
                 item {
                     Spacer(modifier = Modifier.height(32.dp))
-                    SectionTitle("Popular Artists (Mock)")
+                    SectionTitle("Popular Artists")
                     Spacer(modifier = Modifier.height(16.dp))
-                    val artists = listOf(
-                        Pair("Arijit Singh", "https://c.saavncdn.com/artists/Arijit_Singh_002_20230323062147_500x500.jpg"),
-                        Pair("Karan Aujla", "https://c.saavncdn.com/artists/Karan_Aujla_005_20231025062147_500x500.jpg"),
-                        Pair("Badshah", "https://c.saavncdn.com/artists/Badshah_005_20230608062147_500x500.jpg"),
-                        Pair("Shreya Ghoshal", "https://c.saavncdn.com/artists/Shreya_Ghoshal_002_20230323062147_500x500.jpg")
+                    val fallbackArtists = listOf(
+                        Pair("Arijit Singh", "https://c.saavncdn.com/artists/Arijit_Singh_004_20241118063717_500x500.jpg"),
+                        Pair("Pritam", "https://c.saavncdn.com/artists/Pritam_Chakraborty-20170711073326_500x500.jpg"),
+                        Pair("KK", "https://c.saavncdn.com/artists/KK_500x500.jpg"),
+                        Pair("Shreya Ghoshal", "https://c.saavncdn.com/artists/Shreya_Ghoshal_007_20241101074144_500x500.jpg")
                     )
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 24.dp),
                         horizontalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
-                        items(artists.size) { index ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.width(90.dp)
-                            ) {
-                                AsyncImage(
-                                    model = artists[index].second,
-                                    contentDescription = artists[index].first,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(90.dp)
-                                        .clip(CircleShape)
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = artists[index].first,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                        items(fallbackArtists.size) { index ->
+                            val artist = fallbackArtists[index]
+                            ArtistCircleItem(
+                                name = artist.first,
+                                imageUrl = artist.second,
+                                onClick = { onNavigateToArtist(artist.first) }
+                            )
                         }
                     }
                 }
@@ -446,12 +486,48 @@ private fun SquareCard(title: String, imageUrl: String, badgeText: String? = nul
 }
 
 @Composable
-private fun SectionTitle(title: String) {
+private fun SectionTitle(
+    title: String,
+    modifier: Modifier = Modifier.padding(horizontal = 24.dp)
+) {
     Text(
         text = title,
         fontSize = 20.sp,
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(horizontal = 24.dp),
+        modifier = modifier,
     )
+}
+
+@Composable
+private fun ArtistCircleItem(
+    name: String,
+    imageUrl: String?,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(90.dp)
+            .clickable { onClick() }
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(90.dp)
+                .clip(CircleShape)
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
 }

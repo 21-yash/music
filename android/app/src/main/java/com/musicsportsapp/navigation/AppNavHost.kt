@@ -28,7 +28,7 @@ import com.musicsportsapp.features.sports.SportsScreen
  * slide animations between bottom-nav destinations.
  */
 
-private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile", "music/jam")
+private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile", "music/jam", "music/popular_artists")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -98,7 +98,15 @@ fun AppNavHost(
                 onNavigateToSearch = { navController.navigate(Screen.Search.route) },
                 onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
                 onNavigateToPlaylist = { playlistId -> navController.navigate(Screen.Playlist().createRoute(playlistId)) },
-                onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
+                onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) },
+                onNavigateToPopularArtists = { navController.navigate(Screen.PopularArtists.route) }
+            )
+        }
+
+        composable(Screen.PopularArtists.route) {
+            com.musicsportsapp.features.music.PopularArtistsScreen(
+                onBackClick = { navController.popBackStack() },
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) }
             )
         }
 
@@ -116,7 +124,8 @@ fun AppNavHost(
             com.musicsportsapp.features.music.PlaylistScreen(
                 playlistId = playlistId,
                 onBackClick = { navController.popBackStack() },
-                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) }
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
+                onNavigateToSearch = { navController.navigate(Screen.Search.route) }
             )
         }
 
@@ -126,6 +135,16 @@ fun AppNavHost(
                 albumId = albumId,
                 onBackClick = { navController.popBackStack() },
                 onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) }
+            )
+        }
+
+        composable(Screen.SongDetails().route) { backStackEntry ->
+            val songId = backStackEntry.arguments?.getString("songId") ?: ""
+            com.musicsportsapp.features.music.SongDetailScreen(
+                songId = songId,
+                onBackClick = { navController.popBackStack() },
+                onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
+                onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
             )
         }
 

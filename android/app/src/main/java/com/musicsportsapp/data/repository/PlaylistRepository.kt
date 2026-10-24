@@ -139,6 +139,40 @@ class PlaylistRepository @Inject constructor(
         }
     }
 
+    suspend fun updatePlaylist(
+        playlistId: String,
+        name: String? = null,
+        description: String? = null,
+        imageUrl: String? = null
+    ): AppResult<PlaylistDto> {
+        val request = UpdatePlaylistRequest(
+            name = name,
+            description = description,
+            imageUrl = imageUrl
+        )
+        return when (val result = safeApiCall { libraryApi.updatePlaylist(playlistId, request) }) {
+            is AppResult.Success -> {
+                loadPlaylistDetails(playlistId)
+                AppResult.Success(result.data)
+            }
+            is AppResult.Error -> AppResult.Error(result.error)
+        }
+    }
+
+    suspend fun reorderPlaylistSongs(
+        playlistId: String,
+        songIds: List<String>
+    ): AppResult<PlaylistDto> {
+        val request = ReorderPlaylistSongsRequest(songIds = songIds)
+        return when (val result = safeApiCall { libraryApi.reorderPlaylistSongs(playlistId, request) }) {
+            is AppResult.Success -> {
+                loadPlaylistDetails(playlistId)
+                AppResult.Success(result.data)
+            }
+            is AppResult.Error -> AppResult.Error(result.error)
+        }
+    }
+
     suspend fun getLocalPlaylist(playlistId: String): PlaylistEntity? =
         playlistDao.getPlaylistById(playlistId).firstOrNull()
 

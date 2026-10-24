@@ -20,14 +20,19 @@ data class Song(
     val playCount: Int,
     val label: String,
     val streamRef: String,
-    val providerId: String
+    val providerId: String,
+    val addedAt: Long? = null
 ) {
     // Helper to get formatted duration (e.g., "3:45")
     val formattedDuration: String
         get() = String.format("%d:%02d", durationSeconds / 60, durationSeconds % 60)
         
-    // Helper to get primary artist name or default
+    // Formatted artist names (e.g., "Shashwat Sachdev, Simran Choudhary")
     val primaryArtistName: String
+        get() = if (artists.isNotEmpty()) artists.joinToString(", ") { it.name } else "Unknown Artist"
+
+    // Helper to get just the lead artist if needed
+    val firstArtistName: String
         get() = artists.firstOrNull()?.name ?: "Unknown Artist"
 }
 

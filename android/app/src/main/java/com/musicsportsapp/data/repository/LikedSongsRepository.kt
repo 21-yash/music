@@ -148,6 +148,8 @@ class LikedSongsRepository @Inject constructor(
         }
     }
 
+    suspend fun syncLikedSongs(): AppResult<Unit> = syncWithServer()
+
     suspend fun clearLocalCache() {
         likedSongDao.clearAll()
     }

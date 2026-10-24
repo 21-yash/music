@@ -1,5 +1,6 @@
 package com.musicsportsapp.features.music.components
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -7,10 +8,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -32,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.musicsportsapp.features.music.domain.model.Song
+import com.musicsportsapp.features.music.jam.LocalIsInJam
 import com.musicsportsapp.ui.isAppDark
 
 @Composable
@@ -41,7 +47,10 @@ fun SongItem(
     modifier: Modifier = Modifier,
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
-    onLike: (() -> Unit)? = null
+    onAddToPlaylist: (() -> Unit)? = null,
+    onLike: (() -> Unit)? = null,
+    isLiked: Boolean = false,
+    isInJam: Boolean = LocalIsInJam.current
 ) {
     val isDark = isAppDark()
     val titleColor = if (isDark) Color.White else Color(0xFF0F172A)
@@ -99,27 +108,46 @@ fun SongItem(
         if (showOptions) {
             SongOptionsSheet(
                 song = song,
+                isInJam = isInJam,
                 onPlayNext = onPlayNext,
                 onAddToQueue = onAddToQueue,
+                onAddToPlaylist = onAddToPlaylist,
                 onLike = onLike,
+                isLiked = isLiked,
                 onDismiss = { showOptions = false }
             )
         }
     }
 }
 
+val LocalOnNavigateToSongDetails = androidx.compose.runtime.compositionLocalOf<(String) -> Unit> { {} }
+val LocalToggleLike = androidx.compose.runtime.compositionLocalOf<(Song) -> Unit> { {} }
+val LocalLikedSongIds = androidx.compose.runtime.compositionLocalOf<Set<String>> { emptySet() }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongOptionsSheet(
     song: Song,
+    isInJam: Boolean = LocalIsInJam.current,
     onPlayNext: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
     onLike: (() -> Unit)? = null,
+    isLiked: Boolean = false,
+    onSongDetails: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val isDark = isAppDark()
+    val localAddToPlaylist = LocalAddToPlaylist.current
+    val effectiveAddToPlaylist = onAddToPlaylist ?: { localAddToPlaylist(song) }
+    val localOnNavigateToSongDetails = LocalOnNavigateToSongDetails.current
+    val effectiveOnSongDetails = onSongDetails ?: { localOnNavigateToSongDetails(song.id) }
+    val localToggleLike = LocalToggleLike.current
+    val globalLikedIds = LocalLikedSongIds.current
+    val isCurrentlyLiked = isLiked || globalLikedIds.contains(song.id)
+    val effectiveOnLike: () -> Unit = onLike ?: { localToggleLike(song) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -182,32 +210,53 @@ fun SongOptionsSheet(
             HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.08f))
             Spacer(modifier = Modifier.height(8.dp))
             
+            if (isInJam) {
+                SongOptionItem(
+                    icon = Icons.Default.Groups,
+                    text = "Add to Jam Queue",
+                    isDark = isDark,
+                    onClick = {
+                        (onAddToQueue ?: onPlayNext)?.invoke()
+                        onDismiss()
+                    }
+                )
+            } else {
+                SongOptionItem(
+                    icon = Icons.Default.PlayArrow,
+                    text = "Play Next",
+                    isDark = isDark,
+                    onClick = {
+                        onPlayNext?.invoke()
+                        Toast.makeText(context, "Added to play next", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
+                )
+                SongOptionItem(
+                    icon = Icons.Default.List,
+                    text = "Add to Queue",
+                    isDark = isDark,
+                    onClick = {
+                        onAddToQueue?.invoke()
+                        Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
+                )
+            }
             SongOptionItem(
-                icon = Icons.Default.PlayArrow,
-                text = "Play Next",
+                icon = Icons.Default.PlaylistAdd,
+                text = "Add to Playlist",
                 isDark = isDark,
                 onClick = {
-                    onPlayNext?.invoke()
-                    Toast.makeText(context, "Added to play next", Toast.LENGTH_SHORT).show()
+                    effectiveAddToPlaylist()
                     onDismiss()
                 }
             )
             SongOptionItem(
-                icon = Icons.Default.List,
-                text = "Add to Queue",
+                icon = if (isCurrentlyLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                text = if (isCurrentlyLiked) "Remove from Liked" else "Like Song",
                 isDark = isDark,
                 onClick = {
-                    onAddToQueue?.invoke()
-                    Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
-                    onDismiss()
-                }
-            )
-            SongOptionItem(
-                icon = Icons.Default.FavoriteBorder,
-                text = "Like Song",
-                isDark = isDark,
-                onClick = {
-                    onLike?.invoke()
+                    effectiveOnLike()
                     onDismiss()
                 }
             )
@@ -216,8 +265,21 @@ fun SongOptionsSheet(
                 text = "Share Song",
                 isDark = isDark,
                 onClick = {
-                    clipboardManager.setText(AnnotatedString("${song.title} - ${song.primaryArtistName}"))
-                    Toast.makeText(context, "Copied song info to clipboard", Toast.LENGTH_SHORT).show()
+                    val shareUrl = "https://21yash.online/track/${song.id}"
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        putExtra(Intent.EXTRA_TEXT, shareUrl)
+                        type = "text/plain"
+                    }
+                    context.startActivity(Intent.createChooser(sendIntent, "Share Song"))
+                    onDismiss()
+                }
+            )
+            SongOptionItem(
+                icon = Icons.Default.Info,
+                text = "Song Details",
+                isDark = isDark,
+                onClick = {
+                    effectiveOnSongDetails()
                     onDismiss()
                 }
             )

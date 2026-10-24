@@ -94,4 +94,12 @@ class MusicViewModel @Inject constructor(
     fun togglePlayPause() {
         playerManager.togglePlayPause()
     }
+
+    fun toggleShuffle() {
+        playerManager.toggleShuffle()
+    }
+
+    fun setShuffle(enabled: Boolean) {
+        playerManager.setShuffle(enabled)
+    }
 }

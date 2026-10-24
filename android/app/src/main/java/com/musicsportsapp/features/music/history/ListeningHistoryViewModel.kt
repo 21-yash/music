@@ -60,6 +60,14 @@ class ListeningHistoryViewModel @Inject constructor(
         playerManager.playSong(song)
     }
 
+    fun playNext(song: Song) {
+        playerManager.playNext(song)
+    }
+
+    fun addToQueue(song: Song) {
+        playerManager.addToQueue(song)
+    }
+
     fun toggleLike(song: Song) {
         viewModelScope.launch {
             likedSongsRepository.toggleLike(song)
