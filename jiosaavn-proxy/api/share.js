@@ -4,15 +4,15 @@ export default async function handler(req, res) {
   // Normalize type
   if (type === 'song') type = 'track';
 
-  let title = qTitle || (type === 'playlist' ? 'Featured Playlist' : 'Track Preview');
-  let artist = qArtist || (type === 'playlist' ? 'Curated Collection' : 'MusicSports');
+  let title = qTitle || (type === 'playlist' ? 'Featured Playlist' : (type === 'artist' ? 'Artist Profile' : (type === 'album' ? 'Album Preview' : 'Track Preview')));
+  let artist = qArtist || (type === 'playlist' ? 'Curated Collection' : (type === 'artist' ? 'Verified Artist' : 'Synq'));
   let album = '';
   let year = '';
   let imageUrl = qImg || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80';
   let durationSeconds = 0;
   let playlistSongs = [];
   let playlistCount = 0;
-  let creator = 'MusicSports';
+  let creator = 'Synq';
 
   // ─── Server-side metadata resolution from JioSaavn API ───────────
   if (id) {
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
         if (response.ok) {
           const data = await response.json();
           title = cleanEntity(data.listname || data.title || title);
-          creator = cleanEntity(data.firstname || 'MusicSports');
+          creator = cleanEntity(data.firstname || 'Synq');
           artist = creator;
           if (data.image) {
             imageUrl = data.image.replace(/150x150/, '500x500');
@@ -40,6 +40,54 @@ export default async function handler(req, res) {
             id: s.id,
             title: cleanEntity(s.song || s.title || 'Untitled Track'),
             artist: cleanEntity(s.primary_artists || s.singers || 'Unknown Artist'),
+            duration: parseInt(s.duration || '0', 10),
+            image: s.image ? s.image.replace(/150x150/, '250x250') : ''
+          }));
+        }
+      } else if (type === 'album') {
+        const apiUrl = `https://www.jiosaavn.com/api.php?__call=content.getAlbumDetails&albumid=${encodeURIComponent(id)}&_format=json`;
+        const response = await fetch(apiUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (response.ok) {
+          const data = await response.json();
+          title = cleanEntity(data.title || data.name || title);
+          artist = cleanEntity(data.primary_artists || data.subtitle || 'Various Artists');
+          album = title;
+          year = data.year || '';
+          if (data.image) {
+            imageUrl = data.image.replace(/150x150/, '500x500');
+          }
+          const rawSongs = Array.isArray(data.songs) ? data.songs : (Array.isArray(data.list) ? data.list : []);
+          playlistCount = rawSongs.length;
+          playlistSongs = rawSongs.slice(0, 30).map(s => ({
+            id: s.id,
+            title: cleanEntity(s.song || s.title || 'Untitled Track'),
+            artist: cleanEntity(s.primary_artists || s.singers || artist),
+            duration: parseInt(s.duration || '0', 10),
+            image: s.image ? s.image.replace(/150x150/, '250x250') : ''
+          }));
+        }
+      } else if (type === 'artist') {
+        const apiUrl = `https://www.jiosaavn.com/api.php?__call=artist.getArtistPageDetails&artistId=${encodeURIComponent(id)}&n_song=20&_format=json`;
+        const response = await fetch(apiUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (response.ok) {
+          const data = await response.json();
+          title = cleanEntity(data.name || title);
+          artist = 'Verified Artist';
+          if (data.image) {
+            imageUrl = data.image.replace(/150x150/, '500x500');
+          }
+          const rawSongs = (data.topSongs && data.topSongs.songs) ? data.topSongs.songs : (Array.isArray(data.topSongs) ? data.topSongs : []);
+          playlistCount = rawSongs.length;
+          playlistSongs = rawSongs.slice(0, 20).map(s => ({
+            id: s.id,
+            title: cleanEntity(s.song || s.title || 'Untitled Track'),
+            artist: cleanEntity(s.primary_artists || s.singers || title),
             duration: parseInt(s.duration || '0', 10),
             image: s.image ? s.image.replace(/150x150/, '250x250') : ''
           }));
@@ -81,24 +129,28 @@ export default async function handler(req, res) {
 
   const domain = '21yash.online';
   const canonicalUrl = `https://${domain}/${type}/${cleanId}`;
-  const deepLink = `musicsports://${type}/${cleanId}`;
+  const deepLink = `synq://${type}/${cleanId}`;
 
   // Clean description for social previews
   const metaDescription = type === 'playlist'
     ? `${playlistCount || (playlistSongs.length || 'Curated')} songs • Playlist by ${creator}`
-    : `${cleanArtist} • ${cleanAlbum || 'Song'}`;
+    : (type === 'album'
+        ? `${cleanArtist} • Album (${playlistCount || playlistSongs.length} songs)`
+        : (type === 'artist'
+            ? `Listen to ${cleanTitle} on synq • Verified Artist`
+            : `${cleanArtist} • ${cleanAlbum || 'Song'}`));
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>${cleanTitle} | MusicSports</title>
+  <title>${cleanTitle} | Synq</title>
   <meta name="description" content="${escapeHtml(metaDescription)}">
 
   <!-- Open Graph -->
-  <meta property="og:site_name" content="MusicSports">
-  <meta property="og:type" content="${type === 'playlist' ? 'music.playlist' : 'music.song'}">
+  <meta property="og:site_name" content="Synq">
+  <meta property="og:type" content="${type === 'playlist' ? 'music.playlist' : (type === 'album' ? 'music.album' : (type === 'artist' ? 'profile' : 'music.song'))}">
   <meta property="og:title" content="${cleanTitle}">
   <meta property="og:description" content="${escapeHtml(metaDescription)}">
   <meta property="og:image" content="${cleanImage}">
@@ -276,6 +328,10 @@ export default async function handler(req, res) {
       overflow: hidden;
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
       border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .hero-art-wrapper.is-artist {
+      border-radius: 50%;
     }
 
     .hero-art {
@@ -679,17 +735,17 @@ export default async function handler(req, res) {
   <!-- Player Preview Card (No Web Audio - Directs to App) -->
   <main class="player-card">
     <div class="track-hero">
-      <div class="hero-art-wrapper">
+      <div class="hero-art-wrapper ${type === 'artist' ? 'is-artist' : ''}">
         <img src="${cleanImage}" alt="${cleanTitle}" class="hero-art" onerror="this.src='https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500'">
       </div>
 
       <div class="hero-meta">
-        <div class="type-pill">${type === 'playlist' ? 'PLAYLIST' : 'SONG'}</div>
+        <div class="type-pill">${type === 'playlist' ? 'PLAYLIST' : (type === 'artist' ? 'ARTIST' : (type === 'album' ? 'ALBUM' : 'SONG'))}</div>
         <h1 class="track-title" title="${cleanTitle}">${cleanTitle}</h1>
-        <div class="track-artist">${type === 'playlist' ? `Curated by ${creator} • ${playlistCount || playlistSongs.length} songs` : cleanArtist}</div>
+        <div class="track-artist">${type === 'playlist' ? `Curated by ${creator} • ${playlistCount || playlistSongs.length} songs` : (type === 'album' ? `${cleanArtist} • ${year ? year + ' • ' : ''}${playlistCount || playlistSongs.length} songs` : (type === 'artist' ? `Verified Artist • ${playlistCount || playlistSongs.length} popular tracks` : cleanArtist))}</div>
         <div class="meta-tags">
           <span class="preview-pill">320 KBPS LOSSLESS</span>
-          ${cleanAlbum && type !== 'playlist' ? `<span class="meta-info-tag">${cleanAlbum}${year ? ' • ' + year : ''}</span>` : ''}
+          ${cleanAlbum && type !== 'playlist' && type !== 'artist' ? `<span class="meta-info-tag">${cleanAlbum}${year ? ' • ' + year : ''}</span>` : ''}
         </div>
       </div>
     </div>
@@ -728,11 +784,11 @@ export default async function handler(req, res) {
       </button>
     </div>
 
-    <!-- Playlist Track List -->
-    ${type === 'playlist' && playlistSongs.length > 0 ? `
+    <!-- Track List (Playlist / Album / Artist) -->
+    ${playlistSongs.length > 0 ? `
     <div class="tracklist-container">
       <div class="tracklist-header">
-        <span>Tracklist (${playlistSongs.length} Tracks)</span>
+        <span>${type === 'artist' ? 'Popular Tracks' : (type === 'album' ? 'Album Tracks' : 'Tracklist')} (${playlistSongs.length} Tracks)</span>
         <span>Duration</span>
       </div>
       ${playlistSongs.map((song, i) => `
@@ -754,7 +810,7 @@ export default async function handler(req, res) {
     <div class="cta-row">
       <a href="${deepLink}" class="btn-open-app" id="open-app-btn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
-        <span>Listen in MusicSports App</span>
+        <span>${type === 'artist' ? 'Open Artist in Synq' : (type === 'album' ? 'Open Album in Synq' : (type === 'playlist' ? 'Open Playlist in Synq' : 'Listen in Synq App'))}</span>
       </a>
     </div>
   </main>
@@ -768,7 +824,7 @@ export default async function handler(req, res) {
         <div style="font-size: 11px; color: var(--text-dim);">Live ball-by-ball cricket scores synced with high-fi music</div>
       </div>
     </div>
-    <a href="musicsports://sports" style="color: var(--brand-pink); text-decoration: none; font-size: 12px; font-weight: 700;">View Live →</a>
+    <a href="synq://sports" style="color: var(--brand-pink); text-decoration: none; font-size: 12px; font-weight: 700;">View Live →</a>
   </aside>
 
   <div id="toast">Link copied to clipboard!</div>
@@ -786,13 +842,13 @@ export default async function handler(req, res) {
     }
 
     function triggerAppAction() {
-      showToast('Opening in MusicSports App...');
+      showToast('Opening in Synq App...');
       window.location.href = deepLink;
     }
 
     function triggerSongDeepLink(songId) {
       if (songId) {
-        window.location.href = "musicsports://track/" + songId;
+        window.location.href = "synq://track/" + songId;
       } else {
         triggerAppAction();
       }
@@ -802,7 +858,7 @@ export default async function handler(req, res) {
       if (navigator.share) {
         navigator.share({
           title: "${cleanTitle}",
-          text: "Listen to ${cleanTitle} on MusicSports",
+          text: "Listen to ${cleanTitle} on Synq",
           url: canonicalUrl
         }).catch(() => {});
       } else {

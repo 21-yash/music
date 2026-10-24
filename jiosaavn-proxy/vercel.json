@@ -8,6 +8,10 @@
     { "source": "/track/:id*", "destination": "/api/share?type=track&id=:id*" },
     { "source": "/song/:id*", "destination": "/api/share?type=track&id=:id*" },
     { "source": "/playlist", "destination": "/api/share?type=playlist" },
-    { "source": "/playlist/:id*", "destination": "/api/share?type=playlist&id=:id*" }
+    { "source": "/playlist/:id*", "destination": "/api/share?type=playlist&id=:id*" },
+    { "source": "/artist", "destination": "/api/share?type=artist" },
+    { "source": "/artist/:id*", "destination": "/api/share?type=artist&id=:id*" },
+    { "source": "/album", "destination": "/api/share?type=album" },
+    { "source": "/album/:id*", "destination": "/api/share?type=album&id=:id*" }
   ]
 }

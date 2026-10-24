@@ -9,6 +9,7 @@ agp = "8.10.1"
 kotlin = "2.1.20"
 ksp = "2.1.20-1.0.32"
 coroutines = "1.10.2"
+coreSplashScreen = "1.0.1"
 
 # Compose
 composeBom = "2025.06.01"
@@ -57,6 +58,7 @@ newpipe = "v0.26.5"
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version = "1.16.0" }
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashScreen" }
 
 # Compose BOM
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }

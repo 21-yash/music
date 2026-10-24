@@ -1,0 +1,16 @@
+package com.synq.features.sports.domain.repository
+
+import com.synq.features.sports.domain.model.MatchSummary
+import kotlinx.coroutines.flow.Flow
+
+interface SportsRepository {
+    /**
+     * Fetches a list of matches based on the filter ('live', 'upcoming', 'recent').
+     * Returns a Flow of Result containing the list of MatchSummary.
+     */
+    fun getMatches(filter: String): Flow<Result<List<MatchSummary>>>
+
+    fun getMatchDetails(matchId: String): Flow<Result<com.synq.features.sports.domain.model.MatchDetails>>
+    fun getScorecard(matchId: String): Flow<Result<com.synq.features.sports.domain.model.Scorecard>>
+    fun getSquads(matchId: String): Flow<Result<com.synq.features.sports.domain.model.Squad>>
+}

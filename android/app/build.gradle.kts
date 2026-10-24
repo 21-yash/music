@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "com.musicsportsapp"
+    namespace = "com.synq"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.musicsportsapp"
+        applicationId = "com.synq"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
@@ -60,6 +60,7 @@ dependencies {
 
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
 
     // Compose
     implementation(platform(libs.compose.bom))

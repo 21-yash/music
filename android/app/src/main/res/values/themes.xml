@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Base theme — Compose handles actual theming via MaterialTheme -->
-    <style name="Theme.MusicSportsApp" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Synq" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        <item name="android:statusBarColor">@color/ic_launcher_background</item>
+        <item name="android:navigationBarColor">@color/ic_launcher_background</item>
+    </style>
+
+    <!-- Starting window splash theme: Android OS renders the logo immediately upon launch (zero delay) -->
+    <style name="Theme.Synq.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Synq</item>
+    </style>
 </resources>
+

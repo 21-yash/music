@@ -18,7 +18,7 @@ export interface LyricsOutcome {
   cacheable: boolean;
 }
 
-const LRCLIB_USER_AGENT = 'MusicSportsApp/1.0 (https://github.com/21-yash/music)';
+const LRCLIB_USER_AGENT = 'Synq/1.0 (https://github.com/21-yash/music)';
 const LRCLIB_API = 'https://lrclib.net/api';
 
 // ─── Tunables ────────────────────────────────────────────────────────────────

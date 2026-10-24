@@ -21,5 +21,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MusicSportsApp"
+rootProject.name = "Synq"
 include(":app")

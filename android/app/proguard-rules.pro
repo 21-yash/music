@@ -23,27 +23,27 @@
 -keep,includedescriptorclasses class *$$serializer { *; }
 
 # Keep app data classes used with serialization
--keep,includedescriptorclasses class com.musicsportsapp.data.remote.dto.**$$serializer { *; }
--keepclassmembers class com.musicsportsapp.data.remote.dto.** {
+-keep,includedescriptorclasses class com.synq.data.remote.dto.**$$serializer { *; }
+-keepclassmembers class com.synq.data.remote.dto.** {
     *** Companion;
 }
--keepclasseswithmembers class com.musicsportsapp.data.remote.dto.** {
+-keepclasseswithmembers class com.synq.data.remote.dto.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--keep,includedescriptorclasses class com.musicsportsapp.features.music.data.dto.**$$serializer { *; }
--keepclassmembers class com.musicsportsapp.features.music.data.dto.** {
+-keep,includedescriptorclasses class com.synq.features.music.data.dto.**$$serializer { *; }
+-keepclassmembers class com.synq.features.music.data.dto.** {
     *** Companion;
 }
--keepclasseswithmembers class com.musicsportsapp.features.music.data.dto.** {
+-keepclasseswithmembers class com.synq.features.music.data.dto.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--keep,includedescriptorclasses class com.musicsportsapp.features.music.jam.**$$serializer { *; }
--keepclassmembers class com.musicsportsapp.features.music.jam.** {
+-keep,includedescriptorclasses class com.synq.features.music.jam.**$$serializer { *; }
+-keepclassmembers class com.synq.features.music.jam.** {
     *** Companion;
 }
--keepclasseswithmembers class com.musicsportsapp.features.music.jam.** {
+-keepclasseswithmembers class com.synq.features.music.jam.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 

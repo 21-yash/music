@@ -1,7 +1,7 @@
 {
-  "name": "musicsportsapp-backend",
+  "name": "synq-backend",
   "version": "0.1.0",
-  "description": "MusicSportsApp backend — Node.js/TypeScript/Express API with MongoDB, Redis, and Socket.IO",
+  "description": "Synq backend — Node.js/TypeScript/Express API with MongoDB, Redis, and Socket.IO",
   "private": true,
   "main": "dist/server.js",
   "scripts": {

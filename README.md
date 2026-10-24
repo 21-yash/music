@@ -1,3 +1,3 @@
-# Music & Sports App
+# Synq
 
-A full-stack application featuring a Jetpack Compose Android app and a Node.js backend.
+A high-performance Android music streaming and live sports application with real-time updates and lossless audio.

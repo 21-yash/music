@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   }
 
   let title = type === 'playlist' ? 'Featured Playlist' : 'Track Preview';
-  let author = type === 'playlist' ? 'MusicSports Playlist' : 'MusicSports';
+  let author = type === 'playlist' ? 'Synq Playlist' : 'Synq';
   let imageUrl = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=500&auto=format&fit=crop&q=80';
 
   if (id) {
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
   res.status(200).json({
     version: '1.0',
     type: 'link',
-    provider_name: 'MusicSports',
+    provider_name: 'Synq',
     provider_url: 'https://21yash.online',
     title: title,
     thumbnail_url: imageUrl,

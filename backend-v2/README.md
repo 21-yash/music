@@ -1,6 +1,6 @@
-# MusicSportsApp — Backend
+# Synq — Backend
 
-Node.js / TypeScript / Express backend for the MusicSportsApp. Provides a REST API, real-time communication via Socket.IO, and persistent storage through MongoDB and Redis.
+Node.js / TypeScript / Express backend for Synq. Provides a REST API, real-time communication via Socket.IO, and persistent storage through MongoDB and Redis.
 
 ## Tech Stack
 
