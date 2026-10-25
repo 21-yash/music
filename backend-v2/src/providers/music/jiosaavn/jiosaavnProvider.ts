@@ -408,9 +408,14 @@ export class JioSaavnProvider implements MusicProvider {
         .map(mapSong)
         .filter((s): s is Song => s !== null);
 
+      const title = cleanText(data.title || data.listname || '');
+      if (!title && songs.length === 0) {
+        return null;
+      }
+
       return {
         id: data.listid || data.id || id,
-        title: cleanText(data.title || data.listname || ''),
+        title,
         description: cleanText(data.subtitle || ''),
         imageUrl: upgradeImageUrl(data.image),
         songCount:

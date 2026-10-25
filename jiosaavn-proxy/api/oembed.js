@@ -5,6 +5,16 @@ function upgradeImageUrl(url) {
     .replace(/\b(?:50x50|150x150|250x250|350x350)\b/g, '500x500');
 }
 
+function getThumbnailUrl(url) {
+  if (!url) return '';
+  if (url.includes('unsplash.com')) {
+    return url.replace(/w=\d+/, 'w=250').replace(/h=\d+/, 'h=250');
+  }
+  return url
+    .replace(/([-_/])(?:50x50|150x150|350x350|500x500)\b/g, '$1250x250')
+    .replace(/\b(?:50x50|150x150|350x350|500x500)\b/g, '250x250');
+}
+
 export default async function handler(req, res) {
   let { type = 'track', id = '', url = '' } = req.query;
 
@@ -24,18 +34,42 @@ export default async function handler(req, res) {
   if (id) {
     try {
       if (type === 'playlist') {
-        const apiUrl = `https://www.jiosaavn.com/api.php?__call=playlist.getDetails&listid=${encodeURIComponent(id)}&_format=json`;
-        const response = await fetch(apiUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(3500)
-        });
-        if (response.ok) {
-          const data = await response.json();
-          title = data.listname || data.title || title;
-          const count = data.list_count || (Array.isArray(data.songs) ? data.songs.length : 'Multiple');
-          author = `Playlist • ${count} songs`;
-          if (data.image) {
-            imageUrl = upgradeImageUrl(data.image);
+        let resolved = false;
+        try {
+          const beRes = await fetch(`https://api.21yash.online/api/v1/music/playlists/${encodeURIComponent(id)}`, {
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (beRes.ok) {
+            const beJson = await beRes.json();
+            if (beJson.success && beJson.data && (beJson.data.title || (beJson.data.songs && beJson.data.songs.length > 0))) {
+              title = beJson.data.title || title;
+              const count = beJson.data.songCount || (Array.isArray(beJson.data.songs) ? beJson.data.songs.length : 'Multiple');
+              author = `Playlist • ${count} songs`;
+              if (beJson.data.imageUrl) {
+                imageUrl = upgradeImageUrl(beJson.data.imageUrl);
+              }
+              resolved = true;
+            }
+          }
+        } catch {}
+
+        if (!resolved) {
+          const apiUrl = `https://www.jiosaavn.com/api.php?__call=playlist.getDetails&listid=${encodeURIComponent(id)}&_format=json&cc=in&_marker=0`;
+          const response = await fetch(apiUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data && (data.listname || data.title)) {
+              title = data.listname || data.title || title;
+              const count = data.list_count || (Array.isArray(data.songs) ? data.songs.length : 'Multiple');
+              author = `Playlist • ${count} songs`;
+              if (data.image) {
+                imageUrl = upgradeImageUrl(data.image);
+              }
+            }
           }
         }
       } else {
@@ -74,9 +108,9 @@ export default async function handler(req, res) {
     provider_name: 'Synq',
     provider_url: 'https://21yash.online',
     title: title,
-    thumbnail_url: imageUrl,
-    thumbnail_width: 500,
-    thumbnail_height: 500
+    thumbnail_url: getThumbnailUrl(imageUrl),
+    thumbnail_width: 250,
+    thumbnail_height: 250
   });
 }
 

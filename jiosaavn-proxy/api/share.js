@@ -5,6 +5,16 @@ function upgradeImageUrl(url) {
     .replace(/\b(?:50x50|150x150|250x250|350x350)\b/g, '500x500');
 }
 
+function getThumbnailUrl(url) {
+  if (!url) return '';
+  if (url.includes('unsplash.com')) {
+    return url.replace(/w=\d+/, 'w=250').replace(/h=\d+/, 'h=250');
+  }
+  return url
+    .replace(/([-_/])(?:50x50|150x150|350x350|500x500)\b/g, '$1250x250')
+    .replace(/\b(?:50x50|150x150|350x350|500x500)\b/g, '250x250');
+}
+
 export default async function handler(req, res) {
   let { type = 'track', id = '', title: qTitle, artist: qArtist, img: qImg, songs: qSongs } = req.query;
 
@@ -25,31 +35,70 @@ export default async function handler(req, res) {
   if (id) {
     try {
       if (type === 'playlist') {
-        const apiUrl = `https://www.jiosaavn.com/api.php?__call=playlist.getDetails&listid=${encodeURIComponent(id)}&_format=json`;
-        const response = await fetch(apiUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(4000)
-        });
-        if (response.ok) {
-          const data = await response.json();
-          title = cleanEntity(data.listname || data.title || title);
-          creator = cleanEntity(data.firstname || 'Synq');
-          artist = creator;
-          if (data.image) {
-            imageUrl = upgradeImageUrl(data.image);
-          }
-          const rawSongs = Array.isArray(data.songs)
-            ? data.songs
-            : (Array.isArray(data.list) ? data.list : Object.values(data).filter(v => v && typeof v === 'object' && (v.song || v.title)));
+        let resolved = false;
 
-          playlistCount = parseInt(data.list_count || rawSongs.length || '0', 10);
-          playlistSongs = rawSongs.slice(0, 30).map(s => ({
-            id: s.id,
-            title: cleanEntity(s.song || s.title || 'Untitled Track'),
-            artist: cleanEntity(s.primary_artists || s.singers || 'Unknown Artist'),
-            duration: parseInt(s.duration || '0', 10),
-            image: upgradeImageUrl(s.image)
-          }));
+        // 1. First attempt to query Synq Backend (which supports custom user playlists & external playlists)
+        try {
+          const beRes = await fetch(`https://api.21yash.online/api/v1/music/playlists/${encodeURIComponent(id)}`, {
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (beRes.ok) {
+            const beJson = await beRes.json();
+            if (beJson.success && beJson.data && (beJson.data.title || (beJson.data.songs && beJson.data.songs.length > 0))) {
+              const p = beJson.data;
+              title = cleanEntity(p.title || title);
+              creator = cleanEntity(p.description ? p.description.replace(/^Curated by\s*/i, '') : 'Synq');
+              artist = creator;
+              if (p.imageUrl) {
+                imageUrl = upgradeImageUrl(p.imageUrl);
+              }
+              const rawSongs = Array.isArray(p.songs) ? p.songs : [];
+              playlistCount = p.songCount || rawSongs.length;
+              playlistSongs = rawSongs.slice(0, 30).map(s => ({
+                id: s.id,
+                title: cleanEntity(s.title || 'Untitled Track'),
+                artist: cleanEntity((s.artists && s.artists[0]?.name) || s.primaryArtists || s.artist || 'Unknown Artist'),
+                duration: parseInt(s.duration || s.durationSeconds || '0', 10),
+                image: upgradeImageUrl(s.imageUrl || s.image)
+              }));
+              resolved = true;
+            }
+          }
+        } catch {
+          // Backend fetch failed, will try JioSaavn direct fallback
+        }
+
+        // 2. Fallback to direct JioSaavn API if not resolved
+        if (!resolved) {
+          const apiUrl = `https://www.jiosaavn.com/api.php?__call=playlist.getDetails&listid=${encodeURIComponent(id)}&_format=json&cc=in&_marker=0`;
+          const response = await fetch(apiUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(4000)
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data && (data.listname || data.title)) {
+              title = cleanEntity(data.listname || data.title || title);
+              creator = cleanEntity(data.firstname || 'Synq');
+              artist = creator;
+              if (data.image) {
+                imageUrl = upgradeImageUrl(data.image);
+              }
+              const rawSongs = Array.isArray(data.songs)
+                ? data.songs
+                : (Array.isArray(data.list) ? data.list : Object.values(data).filter(v => v && typeof v === 'object' && (v.song || v.title)));
+
+              playlistCount = parseInt(data.list_count || rawSongs.length || '0', 10);
+              playlistSongs = rawSongs.slice(0, 30).map(s => ({
+                id: s.id,
+                title: cleanEntity(s.song || s.title || 'Untitled Track'),
+                artist: cleanEntity(s.primary_artists || s.singers || 'Unknown Artist'),
+                duration: parseInt(s.duration || '0', 10),
+                image: upgradeImageUrl(s.image)
+              }));
+            }
+          }
         }
       } else if (type === 'album') {
         const apiUrl = `https://www.jiosaavn.com/api.php?__call=content.getAlbumDetails&albumid=${encodeURIComponent(id)}&_format=json`;
@@ -132,6 +181,7 @@ export default async function handler(req, res) {
   const cleanArtist = escapeHtml(artist);
   const cleanAlbum = escapeHtml(album);
   const cleanImage = escapeHtml(imageUrl);
+  const cleanThumbnail = escapeHtml(getThumbnailUrl(imageUrl));
   const cleanId = encodeURIComponent(id || 'sample');
 
   const domain = '21yash.online';
@@ -144,7 +194,7 @@ export default async function handler(req, res) {
     : (type === 'album'
         ? `${cleanArtist} • Album (${playlistCount || playlistSongs.length} songs)`
         : (type === 'artist'
-            ? `Listen to ${cleanTitle} on synq • Verified Artist`
+            ? `Listen to ${cleanTitle} on Synq • Verified Artist`
             : `${cleanArtist} • ${cleanAlbum || 'Song'}`));
 
   const html = `<!DOCTYPE html>
@@ -160,16 +210,17 @@ export default async function handler(req, res) {
   <meta property="og:type" content="${type === 'playlist' ? 'music.playlist' : (type === 'album' ? 'music.album' : (type === 'artist' ? 'profile' : 'music.song'))}">
   <meta property="og:title" content="${cleanTitle}">
   <meta property="og:description" content="${escapeHtml(metaDescription)}">
-  <meta property="og:image" content="${cleanImage}">
-  <meta property="og:image:width" content="500">
-  <meta property="og:image:height" content="500">
+  <meta property="og:image" content="${cleanThumbnail}">
+  <meta property="og:image:width" content="250">
+  <meta property="og:image:height" content="250">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:url" content="${canonicalUrl}">
 
   <!-- Twitter / Discord Horizontal Compact Card -->
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="${cleanTitle}">
   <meta name="twitter:description" content="${escapeHtml(metaDescription)}">
-  <meta name="twitter:image" content="${cleanImage}">
+  <meta name="twitter:image" content="${cleanThumbnail}">
 
   <!-- oEmbed Discovery -->
   <link rel="alternate" type="application/json+oembed" href="https://${domain}/api/oembed?type=${type}&id=${cleanId}" title="${cleanTitle}">
@@ -730,8 +781,8 @@ export default async function handler(req, res) {
   <!-- Minimal Brand Header -->
   <header class="nav-container">
     <a href="/" class="brand">
-      <div class="brand-logo">M</div>
-      <div class="brand-name">Music<span>Sports</span></div>
+      <div class="brand-logo">S</div>
+      <div class="brand-name">Synq</div>
     </a>
     <a href="${deepLink}" class="nav-app-btn" id="nav-btn">
       <span>Open App</span>

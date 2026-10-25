@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navDeepLink
 import com.synq.features.home.HomeScreen
 import com.synq.features.library.LibraryScreen
 import com.synq.features.music.MusicScreen
@@ -119,7 +120,13 @@ fun AppNavHost(
             )
         }
 
-        composable(Screen.Artist().route) { backStackEntry ->
+        composable(
+            route = Screen.Artist().route,
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "https://21yash.online/artist/{artistId}" },
+                navDeepLink { uriPattern = "synq://artist/{artistId}" }
+            )
+        ) { backStackEntry ->
             val artistId = backStackEntry.arguments?.getString("artistId") ?: ""
             com.synq.features.music.ArtistScreen(
                 artistId = artistId,
@@ -128,7 +135,13 @@ fun AppNavHost(
             )
         }
 
-        composable(Screen.Playlist().route) { backStackEntry ->
+        composable(
+            route = Screen.Playlist().route,
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "https://21yash.online/playlist/{playlistId}" },
+                navDeepLink { uriPattern = "synq://playlist/{playlistId}" }
+            )
+        ) { backStackEntry ->
             val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
             com.synq.features.music.PlaylistScreen(
                 playlistId = playlistId,
@@ -138,7 +151,13 @@ fun AppNavHost(
             )
         }
 
-        composable(Screen.Album().route) { backStackEntry ->
+        composable(
+            route = Screen.Album().route,
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "https://21yash.online/album/{albumId}" },
+                navDeepLink { uriPattern = "synq://album/{albumId}" }
+            )
+        ) { backStackEntry ->
             val albumId = backStackEntry.arguments?.getString("albumId") ?: ""
             com.synq.features.music.AlbumScreen(
                 albumId = albumId,
@@ -147,7 +166,15 @@ fun AppNavHost(
             )
         }
 
-        composable(Screen.SongDetails().route) { backStackEntry ->
+        composable(
+            route = Screen.SongDetails().route,
+            deepLinks = listOf(
+                navDeepLink { uriPattern = "https://21yash.online/track/{songId}" },
+                navDeepLink { uriPattern = "https://21yash.online/song/{songId}" },
+                navDeepLink { uriPattern = "synq://track/{songId}" },
+                navDeepLink { uriPattern = "synq://song/{songId}" }
+            )
+        ) { backStackEntry ->
             val songId = backStackEntry.arguments?.getString("songId") ?: ""
             com.synq.features.music.SongDetailScreen(
                 songId = songId,

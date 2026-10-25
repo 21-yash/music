@@ -2,6 +2,10 @@ import type { MusicProvider, Song, Album, Artist, Playlist, SearchResults, Strea
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 import { createHash } from 'node:crypto';
+import { Types } from 'mongoose';
+import { Playlist as PlaylistModel } from '../models/Playlist';
+import { User } from '../models/User';
+import { upgradeImageUrl } from '../providers/music/jiosaavn/jiosaavnMapper';
 import { deduplicateRelatedSongs } from '../utils/musicFingerprint';
 import { getLyricsWithMeta, LyricsResult } from './lyricsService';
 
@@ -155,16 +159,80 @@ export async function getArtist(id: string, providerId?: string): Promise<Artist
 }
 
 /**
- * Get playlist with songs.
+ * Get playlist with songs. Supports both custom user-created playlists (from MongoDB)
+ * and external provider playlists (e.g. JioSaavn).
  */
 export async function getPlaylist(id: string, providerId?: string): Promise<Playlist | null> {
+  // 1. Check if ID is a custom user playlist in MongoDB
+  if (Types.ObjectId.isValid(id)) {
+    const customCacheKey = `${CACHE_PREFIX.playlist}${id}:custom`;
+    const cachedCustom = await getFromCache<Playlist>(customCacheKey);
+    if (cachedCustom && (cachedCustom.title || (cachedCustom.songs && cachedCustom.songs.length > 0))) {
+      return cachedCustom;
+    }
+
+    try {
+      const customPlaylist = await PlaylistModel.findById(id).lean();
+      if (customPlaylist) {
+        let creatorName = 'Synq User';
+        try {
+          const user = await User.findById(customPlaylist.userId, 'username').lean();
+          if (user?.username) {
+            creatorName = user.username;
+          }
+        } catch {}
+
+        const mappedSongs: Song[] = (customPlaylist.songs || []).map((s) => ({
+          id: s.songId,
+          title: s.title,
+          artists: [{ id: '', name: s.artist, imageUrl: null }],
+          album: null,
+          duration: s.duration || 0,
+          imageUrl: upgradeImageUrl(s.imageUrl),
+          year: '',
+          language: '',
+          hasLyrics: false,
+          playCount: 0,
+          label: '',
+          streamRef: s.songId,
+          providerId: s.providerId || 'jiosaavn',
+        }));
+
+        await storeStreamTokens(mappedSongs);
+
+        const customResult: Playlist = {
+          id: customPlaylist._id.toString(),
+          title: customPlaylist.name,
+          description: customPlaylist.description || `Curated by ${creatorName}`,
+          imageUrl: upgradeImageUrl(
+            customPlaylist.imageUrl || (mappedSongs.length > 0 ? mappedSongs[0].imageUrl : null),
+          ),
+          songCount: mappedSongs.length,
+          followerCount: 0,
+          songs: mappedSongs.map(stripStreamRef),
+          providerId: 'custom',
+        };
+
+        // Cache custom playlist with 5 minute TTL
+        await setCache(customCacheKey, customResult, 5 * 60);
+        return customResult;
+      }
+    } catch (err) {
+      logger.error({ err, id }, 'Failed to fetch custom playlist from MongoDB');
+    }
+  }
+
+  // 2. Fallback to external provider (e.g. JioSaavn)
   const provider = getProvider(providerId);
   const cacheKey = `${CACHE_PREFIX.playlist}${id}:${provider.name}`;
   const cached = await getFromCache<Playlist>(cacheKey);
-  if (cached) return cached;
+  // Only accept cached value if it is non-empty
+  if (cached && (cached.title || (cached.songs && cached.songs.length > 0))) {
+    return cached;
+  }
 
   const playlist = await provider.getPlaylist(id);
-  if (playlist) {
+  if (playlist && (playlist.title || (playlist.songs && playlist.songs.length > 0))) {
     await storeStreamTokens(playlist.songs);
     const sanitized = { ...playlist, songs: playlist.songs.map(stripStreamRef) };
     await setCache(cacheKey, sanitized, CACHE_TTL.playlist);
