@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { LikedSong, Playlist, FollowedTeam } from '../models';
 import { NotFoundError, BadRequestError } from '../utils/errors';
+import { upgradeImageUrl } from '../providers/music/jiosaavn/jiosaavnMapper';
 
 // ─── Liked Songs ─────────────────────────────────────────────────────────────
 
@@ -37,6 +38,10 @@ export async function getLikedSongs(
     LikedSong.countDocuments({ userId: userObjectId }),
   ]);
 
+  for (const s of songs) {
+    (s as any).imageUrl = upgradeImageUrl(s.imageUrl);
+  }
+
   return {
     songs,
     total,
@@ -61,7 +66,7 @@ export async function likeSong(userId: string, data: LikeSongInput) {
       providerId: data.providerId,
       title: data.title,
       artist: data.artist,
-      imageUrl: data.imageUrl ?? null,
+      imageUrl: upgradeImageUrl(data.imageUrl),
       duration: data.duration ?? 0,
       likedAt: new Date(),
     },
@@ -149,7 +154,7 @@ export async function syncLikes(
             providerId: item.providerId,
             title: item.title,
             artist: item.artist,
-            imageUrl: item.imageUrl ?? null,
+            imageUrl: upgradeImageUrl(item.imageUrl),
             duration: item.duration ?? 0,
             likedAt: item.likedAt ? new Date(item.likedAt) : new Date(),
           },
@@ -164,6 +169,10 @@ export async function syncLikes(
   const allLiked = await LikedSong.find({ userId: userObjectId })
     .sort({ likedAt: -1 })
     .lean();
+
+  for (const s of allLiked) {
+    (s as any).imageUrl = upgradeImageUrl(s.imageUrl);
+  }
 
   return {
     likes: allLiked,
@@ -183,7 +192,7 @@ export async function getPlaylists(userId: string) {
     id: p._id.toString(),
     name: p.name,
     description: p.description,
-    imageUrl: p.imageUrl ?? (p.songs.length > 0 ? p.songs[0].imageUrl : null),
+    imageUrl: upgradeImageUrl(p.imageUrl ?? (p.songs.length > 0 ? p.songs[0].imageUrl : null)),
     songCount: p.songs.length,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
@@ -199,7 +208,7 @@ export async function createPlaylist(
     userId: userObjectId,
     name: data.name,
     description: data.description ?? '',
-    imageUrl: data.imageUrl ?? null,
+    imageUrl: upgradeImageUrl(data.imageUrl),
     songs: [],
   });
 
@@ -235,10 +244,14 @@ export async function getPlaylistById(userId: string, playlistId: string) {
     id: playlist._id.toString(),
     name: playlist.name,
     description: playlist.description,
-    imageUrl:
+    imageUrl: upgradeImageUrl(
       playlist.imageUrl ??
       (playlist.songs.length > 0 ? playlist.songs[0].imageUrl : null),
-    songs: playlist.songs,
+    ),
+    songs: playlist.songs.map((s) => ({
+      ...s,
+      imageUrl: upgradeImageUrl(s.imageUrl),
+    })),
     songCount: playlist.songs.length,
     createdAt: playlist.createdAt,
     updatedAt: playlist.updatedAt,
@@ -266,7 +279,7 @@ export async function updatePlaylist(
 
   if (data.name !== undefined) playlist.name = data.name;
   if (data.description !== undefined) playlist.description = data.description;
-  if (data.imageUrl !== undefined) playlist.imageUrl = data.imageUrl;
+  if (data.imageUrl !== undefined) playlist.imageUrl = upgradeImageUrl(data.imageUrl);
 
   await playlist.save();
 
@@ -332,14 +345,14 @@ export async function addSongToPlaylist(
     providerId: songData.providerId,
     title: songData.title,
     artist: songData.artist,
-    imageUrl: songData.imageUrl ?? null,
+    imageUrl: upgradeImageUrl(songData.imageUrl),
     duration: songData.duration ?? 0,
     addedAt: new Date(),
     position: newPosition,
   });
 
   if (!playlist.imageUrl && songData.imageUrl) {
-    playlist.imageUrl = songData.imageUrl;
+    playlist.imageUrl = upgradeImageUrl(songData.imageUrl);
   }
 
   await playlist.save();

@@ -34,13 +34,22 @@ export function cleanText(text: string | undefined | null): string {
 // ─── Image URL ───────────────────────────────────────────────────────
 
 /**
- * Upgrade JioSaavn image to 500x500.
+ * Upgrade JioSaavn image to highest quality (500x500).
+ * Handles all JioSaavn CDN formats:
+ * - https://c.saavncdn.com/...-150x150.jpg -> -500x500.jpg
+ * - https://c.saavncdn.com/..._150x150.jpg -> _500x500.jpg
+ * - https://c.saavncdn.com/.../150x150.jpg -> /500x500.jpg
+ * Also handles 50x50, 150x150, 250x250, 350x350, and upgrades http to https.
  */
 export function upgradeImageUrl(url: string | undefined | null): string | null {
   if (!url) return null;
-  return url
-    .replace(/\/150x150\b/g, '/500x500')
-    .replace(/\/50x50\b/g, '/500x500');
+  let upgraded = url
+    .replace(/([-_/])(?:50x50|150x150|250x250|350x350)\b/gi, '$1500x500')
+    .replace(/\b(?:50x50|150x150|250x250|350x350)\b/gi, '500x500');
+  if (upgraded.startsWith('http://')) {
+    upgraded = 'https://' + upgraded.slice(7);
+  }
+  return upgraded;
 }
 
 // ─── Artist extraction ──────────────────────────────────────────────
