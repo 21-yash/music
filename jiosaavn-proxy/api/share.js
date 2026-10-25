@@ -1,3 +1,10 @@
+function upgradeImageUrl(url) {
+  if (!url) return '';
+  return url
+    .replace(/([-_/])(?:50x50|150x150|250x250|350x350)\b/g, '$1500x500')
+    .replace(/\b(?:50x50|150x150|250x250|350x350)\b/g, '500x500');
+}
+
 export default async function handler(req, res) {
   let { type = 'track', id = '', title: qTitle, artist: qArtist, img: qImg, songs: qSongs } = req.query;
 
@@ -29,7 +36,7 @@ export default async function handler(req, res) {
           creator = cleanEntity(data.firstname || 'Synq');
           artist = creator;
           if (data.image) {
-            imageUrl = data.image.replace(/150x150/, '500x500');
+            imageUrl = upgradeImageUrl(data.image);
           }
           const rawSongs = Array.isArray(data.songs)
             ? data.songs
@@ -41,7 +48,7 @@ export default async function handler(req, res) {
             title: cleanEntity(s.song || s.title || 'Untitled Track'),
             artist: cleanEntity(s.primary_artists || s.singers || 'Unknown Artist'),
             duration: parseInt(s.duration || '0', 10),
-            image: s.image ? s.image.replace(/150x150/, '250x250') : ''
+            image: upgradeImageUrl(s.image)
           }));
         }
       } else if (type === 'album') {
@@ -57,7 +64,7 @@ export default async function handler(req, res) {
           album = title;
           year = data.year || '';
           if (data.image) {
-            imageUrl = data.image.replace(/150x150/, '500x500');
+            imageUrl = upgradeImageUrl(data.image);
           }
           const rawSongs = Array.isArray(data.songs) ? data.songs : (Array.isArray(data.list) ? data.list : []);
           playlistCount = rawSongs.length;
@@ -66,7 +73,7 @@ export default async function handler(req, res) {
             title: cleanEntity(s.song || s.title || 'Untitled Track'),
             artist: cleanEntity(s.primary_artists || s.singers || artist),
             duration: parseInt(s.duration || '0', 10),
-            image: s.image ? s.image.replace(/150x150/, '250x250') : ''
+            image: upgradeImageUrl(s.image)
           }));
         }
       } else if (type === 'artist') {
@@ -80,7 +87,7 @@ export default async function handler(req, res) {
           title = cleanEntity(data.name || title);
           artist = 'Verified Artist';
           if (data.image) {
-            imageUrl = data.image.replace(/150x150/, '500x500');
+            imageUrl = upgradeImageUrl(data.image);
           }
           const rawSongs = (data.topSongs && data.topSongs.songs) ? data.topSongs.songs : (Array.isArray(data.topSongs) ? data.topSongs : []);
           playlistCount = rawSongs.length;
@@ -89,7 +96,7 @@ export default async function handler(req, res) {
             title: cleanEntity(s.song || s.title || 'Untitled Track'),
             artist: cleanEntity(s.primary_artists || s.singers || title),
             duration: parseInt(s.duration || '0', 10),
-            image: s.image ? s.image.replace(/150x150/, '250x250') : ''
+            image: upgradeImageUrl(s.image)
           }));
         }
       } else {
@@ -107,7 +114,7 @@ export default async function handler(req, res) {
             album = cleanEntity(songData.album || '');
             year = songData.year || '';
             if (songData.image) {
-              imageUrl = songData.image.replace(/150x150/, '500x500');
+              imageUrl = upgradeImageUrl(songData.image);
             }
             if (songData.duration) {
               durationSeconds = parseInt(songData.duration, 10) || 0;

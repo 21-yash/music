@@ -1,3 +1,10 @@
+function upgradeImageUrl(url) {
+  if (!url) return '';
+  return url
+    .replace(/([-_/])(?:50x50|150x150|250x250|350x350)\b/g, '$1500x500')
+    .replace(/\b(?:50x50|150x150|250x250|350x350)\b/g, '500x500');
+}
+
 export default async function handler(req, res) {
   let { type = 'track', id = '', url = '' } = req.query;
 
@@ -28,7 +35,7 @@ export default async function handler(req, res) {
           const count = data.list_count || (Array.isArray(data.songs) ? data.songs.length : 'Multiple');
           author = `Playlist • ${count} songs`;
           if (data.image) {
-            imageUrl = data.image.replace(/150x150/, '500x500');
+            imageUrl = upgradeImageUrl(data.image);
           }
         }
       } else {
@@ -44,7 +51,7 @@ export default async function handler(req, res) {
             title = songData.song || songData.title || title;
             author = songData.primary_artists || songData.singers || author;
             if (songData.image) {
-              imageUrl = songData.image.replace(/150x150/, '500x500');
+              imageUrl = upgradeImageUrl(songData.image);
             }
           }
         }
