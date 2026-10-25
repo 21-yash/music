@@ -205,18 +205,8 @@ fun SongDetailScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
 
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = song.primaryArtistName,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = BrandPink,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center
-                            )
-
                             if (song.album != null) {
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "Album: ${song.album.title}",
                                     style = MaterialTheme.typography.bodyMedium,

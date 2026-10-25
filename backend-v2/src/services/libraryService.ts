@@ -193,6 +193,7 @@ export async function getPlaylists(userId: string) {
     name: p.name,
     description: p.description,
     imageUrl: upgradeImageUrl(p.imageUrl ?? (p.songs.length > 0 ? p.songs[0].imageUrl : null)),
+    songIds: p.songs.map((s) => s.songId),
     songCount: p.songs.length,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,

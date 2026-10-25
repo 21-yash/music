@@ -145,6 +145,7 @@ fun AppNavHost(
             val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
             com.synq.features.music.PlaylistScreen(
                 playlistId = playlistId,
+                rootViewModel = rootViewModel,
                 onBackClick = { navController.popBackStack() },
                 onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
                 onNavigateToSearch = { navController.navigate(Screen.Search.route) }
