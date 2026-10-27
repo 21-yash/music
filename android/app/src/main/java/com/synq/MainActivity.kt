@@ -28,6 +28,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // Keep splash screen visible until initial auth state is loaded from DataStore
+        splashScreen.setKeepOnScreenCondition {
+            rootViewModel.isLoggedIn.value == null
+        }
+
         enableEdgeToEdge()
         setContent {
             val isDarkTheme by rootViewModel.isDarkTheme.collectAsState()

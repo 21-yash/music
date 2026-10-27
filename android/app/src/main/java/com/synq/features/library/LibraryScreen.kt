@@ -55,13 +55,11 @@ fun LibraryScreen(
     navController: NavController,
     viewModel: LibraryViewModel = hiltViewModel(),
     rootViewModel: RootViewModel = hiltViewModel(),
-    onNavigateToLogin: (() -> Unit)? = null,
     onNavigateToHistory: (() -> Unit)? = null,
     onNavigateToAllPlaylists: (() -> Unit)? = null,
     onPlaylistClick: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    val isLoggedIn by viewModel.isLoggedIn.collectAsState()
     val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
     val likedSongs by viewModel.likedSongs.collectAsState()
     val likedCount by viewModel.likedCount.collectAsState()
@@ -201,16 +199,8 @@ fun LibraryScreen(
                 .padding(padding),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
         ) {
-            // Guest login callout banner
-            if (!isLoggedIn) {
-                item {
-                    GuestLoginBanner(onLoginClick = { onNavigateToLogin?.invoke() })
-                    Spacer(Modifier.height(20.dp))
-                }
-            }
-
             // 1. Liked Songs Row (if All or Liked)
-            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.LIKED) && isLoggedIn) {
+            if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.LIKED) {
                 item {
                     SectionHeader("Liked Songs", subtitle = "$likedCount songs in cloud library")
                     Spacer(Modifier.height(8.dp))
@@ -274,7 +264,7 @@ fun LibraryScreen(
             }
 
             // 2. User Playlists (if All or Playlists)
-            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.PLAYLISTS) && isLoggedIn) {
+            if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.PLAYLISTS) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -370,7 +360,7 @@ fun LibraryScreen(
             }
 
             // 3. Followed Teams (if All or Teams)
-            if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) && isLoggedIn) {
+            if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) {
                 item {
                     SectionHeader("Followed Teams", subtitle = "Cricket notifications and updates")
                     Spacer(Modifier.height(8.dp))
@@ -438,7 +428,6 @@ fun LibraryScreen(
                         )
                         RecentlyPlayedItem(
                             item = item,
-                            isLoggedIn = isLoggedIn,
                             isLiked = isLiked,
                             onPlay = { viewModel.playRecentlyPlayed(item) },
                             onToggleLike = {
@@ -519,60 +508,6 @@ private fun SectionHeader(
     }
 }
 
-@Composable
-private fun GuestLoginBanner(onLoginClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-        border = CardDefaults.outlinedCardBorder().copy(brush = AccentGradient)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(AccentGradient),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color.White)
-            }
-
-            Spacer(Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Sign in to sync your library",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Access your liked songs, custom playlists, and followed teams across all devices.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
-                )
-            }
-
-            Spacer(Modifier.width(8.dp))
-
-            Button(
-                onClick = onLoginClick,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Text("Login", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
 
 @Composable
 private fun LikedSongsCard(
@@ -721,7 +656,6 @@ private fun LikedSongItem(
 @Composable
 private fun RecentlyPlayedItem(
     item: RecentlyPlayedEntity,
-    isLoggedIn: Boolean,
     isLiked: Boolean,
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
@@ -789,17 +723,7 @@ private fun RecentlyPlayedItem(
                 )
             }
             IconButton(
-                onClick = {
-                    if (!isLoggedIn) {
-                        Toast.makeText(
-                            context,
-                            "Please log in to use song options",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    } else {
-                        showOptionsSheet = true
-                    }
-                }
+                onClick = { showOptionsSheet = true }
             ) {
                 Icon(
                     Icons.Default.MoreVert,

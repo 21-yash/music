@@ -39,13 +39,11 @@ private val AccentGradient = Brush.linearGradient(
 fun ListeningHistoryScreen(
     viewModel: ListeningHistoryViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {},
-    onNavigateToLogin: () -> Unit = {},
 ) {
     val addToPlaylist = LocalAddToPlaylist.current
     val context = LocalContext.current
     val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
     val likedSongs by viewModel.likedSongs.collectAsState()
-    val isLoggedIn by viewModel.isLoggedIn.collectAsState()
 
     val likedSongIds = remember(likedSongs) { likedSongs.map { it.songId }.toSet() }
     val groupedHistory = remember(recentlyPlayed) {
@@ -199,7 +197,6 @@ fun ListeningHistoryScreen(
                         HistorySongItem(
                             item = item,
                             song = songModel,
-                            isLoggedIn = isLoggedIn,
                             isLiked = isLiked,
                             onPlay = { viewModel.playRecentlyPlayed(item) },
                             onPlayNext = { viewModel.playNext(songModel) },
@@ -256,7 +253,6 @@ private fun formatDateHeader(timestamp: Long): String {
 private fun HistorySongItem(
     item: RecentlyPlayedEntity,
     song: Song,
-    isLoggedIn: Boolean,
     isLiked: Boolean,
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
@@ -343,20 +339,8 @@ private fun HistorySongItem(
             onPlayNext = onPlayNext,
             onAddToQueue = onAddToQueue,
             onRemoveFromHistory = onDelete,
-            onAddToPlaylist = {
-                if (!isLoggedIn) {
-                    Toast.makeText(context, "Please log in to add to playlist", Toast.LENGTH_SHORT).show()
-                } else {
-                    onAddToPlaylist()
-                }
-            },
-            onLike = {
-                if (!isLoggedIn) {
-                    Toast.makeText(context, "Please log in to like songs", Toast.LENGTH_SHORT).show()
-                } else {
-                    onToggleLike()
-                }
-            },
+            onAddToPlaylist = onAddToPlaylist,
+            onLike = onToggleLike,
             onDismiss = { showOptions = false }
         )
     }

@@ -10,10 +10,8 @@ import com.synq.features.music.playback.AudioCacheProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -34,9 +32,6 @@ class ProfileViewModel @Inject constructor(
     fun toggleTheme() {
         themePreferences.toggleTheme()
     }
-
-    val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _user = MutableStateFlow<UserDto?>(null)
     val user: StateFlow<UserDto?> = _user.asStateFlow()

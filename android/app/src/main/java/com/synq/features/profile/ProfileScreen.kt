@@ -37,9 +37,7 @@ private val AvatarBrandGradient = Brush.linearGradient(
 fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel(),
     onBackClick: () -> Unit = {},
-    onNavigateToAuth: () -> Unit = {},
 ) {
-    val isLoggedIn by viewModel.isLoggedIn.collectAsState()
     val user by viewModel.user.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
@@ -528,13 +526,11 @@ fun ProfileScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .clickable(enabled = !isLoggedIn) { onNavigateToAuth() },
+                        .padding(horizontal = 20.dp),
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    ),
-                    border = if (!isLoggedIn) CardDefaults.outlinedCardBorder().copy(brush = AvatarBrandGradient) else null
+                    )
                 ) {
                     Row(
                         modifier = Modifier.padding(20.dp),
@@ -545,50 +541,31 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .size(60.dp)
                                 .clip(CircleShape)
-                                .background(if (isLoggedIn) AvatarBrandGradient else Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primaryContainer))),
+                                .background(AvatarBrandGradient),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isLoggedIn) {
-                                Text(
-                                    text = (user?.username ?: "U").take(1).uppercase(),
-                                    color = Color.White,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Filled.Person,
-                                    contentDescription = "Guest",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(32.dp),
-                                )
-                            }
+                            Text(
+                                text = (user?.username ?: "U").take(1).uppercase(),
+                                color = Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (isLoggedIn) (user?.username ?: "User") else "Guest User",
+                                text = user?.username ?: "User",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = if (isLoggedIn) (user?.email ?: "Logged In") else "Tap here to sign in or create an account",
+                                text = user?.email ?: "Account",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        }
-
-                        if (!isLoggedIn) {
-                            Button(
-                                onClick = onNavigateToAuth,
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text("Sign In", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
                         }
                     }
                 }
@@ -618,37 +595,35 @@ fun ProfileScreen(
             }
 
             // Logout button row
-            if (isLoggedIn) {
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Card(
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clickable { showSignOutDialog = true },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .clickable { showSignOutDialog = true },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Logout,
-                                contentDescription = "Sign out",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(22.dp),
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Text(
-                                text = "Sign Out",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = "Sign out",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = "Sign Out",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
             }

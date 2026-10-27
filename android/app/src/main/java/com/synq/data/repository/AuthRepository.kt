@@ -5,7 +5,10 @@ import com.synq.data.local.TokenStorage
 import com.synq.data.remote.api.AuthApi
 import com.synq.data.remote.dto.*
 import com.synq.data.remote.safeApiCall
+import com.synq.data.local.db.AppDatabase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,6 +23,7 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val authApi: AuthApi,
     private val tokenStorage: TokenStorage,
+    private val appDatabase: AppDatabase,
 ) {
     val isLoggedIn: Flow<Boolean> = tokenStorage.isLoggedIn
     val currentUserId: Flow<String?> = tokenStorage.userId
@@ -66,16 +70,21 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    suspend fun clearLocalData() {
+        tokenStorage.clearTokens()
+        withContext(Dispatchers.IO) {
+            appDatabase.clearAllTables()
+        }
+    }
+
     suspend fun logout(): AppResult<Unit?> {
-        val refreshToken = tokenStorage.getRefreshTokenSync() ?: return AppResult.Success(Unit)
-        
-        return safeApiCall { authApi.logout(LogoutRequest(refreshToken)) }
-            .onSuccess {
-                tokenStorage.clearTokens()
-            }
-            .onError { 
-                // Clear tokens locally even if server logout fails (e.g. network issue)
-                tokenStorage.clearTokens()
-            }
+        val refreshToken = tokenStorage.getRefreshTokenSync()
+        val apiResult = if (refreshToken != null) {
+            safeApiCall { authApi.logout(LogoutRequest(refreshToken)) }
+        } else {
+            AppResult.Success(Unit)
+        }
+        clearLocalData()
+        return apiResult
     }
 }

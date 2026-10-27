@@ -227,11 +227,6 @@ fun AppNavHost(
             LibraryScreen(
                 navController = navController,
                 rootViewModel = rootViewModel,
-                onNavigateToLogin = {
-                    navController.navigate(Screen.Auth.route) {
-                        launchSingleTop = true
-                    }
-                },
                 onNavigateToHistory = {
                     navController.navigate(Screen.ListeningHistory.route) {
                         launchSingleTop = true
@@ -259,12 +254,7 @@ fun AppNavHost(
 
         composable(Screen.ListeningHistory.route) {
             com.synq.features.music.history.ListeningHistoryScreen(
-                onBackClick = { navController.popBackStack() },
-                onNavigateToLogin = {
-                    navController.navigate(Screen.Auth.route) {
-                        launchSingleTop = true
-                    }
-                }
+                onBackClick = { navController.popBackStack() }
             )
         }
 
@@ -280,21 +270,10 @@ fun AppNavHost(
                             restoreState = true
                         }
                     }
-                },
-                onNavigateToAuth = {
-                    navController.navigate(Screen.Auth.route) {
-                        launchSingleTop = true
-                    }
                 }
             )
         }
 
-        composable(Screen.Auth.route) {
-            com.synq.features.auth.AuthScreen(
-                onBackClick = { navController.popBackStack() },
-                onAuthSuccess = { navController.popBackStack() }
-            )
-        }
 
         composable(Screen.Jam.route) {
             com.synq.features.music.jam.JamScreen(

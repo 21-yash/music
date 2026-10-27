@@ -50,7 +50,6 @@ fun AppHeader(
     modifier: Modifier = Modifier,
     showBrandLogo: Boolean = true
 ) {
-    val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
     val user by rootViewModel.user.collectAsState()
     val isDarkTheme by rootViewModel.isDarkTheme.collectAsState()
     var menuExpanded by remember { mutableStateOf(false) }
@@ -75,24 +74,16 @@ fun AppHeader(
                 AppLogoMenu(
                     expanded = menuExpanded,
                     onDismiss = { menuExpanded = false },
-                    isLoggedIn = isLoggedIn,
-                    userName = if (isLoggedIn) (user?.username ?: "User") else "Guest",
-                    planLabel = if (isLoggedIn) (user?.email ?: "Account & Profile") else "Tap to sign in",
+                    userName = user?.username ?: "User",
+                    planLabel = user?.email ?: "Account & Profile",
                     onProfileClick = {
-                        if (isLoggedIn) {
-                            navController.navigate(Screen.Profile.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
+                        navController.navigate(Screen.Profile.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
                             }
-                        } else {
-                            navController.navigate(Screen.Auth.route) { launchSingleTop = true }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                    },
-                    onSignInClick = {
-                        navController.navigate(Screen.Auth.route) { launchSingleTop = true }
                     },
                     isDarkTheme = isDarkTheme,
                     onToggleTheme = { rootViewModel.toggleTheme() },
@@ -157,11 +148,9 @@ fun AppHeader(
 private fun AppLogoMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
-    isLoggedIn: Boolean,
     userName: String,
     planLabel: String,
     onProfileClick: () -> Unit,
-    onSignInClick: () -> Unit,
     isDarkTheme: Boolean,
     onToggleTheme: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -169,7 +158,7 @@ private fun AppLogoMenu(
     onLogoutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val initial = if (isLoggedIn) userName.firstOrNull()?.uppercase() ?: "U" else "?"
+    val initial = userName.firstOrNull()?.uppercase() ?: "U"
 
     DropdownMenu(
         expanded = expanded,
@@ -179,7 +168,7 @@ private fun AppLogoMenu(
         containerColor = MaterialTheme.colorScheme.surface,
         modifier = modifier.width(230.dp)
     ) {
-        // Header row: tapping it opens the Profile or Auth screen
+        // Header row: tapping it opens the Profile screen
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -221,18 +210,12 @@ private fun AppLogoMenu(
             label = if (isDarkTheme) "Light Mode" else "Dark Mode",
             icon = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode
         ) { onDismiss(); onToggleTheme() }
-        if (isLoggedIn) {
-            ProfileMenuItem("Settings", Icons.Default.Settings) { onDismiss(); onSettingsClick() }
-            ProfileMenuItem("Listening History", Icons.Default.Refresh) { onDismiss(); onHistoryClick() }
-            ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
-                onDismiss()
-                onLogoutClick()
-            }
-        } else {
-            ProfileMenuItem("Sign In", Icons.Default.AccountCircle, tint = MaterialTheme.colorScheme.primary) {
-                onDismiss()
-                onSignInClick()
-            }
+
+        ProfileMenuItem("Settings", Icons.Default.Settings) { onDismiss(); onSettingsClick() }
+        ProfileMenuItem("Listening History", Icons.Default.Refresh) { onDismiss(); onHistoryClick() }
+        ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
+            onDismiss()
+            onLogoutClick()
         }
     }
 }

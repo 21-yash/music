@@ -49,7 +49,8 @@ class RootViewModel @Inject constructor(
 
     val jamState = jamSessionManager.jamState
 
-    val isLoggedIn = authRepository.isLoggedIn
+    val isLoggedIn: StateFlow<Boolean?> = authRepository.isLoggedIn
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val likedSongIds: StateFlow<Set<String>> = likedSongsRepository.likedSongs
         .map { list -> list.map { it.songId }.toSet() }
@@ -96,6 +97,8 @@ class RootViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            jamSessionManager.leaveJam()
+            playerManager.stop()
             authRepository.logout()
             _user.value = null
         }

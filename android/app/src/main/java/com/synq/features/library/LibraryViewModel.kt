@@ -6,7 +6,6 @@ import com.synq.data.local.db.entity.FollowedTeamEntity
 import com.synq.data.local.db.entity.LikedSongEntity
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.data.local.db.entity.RecentlyPlayedEntity
-import com.synq.data.repository.AuthRepository
 import com.synq.data.repository.FollowedTeamRepository
 import com.synq.data.repository.LikedSongsRepository
 import com.synq.data.repository.PlaylistRepository
@@ -35,16 +34,12 @@ enum class LibraryTab {
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    private val authRepository: AuthRepository,
     private val recentlyPlayedRepository: RecentlyPlayedRepository,
     private val likedSongsRepository: LikedSongsRepository,
     private val playlistRepository: PlaylistRepository,
     private val followedTeamRepository: FollowedTeamRepository,
     private val playerManager: MusicPlayerManager,
 ) : ViewModel() {
-
-    val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val recentlyPlayed: StateFlow<List<RecentlyPlayedEntity>> = recentlyPlayedRepository.recentlyPlayed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -71,13 +66,7 @@ class LibraryViewModel @Inject constructor(
     val showCreatePlaylistDialog: StateFlow<Boolean> = _showCreatePlaylistDialog.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            authRepository.isLoggedIn.collect { loggedIn ->
-                if (loggedIn) {
-                    syncAll()
-                }
-            }
-        }
+        syncAll()
     }
 
     fun setTab(tab: LibraryTab) {

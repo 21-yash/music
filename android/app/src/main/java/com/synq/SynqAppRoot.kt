@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -47,10 +48,38 @@ import com.synq.features.music.components.MiniPlayer
  * Profile screen (since it's not a bottom-nav tab). The avatar floats at the
  * top-end of every screen except MatchDetails and Profile.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SynqAppRoot(
     rootViewModel: RootViewModel = hiltViewModel()
+) {
+    val isLoggedIn by rootViewModel.isLoggedIn.collectAsState()
+
+    when (isLoggedIn) {
+        null -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            )
+        }
+        false -> {
+            com.synq.features.auth.AuthScreen(
+                showBackButton = false,
+                onAuthSuccess = {
+                    rootViewModel.loadUserProfile()
+                }
+            )
+        }
+        true -> {
+            MainAppContent(rootViewModel = rootViewModel)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainAppContent(
+    rootViewModel: RootViewModel
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -77,7 +106,6 @@ fun SynqAppRoot(
     val isPlaylistEditing by rootViewModel.isPlaylistEditing.collectAsState()
     val showMiniPlayer = currentRoute != Screen.MatchDetails().route && !isPlaylistEditing
 
-    val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
     val user by rootViewModel.user.collectAsState()
     val showSignOutConfirmation by rootViewModel.showSignOutDialog.collectAsState()
 

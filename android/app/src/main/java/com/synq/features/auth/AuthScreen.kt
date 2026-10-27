@@ -21,6 +21,9 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import android.app.Activity
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -42,9 +45,15 @@ private val BrandGradient = Brush.linearGradient(
 @Composable
 fun AuthScreen(
     viewModel: AuthViewModel = hiltViewModel(),
+    showBackButton: Boolean = true,
     onBackClick: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    BackHandler(enabled = !showBackButton) {
+        (context as? Activity)?.finish()
+    }
+
     val isLoginMode by viewModel.isLoginMode.collectAsState()
     val identifier by viewModel.identifier.collectAsState()
     val email by viewModel.email.collectAsState()
@@ -65,20 +74,24 @@ fun AuthScreen(
 
     Scaffold(
         topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBackClick) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onBackground
-                    )
+            if (showBackButton) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBackClick) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
                 }
+            } else {
+                Spacer(Modifier.statusBarsPadding().height(16.dp))
             }
         },
         containerColor = MaterialTheme.colorScheme.background

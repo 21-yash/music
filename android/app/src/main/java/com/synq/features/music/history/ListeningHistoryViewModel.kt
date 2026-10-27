@@ -6,7 +6,6 @@ import com.synq.core.domain.AppResult
 import com.synq.data.local.db.entity.LikedSongEntity
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.data.local.db.entity.RecentlyPlayedEntity
-import com.synq.data.repository.AuthRepository
 import com.synq.data.repository.LikedSongsRepository
 import com.synq.data.repository.PlaylistRepository
 import com.synq.data.repository.RecentlyPlayedRepository
@@ -25,12 +24,8 @@ class ListeningHistoryViewModel @Inject constructor(
     private val recentlyPlayedRepository: RecentlyPlayedRepository,
     private val likedSongsRepository: LikedSongsRepository,
     private val playlistRepository: PlaylistRepository,
-    private val authRepository: AuthRepository,
     private val playerManager: MusicPlayerManager,
 ) : ViewModel() {
-
-    val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val recentlyPlayed: StateFlow<List<RecentlyPlayedEntity>> = recentlyPlayedRepository.recentlyPlayed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
