@@ -2,6 +2,7 @@ package com.synq.features.music
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -23,13 +25,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,13 +47,30 @@ import com.synq.RootViewModel
 import com.synq.features.music.components.SongItem
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.jam.LocalIsInJam
+import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
 
-private val PinkAccent = Color(0xFFEC4899)
+private val PinkAccent = BrandPink
 
-private val PlaylistAccentGradient = Brush.linearGradient(
-    listOf(Color(0xFF6366F1), Color(0xFFEC4899))
-)
+private val PlaylistAccentGradient = PinkGradient
+
+private fun getCreatorAvatarGradient(name: String): Brush {
+    val nonPinkGradients = listOf(
+        listOf(Color(0xFF6366F1), Color(0xFF4338CA)), // Indigo / Royal Blue
+        listOf(Color(0xFF0EA5E9), Color(0xFF0284C7)), // Sky / Ocean Blue
+        listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9)), // Violet / Purple
+        listOf(Color(0xFF10B981), Color(0xFF047857)), // Emerald Green
+        listOf(Color(0xFFF59E0B), Color(0xFFD97706)), // Amber / Gold
+        listOf(Color(0xFF06B6D4), Color(0xFF0E7490)), // Cyan / Deep Teal
+        listOf(Color(0xFF3B82F6), Color(0xFF1E40AF)), // Cobalt Blue
+        listOf(Color(0xFF14B8A6), Color(0xFF0F766E)), // Mint / Teal
+    )
+    if (name.equals("Curated", ignoreCase = true)) {
+        return Brush.linearGradient(nonPinkGradients[0])
+    }
+    val hash = kotlin.math.abs(name.lowercase().hashCode())
+    return Brush.linearGradient(nonPinkGradients[hash % nonPinkGradients.size])
+}
 
 enum class PlaylistSortOrder(val label: String) {
     NORMAL("Normal order"),
@@ -70,6 +93,7 @@ fun PlaylistScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val currentUser by rootViewModel.user.collectAsState()
     val isInJam = LocalIsInJam.current
     val listState = rememberLazyListState()
 
@@ -80,6 +104,18 @@ fun PlaylistScreen(
     // Search inside playlist
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    val searchFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            searchFocusRequester.requestFocus()
+        }
+    }
+
+    BackHandler(enabled = isSearchActive) {
+        isSearchActive = false
+        searchQuery = ""
+    }
 
     // Edit mode (drag-to-reorder and remove)
     var isEditMode by remember { mutableStateOf(false) }
@@ -94,6 +130,11 @@ fun PlaylistScreen(
         onDispose {
             rootViewModel.setPlaylistEditing(false)
         }
+    }
+
+    BackHandler(enabled = isEditMode) {
+        isEditMode = false
+        stagedSongs = uiState.playlist?.songs ?: emptyList()
     }
 
     // Drag tracking state
@@ -153,9 +194,10 @@ fun PlaylistScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         if (uiState.isLoading) {
-            CircularProgressIndicator(
+            SynqLoadingIndicator(
                 modifier = Modifier.align(Alignment.Center),
-                color = MaterialTheme.colorScheme.primary
+                size = 48.dp,
+                barCount = 5
             )
         } else if (uiState.error != null) {
             Column(
@@ -164,7 +206,10 @@ fun PlaylistScreen(
             ) {
                 Text("Failed to load playlist: ${uiState.error}", color = MaterialTheme.colorScheme.error)
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { viewModel.loadPlaylist(playlistId) }) {
+                Button(
+                    onClick = { viewModel.loadPlaylist(playlistId) },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                ) {
                     Text("Retry")
                 }
             }
@@ -236,40 +281,66 @@ fun PlaylistScreen(
                                     tint = MaterialTheme.colorScheme.onBackground
                                 )
                             }
-                            TextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = { Text("Find in playlist", fontSize = 14.sp) },
-                                singleLine = true,
+                            Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                leadingIcon = {
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
                                     )
-                                },
-                                trailingIcon = {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    BasicTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            fontSize = 15.sp
+                                        ),
+                                        cursorBrush = SolidColor(BrandPink),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .focusRequester(searchFocusRequester),
+                                        decorationBox = { innerTextField ->
+                                            Box(contentAlignment = Alignment.CenterStart) {
+                                                if (searchQuery.isEmpty()) {
+                                                    Text(
+                                                        text = "Find in playlist",
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        fontSize = 15.sp
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
+                                        }
+                                    )
                                     if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { searchQuery = "" }) {
+                                        IconButton(
+                                            onClick = { searchQuery = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
                                             Icon(
                                                 imageVector = Icons.Default.Close,
                                                 contentDescription = "Clear",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
                                     }
                                 }
-                            )
+                            }
                         }
                     } else {
                         // Standard top bar with back arrow and collapsed header (Spotify Screenshot 3)
@@ -319,8 +390,9 @@ fun PlaylistScreen(
                                     modifier = Modifier
                                         .padding(end = 8.dp)
                                         .size(42.dp)
+                                        .shadow(elevation = 8.dp, shape = CircleShape, spotColor = BrandPink.copy(alpha = 0.5f))
                                         .clip(CircleShape)
-                                        .background(PinkAccent)
+                                        .background(PinkGradient)
                                         .clickable {
                                             if (originalPlaylist.songs.isNotEmpty()) {
                                                 musicViewModel.playQueue(originalPlaylist.songs, 0)
@@ -424,7 +496,16 @@ fun PlaylistScreen(
 
                                 Spacer(modifier = Modifier.height(10.dp))
 
-                                // Creator Row (Spotify Screenshot 1: Avatar + Name)
+                                // Creator Row (Avatar + Name)
+                                val isUserPlaylist = originalPlaylist.id.equals("liked", ignoreCase = true) || isUserMade
+                                val creatorName = if (isUserPlaylist) {
+                                    currentUser?.username?.takeIf { it.isNotBlank() } ?: "You"
+                                } else {
+                                    "Curated"
+                                }
+                                val creatorInitial = creatorName.firstOrNull()?.uppercase() ?: if (isUserPlaylist) "Y" else "C"
+                                val creatorGradient = remember(creatorName) { getCreatorAvatarGradient(creatorName) }
+
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -432,19 +513,19 @@ fun PlaylistScreen(
                                         modifier = Modifier
                                             .size(24.dp)
                                             .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary),
+                                            .background(creatorGradient),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = originalPlaylist.title.firstOrNull()?.uppercase() ?: "Y",
+                                            text = creatorInitial,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimary
+                                            color = Color.White
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = if (originalPlaylist.id.equals("liked", ignoreCase = true) || isUserMade) "You" else "Curated",
+                                        text = creatorName,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onBackground
@@ -522,8 +603,9 @@ fun PlaylistScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(56.dp)
+                                        .shadow(10.dp, CircleShape, spotColor = BrandPink.copy(alpha = 0.5f))
                                         .clip(CircleShape)
-                                        .background(PinkAccent)
+                                        .background(PinkGradient)
                                         .clickable {
                                             if (originalPlaylist.songs.isNotEmpty()) {
                                                 musicViewModel.playQueue(originalPlaylist.songs, 0)
@@ -606,7 +688,7 @@ fun PlaylistScreen(
                                                 onDismissRequest = { showSortMenu = false },
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
-                                                PlaylistSortOrder.values().forEach { order ->
+                                                PlaylistSortOrder.entries.forEach { order ->
                                                     DropdownMenuItem(
                                                         text = {
                                                             Text(
@@ -619,7 +701,7 @@ fun PlaylistScreen(
                                                                 Icon(
                                                                     Icons.Default.Check,
                                                                     contentDescription = null,
-                                                                    tint = MaterialTheme.colorScheme.primary,
+                                                                    tint = BrandPink,
                                                                     modifier = Modifier.size(18.dp)
                                                                 )
                                                             }
@@ -661,7 +743,7 @@ fun PlaylistScreen(
                                 Icon(
                                     imageVector = Icons.Default.MusicNote,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = BrandPink,
                                     modifier = Modifier.size(42.dp)
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -676,7 +758,7 @@ fun PlaylistScreen(
                                     Button(
                                         onClick = onNavigateToSearch,
                                         shape = RoundedCornerShape(20.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = PinkAccent)
+                                        colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
                                         Spacer(Modifier.width(6.dp))
@@ -758,7 +840,8 @@ fun PlaylistScreen(
                 exit = slideOutVertically(targetOffsetY = { it * 2 }) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 28.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 8.dp)
             ) {
                 Button(
                     onClick = {
@@ -787,7 +870,7 @@ fun PlaylistScreen(
                     enabled = hasChanges && !isSaving,
                     shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PinkAccent,
+                        containerColor = BrandPink,
                         contentColor = Color.White,
                         disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
@@ -796,10 +879,10 @@ fun PlaylistScreen(
                     contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
                 ) {
                     if (isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
+                        SynqLoadingIndicator(
+                            size = 18.dp,
+                            barCount = 3,
+                            colors = listOf(Color.White.copy(alpha = 0.75f), Color.White)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Saving...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -840,11 +923,7 @@ private fun PlaylistCoverArtwork(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF6366F1), Color(0xFFEC4899))
-                        )
-                    ),
+                    .background(PinkGradient),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -934,9 +1013,9 @@ private fun PillButton(
     val isDark = isAppDark()
 
     val containerColor = when {
-        isAccent && enabled -> PinkAccent
+        isAccent && enabled -> BrandPink
         isAccent && !enabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        isSelected -> MaterialTheme.colorScheme.primary
+        isSelected -> BrandPink
         isDark -> Color.White.copy(alpha = 0.12f)
         else -> Color.Black.copy(alpha = 0.08f)
     }
@@ -944,7 +1023,7 @@ private fun PillButton(
     val contentColor = when {
         isAccent && enabled -> Color.White
         isAccent && !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-        isSelected -> MaterialTheme.colorScheme.onPrimary
+        isSelected -> Color.White
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         else -> MaterialTheme.colorScheme.onBackground
     }
@@ -1075,7 +1154,7 @@ private fun EditModeSongRow(
             Icon(
                 imageVector = Icons.Default.DragHandle,
                 contentDescription = "Reorder song",
-                tint = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (isDragging) BrandPink else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -1166,7 +1245,8 @@ private fun EditPlaylistDialog(
                     onDismiss()
                 },
                 enabled = name.isNotBlank(),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
             ) {
                 Text("Save")
             }

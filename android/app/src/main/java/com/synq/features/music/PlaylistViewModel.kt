@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.synq.core.domain.AppResult
 import com.synq.data.repository.PlaylistRepository
 import com.synq.features.music.data.repository.MusicRepository
+import com.synq.features.music.domain.model.AlbumRef
 import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.features.music.domain.model.Playlist
 import com.synq.features.music.domain.model.Song
@@ -45,7 +46,7 @@ class PlaylistViewModel @Inject constructor(
                             id = entity.songId,
                             title = entity.title,
                             artists = listOf(ArtistCredit(id = entity.artist, name = entity.artist, imageUrl = null)),
-                            album = null,
+                            album = entity.albumId?.takeIf { it.isNotBlank() }?.let { AlbumRef(id = it) },
                             durationSeconds = entity.durationSeconds,
                             imageUrl = entity.imageUrl,
                             year = "",
@@ -96,7 +97,7 @@ class PlaylistViewModel @Inject constructor(
                                     id = s.songId,
                                     title = s.title,
                                     artists = listOf(ArtistCredit(id = s.artist, name = s.artist, imageUrl = null)),
-                                    album = null,
+                                    album = s.albumId?.takeIf { it.isNotBlank() }?.let { AlbumRef(id = it) },
                                     durationSeconds = s.durationSeconds,
                                     imageUrl = s.imageUrl,
                                     year = "",
@@ -220,7 +221,7 @@ class PlaylistViewModel @Inject constructor(
                     id = s.songId,
                     title = s.title,
                     artists = listOf(ArtistCredit(id = s.artist, name = s.artist, imageUrl = null)),
-                    album = null,
+                    album = s.albumId?.takeIf { it.isNotBlank() }?.let { AlbumRef(id = it) },
                     durationSeconds = s.duration,
                     imageUrl = s.imageUrl,
                     year = "",

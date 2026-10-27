@@ -39,13 +39,13 @@ data class Song(
 data class ArtistCredit(
     val id: String,
     val name: String,
-    val imageUrl: String?
+    val imageUrl: String? = null
 )
 
 data class AlbumRef(
     val id: String,
-    val title: String,
-    val imageUrl: String?
+    val title: String = "",
+    val imageUrl: String? = null
 )
 
 data class SearchResults(

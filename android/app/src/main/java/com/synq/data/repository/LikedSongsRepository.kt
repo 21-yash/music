@@ -47,6 +47,7 @@ class LikedSongsRepository @Inject constructor(
             durationSeconds = song.durationSeconds,
             likedAt = System.currentTimeMillis(),
             pendingSyncAction = "LIKE",
+            albumId = song.album?.id?.takeIf { it.isNotBlank() },
         )
         // Optimistically write to Room cache
         likedSongDao.insert(entity)
@@ -59,6 +60,7 @@ class LikedSongsRepository @Inject constructor(
             artist = song.primaryArtistName,
             imageUrl = song.imageUrl,
             duration = song.durationSeconds,
+            albumId = song.album?.id?.takeIf { it.isNotBlank() },
         )
         when (safeApiCall { libraryApi.likeSong(request) }) {
             is AppResult.Success -> {
@@ -112,6 +114,7 @@ class LikedSongsRepository @Inject constructor(
                 imageUrl = it.imageUrl,
                 duration = it.durationSeconds,
                 likedAt = it.likedAt,
+                albumId = it.albumId,
             )
         }
         val pendingUnlikes = pendingItems.filter { it.pendingSyncAction == "UNLIKE" }.map { it.songId }
@@ -134,6 +137,7 @@ class LikedSongsRepository @Inject constructor(
                         durationSeconds = dto.duration,
                         likedAt = System.currentTimeMillis(),
                         pendingSyncAction = null,
+                        albumId = dto.albumId,
                     )
                 }
                 likedSongDao.clearAll()

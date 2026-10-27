@@ -23,23 +23,67 @@ class PlaylistRepository @Inject constructor(
     fun getPlaylistSongs(playlistId: String): Flow<List<PlaylistSongEntity>> =
         playlistDao.getSongsForPlaylist(playlistId)
 
+    fun getPlaylistIdsForSong(songId: String): Flow<List<String>> =
+        playlistDao.getPlaylistIdsForSong(songId)
+
+    private fun parseDateToMillis(dateStr: String?): Long {
+        if (dateStr.isNullOrBlank()) return System.currentTimeMillis()
+        return try {
+            java.time.Instant.parse(dateStr).toEpochMilli()
+        } catch (_: Exception) {
+            try {
+                dateStr.toLong()
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+    }
+
     suspend fun syncPlaylists(): AppResult<Unit> {
         return when (val result = safeApiCall { libraryApi.getPlaylists() }) {
             is AppResult.Success -> {
-                val entities = result.data.map { dto ->
+                val dtos = result.data
+                val entities = dtos.map { dto ->
                     PlaylistEntity(
                         serverId = dto.id,
                         name = dto.name,
                         description = dto.description,
                         imageUrl = dto.imageUrl,
                         songCount = dto.songCount,
-                        createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis(),
+                        createdAt = parseDateToMillis(dto.createdAt),
+                        updatedAt = parseDateToMillis(dto.updatedAt),
                     )
                 }
-                playlistDao.clearPlaylists()
+
                 if (entities.isNotEmpty()) {
                     playlistDao.insertPlaylists(entities)
+                    playlistDao.deletePlaylistsNotInList(entities.map { it.serverId })
+                } else {
+                    playlistDao.clearPlaylists()
+                }
+
+                // Sync lightweight songIds into Room without overwriting rich song metadata
+                dtos.forEach { dto ->
+                    val ids = dto.songIds.ifEmpty { dto.songs.map { it.songId } }
+                    if (ids.isNotEmpty()) {
+                        playlistDao.deleteSongsNotInList(dto.id, ids)
+                        val stubEntities = ids.mapIndexed { index, songId ->
+                            PlaylistSongEntity(
+                                id = "${dto.id}_$songId",
+                                playlistId = dto.id,
+                                songId = songId,
+                                providerId = "",
+                                title = "",
+                                artist = "",
+                                imageUrl = null,
+                                durationSeconds = 0,
+                                position = index,
+                            )
+                        }
+                        playlistDao.insertSongsIgnore(stubEntities)
+                    } else {
+                        playlistDao.deleteSongsForPlaylist(dto.id)
+                    }
                 }
                 AppResult.Success(Unit)
             }
@@ -58,8 +102,8 @@ class PlaylistRepository @Inject constructor(
                     description = dto.description,
                     imageUrl = dto.imageUrl,
                     songCount = dto.songCount,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
+                    createdAt = parseDateToMillis(dto.createdAt),
+                    updatedAt = parseDateToMillis(dto.updatedAt),
                 )
                 playlistDao.insertPlaylist(entity)
                 AppResult.Success(dto)
@@ -78,8 +122,8 @@ class PlaylistRepository @Inject constructor(
                     description = dto.description,
                     imageUrl = dto.imageUrl,
                     songCount = dto.songs.size,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
+                    createdAt = parseDateToMillis(dto.createdAt),
+                    updatedAt = parseDateToMillis(dto.updatedAt),
                 )
                 val songEntities = dto.songs.map { s ->
                     PlaylistSongEntity(
@@ -92,6 +136,7 @@ class PlaylistRepository @Inject constructor(
                         imageUrl = s.imageUrl,
                         durationSeconds = s.duration,
                         position = s.position,
+                        albumId = s.albumId,
                     )
                 }
                 playlistDao.syncPlaylistWithSongs(playlistEntity, songEntities)
@@ -119,13 +164,19 @@ class PlaylistRepository @Inject constructor(
             artist = song.primaryArtistName,
             imageUrl = song.imageUrl,
             duration = song.durationSeconds,
+            albumId = song.album?.id?.takeIf { it.isNotBlank() },
         )
         return when (val result = safeApiCall { libraryApi.addSongToPlaylist(playlistId, request) }) {
             is AppResult.Success -> {
                 loadPlaylistDetails(playlistId)
                 AppResult.Success(result.data)
             }
-            is AppResult.Error -> AppResult.Error(result.error)
+            is AppResult.Error -> {
+                if (result.error.message?.contains("already in playlist", ignoreCase = true) == true) {
+                    loadPlaylistDetails(playlistId)
+                }
+                AppResult.Error(result.error)
+            }
         }
     }
 

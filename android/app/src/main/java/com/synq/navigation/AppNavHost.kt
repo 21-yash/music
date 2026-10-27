@@ -7,9 +7,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.synq.features.home.HomeScreen
 import com.synq.features.library.LibraryScreen
@@ -29,7 +32,7 @@ import com.synq.features.sports.SportsScreen
  * slide animations between bottom-nav destinations.
  */
 
-private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "profile", "music/jam", "music/popular_artists")
+private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "music/jam", "music/popular_artists", "music/playlists")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -169,6 +172,14 @@ fun AppNavHost(
 
         composable(
             route = Screen.SongDetails().route,
+            arguments = listOf(
+                navArgument("songId") { type = NavType.StringType },
+                navArgument("provider") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                }
+            ),
             deepLinks = listOf(
                 navDeepLink { uriPattern = "https://21yash.online/track/{songId}" },
                 navDeepLink { uriPattern = "https://21yash.online/song/{songId}" },
@@ -177,8 +188,10 @@ fun AppNavHost(
             )
         ) { backStackEntry ->
             val songId = backStackEntry.arguments?.getString("songId") ?: ""
+            val provider = backStackEntry.arguments?.getString("provider")
             com.synq.features.music.SongDetailScreen(
                 songId = songId,
+                provider = provider,
                 onBackClick = { navController.popBackStack() },
                 onNavigateToArtist = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
                 onNavigateToAlbum = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
@@ -224,6 +237,20 @@ fun AppNavHost(
                         launchSingleTop = true
                     }
                 },
+                onNavigateToAllPlaylists = {
+                    navController.navigate(Screen.AllPlaylists.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onPlaylistClick = { playlistId ->
+                    navController.navigate(Screen.Playlist().createRoute(playlistId))
+                }
+            )
+        }
+
+        composable(Screen.AllPlaylists.route) {
+            com.synq.features.library.AllPlaylistsScreen(
+                onBackClick = { navController.popBackStack() },
                 onPlaylistClick = { playlistId ->
                     navController.navigate(Screen.Playlist().createRoute(playlistId))
                 }
@@ -243,7 +270,17 @@ fun AppNavHost(
 
         composable(Screen.Profile.route) {
             ProfileScreen(
-                onBackClick = { navController.popBackStack() },
+                onBackClick = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
                 onNavigateToAuth = {
                     navController.navigate(Screen.Auth.route) {
                         launchSingleTop = true

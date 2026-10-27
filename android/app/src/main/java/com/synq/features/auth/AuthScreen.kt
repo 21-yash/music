@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synq.ui.SynqBrandedText
+import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.SynqLogo
 
 private val BrandGradient = Brush.linearGradient(
@@ -305,10 +306,10 @@ fun AuthScreen(
                 )
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = Color.White,
-                        strokeWidth = 2.5.dp
+                    SynqLoadingIndicator(
+                        size = 22.dp,
+                        barCount = 3,
+                        colors = listOf(Color.White.copy(alpha = 0.75f), Color.White)
                     )
                 } else {
                     Text(

@@ -9,6 +9,7 @@ export interface ILikedSong extends Document {
   imageUrl: string | null;
   duration: number;
   likedAt: Date;
+  albumId?: string | null;
 }
 
 const likedSongSchema = new Schema<ILikedSong>(
@@ -51,6 +52,11 @@ const likedSongSchema = new Schema<ILikedSong>(
     likedAt: {
       type: Date,
       default: Date.now,
+    },
+    albumId: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   {

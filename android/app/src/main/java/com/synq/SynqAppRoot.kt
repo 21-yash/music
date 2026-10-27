@@ -118,11 +118,23 @@ fun SynqAppRoot(
     }
 
     songForPlaylistAdd?.let { song ->
+        val savedPlaylistIds by rootViewModel.getPlaylistIdsForSong(song.id).collectAsState(initial = emptyList())
+        val isLiked = likedSongIds.contains(song.id)
         com.synq.features.music.components.AddToPlaylistSheet(
             song = song,
             playlists = playlists,
+            savedPlaylistIds = savedPlaylistIds.toSet(),
+            isLiked = isLiked,
+            onToggleLike = {
+                rootViewModel.toggleLike(song)
+            },
             onSelectPlaylist = { playlist ->
                 rootViewModel.addSongToExistingPlaylist(playlist.serverId, song) { success, msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onRemoveFromPlaylist = { playlist ->
+                rootViewModel.removeSongFromPlaylist(playlist.serverId, song.id) { success, msg ->
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
             },
@@ -140,9 +152,13 @@ fun SynqAppRoot(
         com.synq.features.music.components.LocalAddToPlaylist provides { song ->
             rootViewModel.showAddToPlaylist(song)
         },
-        com.synq.features.music.components.LocalOnNavigateToSongDetails provides { songId ->
+        com.synq.features.music.components.LocalOnNavigateToSongDetails provides { songId, provider ->
             showFullPlayer = false
-            navController.navigate(com.synq.navigation.Screen.SongDetails().createRoute(songId))
+            navController.navigate(com.synq.navigation.Screen.SongDetails().createRoute(songId, provider))
+        },
+        com.synq.features.music.components.LocalOnNavigateToAlbum provides { albumId ->
+            showFullPlayer = false
+            navController.navigate(com.synq.navigation.Screen.Album().createRoute(albumId))
         },
         com.synq.features.music.components.LocalLikedSongIds provides likedSongIds,
         com.synq.features.music.components.LocalToggleLike provides { song ->

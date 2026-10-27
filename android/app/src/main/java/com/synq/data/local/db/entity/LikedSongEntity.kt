@@ -13,5 +13,6 @@ data class LikedSongEntity(
     val imageUrl: String?,
     val durationSeconds: Int,
     val likedAt: Long = System.currentTimeMillis(),
-    val pendingSyncAction: String? = null // "LIKE", "UNLIKE", or null if synced
+    val pendingSyncAction: String? = null, // "LIKE", "UNLIKE", or null if synced
+    val albumId: String? = null
 )

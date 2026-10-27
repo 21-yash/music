@@ -15,6 +15,7 @@ data class LikedSongDto(
     val imageUrl: String? = null,
     val duration: Int = 0,
     val likedAt: String? = null,
+    val albumId: String? = null,
 )
 
 @Serializable
@@ -34,6 +35,7 @@ data class LikeSongRequest(
     val artist: String,
     val imageUrl: String? = null,
     val duration: Int? = null,
+    val albumId: String? = null,
 )
 
 @Serializable
@@ -51,6 +53,7 @@ data class PendingLikeItemDto(
     val imageUrl: String? = null,
     val duration: Int? = null,
     val likedAt: Long? = null,
+    val albumId: String? = null,
 )
 
 @Serializable
@@ -84,6 +87,7 @@ data class PlaylistSongDto(
     val duration: Int = 0,
     val addedAt: String? = null,
     val position: Int = 0,
+    val albumId: String? = null,
 )
 
 @Serializable
@@ -92,6 +96,7 @@ data class PlaylistDto(
     val name: String,
     val description: String = "",
     val imageUrl: String? = null,
+    val songIds: List<String> = emptyList(),
     val songs: List<PlaylistSongDto> = emptyList(),
     val songCount: Int = 0,
     val createdAt: String? = null,
@@ -120,6 +125,7 @@ data class AddPlaylistSongRequest(
     val artist: String,
     val imageUrl: String? = null,
     val duration: Int? = null,
+    val albumId: String? = null,
 )
 
 @Serializable

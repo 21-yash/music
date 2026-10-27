@@ -252,6 +252,9 @@ class RootViewModel @Inject constructor(
         }
     }
 
+    fun getPlaylistIdsForSong(songId: String): Flow<List<String>> =
+        playlistRepository.getPlaylistIdsForSong(songId)
+
     fun dismissAddToPlaylist() {
         _songForPlaylistAdd.value = null
     }
@@ -261,10 +264,22 @@ class RootViewModel @Inject constructor(
             when (val result = playlistRepository.addSongToPlaylist(playlistId, song)) {
                 is AppResult.Success -> {
                     onComplete?.invoke(true, "Added to playlist")
-                    dismissAddToPlaylist()
                 }
                 is AppResult.Error -> {
                     onComplete?.invoke(false, result.error.message ?: "Failed to add song")
+                }
+            }
+        }
+    }
+
+    fun removeSongFromPlaylist(playlistId: String, songId: String, onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            when (val result = playlistRepository.removeSongFromPlaylist(playlistId, songId)) {
+                is AppResult.Success -> {
+                    onComplete?.invoke(true, "Removed from playlist")
+                }
+                is AppResult.Error -> {
+                    onComplete?.invoke(false, result.error.message ?: "Failed to remove song")
                 }
             }
         }
@@ -278,11 +293,9 @@ class RootViewModel @Inject constructor(
                     when (val addResult = playlistRepository.addSongToPlaylist(newPlaylistId, song)) {
                         is AppResult.Success -> {
                             onComplete?.invoke(true, "Created \"$name\" and added song")
-                            dismissAddToPlaylist()
                         }
                         is AppResult.Error -> {
                             onComplete?.invoke(false, addResult.error.message ?: "Playlist created, but failed to add song")
-                            dismissAddToPlaylist()
                         }
                     }
                 }

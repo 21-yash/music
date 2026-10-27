@@ -48,6 +48,9 @@ fun ListeningHistoryScreen(
     val isLoggedIn by viewModel.isLoggedIn.collectAsState()
 
     val likedSongIds = remember(likedSongs) { likedSongs.map { it.songId }.toSet() }
+    val groupedHistory = remember(recentlyPlayed) {
+        recentlyPlayed.groupBy { formatDateHeader(it.playedAt) }
+    }
     var showClearDialog by remember { mutableStateOf(false) }
 
     if (showClearDialog) {
@@ -159,49 +162,65 @@ fun ListeningHistoryScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(recentlyPlayed, key = { it.id }) { item ->
-                    val isLiked = likedSongIds.contains(item.songId)
-                    val songModel = remember(item) {
-                        Song(
-                            id = item.songId,
-                            title = item.title,
-                            artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
-                            album = null,
-                            durationSeconds = item.durationSeconds,
-                            imageUrl = item.imageUrl,
-                            year = "",
-                            language = "",
-                            hasLyrics = false,
-                            playCount = 0,
-                            label = "",
-                            streamRef = item.songId,
-                            providerId = item.providerId,
+                groupedHistory.forEach { (dateHeader, itemsForDate) ->
+                    item(key = "header_$dateHeader") {
+                        Text(
+                            text = dateHeader,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = com.synq.ui.SynqPink,
+                            modifier = Modifier.padding(top = 14.dp, bottom = 4.dp)
                         )
                     }
 
-                    HistorySongItem(
-                        item = item,
-                        song = songModel,
-                        isLoggedIn = isLoggedIn,
-                        isLiked = isLiked,
-                        onPlay = { viewModel.playRecentlyPlayed(item) },
-                        onPlayNext = { viewModel.playNext(songModel) },
-                        onAddToQueue = { viewModel.addToQueue(songModel) },
-                        onToggleLike = {
-                            viewModel.toggleLike(songModel)
-                            Toast.makeText(
-                                context,
-                                if (isLiked) "Removed from Liked Songs" else "Added to Liked Songs",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        onAddToPlaylist = {
-                            addToPlaylist(songModel)
+                    items(itemsForDate, key = { it.id }) { item ->
+                        val isLiked = likedSongIds.contains(item.songId)
+                        val songModel = remember(item) {
+                            Song(
+                                id = item.songId,
+                                title = item.title,
+                                artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
+                                album = item.albumId?.takeIf { it.isNotBlank() }?.let { com.synq.features.music.domain.model.AlbumRef(id = it) },
+                                durationSeconds = item.durationSeconds,
+                                imageUrl = item.imageUrl,
+                                year = "",
+                                language = "",
+                                hasLyrics = false,
+                                playCount = 0,
+                                label = "",
+                                streamRef = item.songId,
+                                providerId = item.providerId,
+                            )
                         }
-                    )
+
+                        HistorySongItem(
+                            item = item,
+                            song = songModel,
+                            isLoggedIn = isLoggedIn,
+                            isLiked = isLiked,
+                            onPlay = { viewModel.playRecentlyPlayed(item) },
+                            onPlayNext = { viewModel.playNext(songModel) },
+                            onAddToQueue = { viewModel.addToQueue(songModel) },
+                            onToggleLike = {
+                                viewModel.toggleLike(songModel)
+                                Toast.makeText(
+                                    context,
+                                    if (isLiked) "Removed from Liked Songs" else "Added to Liked Songs",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onAddToPlaylist = {
+                                addToPlaylist(songModel)
+                            },
+                            onDelete = {
+                                viewModel.deleteEntry(item.id)
+                                Toast.makeText(context, "Removed from history", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                 }
 
                 item {
@@ -209,6 +228,27 @@ fun ListeningHistoryScreen(
                 }
             }
         }
+    }
+}
+
+private fun formatDateHeader(timestamp: Long): String {
+    return try {
+        val playDate = java.time.Instant.ofEpochMilli(timestamp)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toLocalDate()
+        val today = java.time.LocalDate.now()
+        val yesterday = today.minusDays(1)
+
+        when (playDate) {
+            today -> "Today"
+            yesterday -> "Yesterday"
+            else -> {
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d")
+                playDate.format(formatter)
+            }
+        }
+    } catch (_: Exception) {
+        "Recent"
     }
 }
 
@@ -223,6 +263,7 @@ private fun HistorySongItem(
     onAddToQueue: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val context = LocalContext.current
     var showOptions by remember { mutableStateOf(false) }
@@ -266,15 +307,32 @@ private fun HistorySongItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(
-                onClick = { showOptions = true }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "Options",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
-                )
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove from history",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { showOptions = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
@@ -284,6 +342,7 @@ private fun HistorySongItem(
             song = song,
             onPlayNext = onPlayNext,
             onAddToQueue = onAddToQueue,
+            onRemoveFromHistory = onDelete,
             onAddToPlaylist = {
                 if (!isLoggedIn) {
                     Toast.makeText(context, "Please log in to add to playlist", Toast.LENGTH_SHORT).show()

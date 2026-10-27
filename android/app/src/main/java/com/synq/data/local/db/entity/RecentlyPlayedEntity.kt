@@ -12,5 +12,6 @@ data class RecentlyPlayedEntity(
     val artist: String,
     val imageUrl: String?,
     val durationSeconds: Int,
-    val playedAt: Long = System.currentTimeMillis()
+    val playedAt: Long = System.currentTimeMillis(),
+    val albumId: String? = null
 )

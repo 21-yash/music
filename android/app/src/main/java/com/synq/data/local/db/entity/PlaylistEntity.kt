@@ -38,5 +38,6 @@ data class PlaylistSongEntity(
     val imageUrl: String?,
     val durationSeconds: Int,
     val position: Int,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val albumId: String? = null
 )

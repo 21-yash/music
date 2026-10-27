@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -23,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.synq.ui.GlassAccent
 import com.synq.ui.glassContentColors
@@ -43,6 +42,8 @@ fun AppBottomNavBar(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
+    var lastMusicClickTime by remember { mutableLongStateOf(0L) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -60,9 +61,21 @@ fun AppBottomNavBar(
                 icon = if (isSelected) screen.selectedIcon else screen.unselectedIcon,
                 selected = isSelected,
                 onClick = {
+                    if (screen == Screen.Music) {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (now - lastMusicClickTime < 400L) {
+                            lastMusicClickTime = 0L
+                            navController.navigate(Screen.Search.route) {
+                                launchSingleTop = true
+                            }
+                            return@NavBarItem
+                        }
+                        lastMusicClickTime = now
+                    }
+
                     if (currentRoute != screen.route) {
                         navController.navigate(screen.route) {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }

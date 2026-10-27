@@ -79,6 +79,7 @@ import com.synq.features.music.playback.PlaybackState
 import android.content.Intent
 import android.widget.Toast
 import com.synq.features.music.components.AnimatedEqualizerBars
+import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1080,6 +1081,32 @@ private fun PlayerMoreOptionsSheet(
             }
         )
 
+        val localOnNavigateToSongDetails = com.synq.features.music.components.LocalOnNavigateToSongDetails.current
+        OptionRowItem(
+            icon = Icons.Default.Info,
+            title = "Song Details",
+            subtitle = "View credits, lyrics & audio format info",
+            isDark = isDark,
+            onClick = {
+                onDismiss()
+                localOnNavigateToSongDetails(song.id, song.providerId)
+            }
+        )
+
+        if (song.album != null && song.album.id.isNotBlank() && song.providerId != "youtube") {
+            val localOnNavigateToAlbum = com.synq.features.music.components.LocalOnNavigateToAlbum.current
+            OptionRowItem(
+                icon = Icons.Default.Album,
+                title = "Go to Album",
+                subtitle = if (song.album.title.isNotBlank()) "View album \"${song.album.title}\"" else "View full album",
+                isDark = isDark,
+                onClick = {
+                    onDismiss()
+                    localOnNavigateToAlbum(song.album.id)
+                }
+            )
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         Box(
@@ -1165,7 +1192,7 @@ private fun RealLyricsContent(
 
     if (isLoading) {
         Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Accent)
+            SynqLoadingIndicator(size = 40.dp, barCount = 5)
         }
         return
     }

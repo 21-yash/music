@@ -71,6 +71,8 @@ suspend fun <T> safeApiCall(
             "VALIDATION_ERROR" -> AppResult.Error(AppError.Validation(friendlyMessage))
             else -> AppResult.Error(AppError.Server(errorCode, friendlyMessage))
         }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
     } catch (e: Exception) {
         AppResult.Error(AppError.Unknown(e.message ?: "An unexpected error occurred"))
     }

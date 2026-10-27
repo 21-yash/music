@@ -14,13 +14,16 @@ interface RecentlyPlayedDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: RecentlyPlayedEntity)
 
-    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 50")
+    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 200")
     fun getAll(): Flow<List<RecentlyPlayedEntity>>
 
-    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 50")
+    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 200")
     suspend fun getRecentList(): List<RecentlyPlayedEntity>
 
-    @Query("DELETE FROM recently_played WHERE id NOT IN (SELECT id FROM recently_played ORDER BY playedAt DESC LIMIT 50)")
+    @Query("DELETE FROM recently_played WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM recently_played WHERE id NOT IN (SELECT id FROM recently_played ORDER BY playedAt DESC LIMIT 200)")
     suspend fun trimOldEntries()
 
     @Query("DELETE FROM recently_played")

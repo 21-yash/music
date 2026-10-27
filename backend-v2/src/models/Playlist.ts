@@ -9,6 +9,7 @@ export interface IPlaylistSong {
   duration: number;
   addedAt: Date;
   position: number;
+  albumId?: string | null;
 }
 
 export interface IPlaylist extends Document {
@@ -59,6 +60,11 @@ const playlistSongSchema = new Schema<IPlaylistSong>(
     position: {
       type: Number,
       default: 0,
+    },
+    albumId: {
+      type: String,
+      default: null,
+      trim: true,
     },
   },
   { _id: true },

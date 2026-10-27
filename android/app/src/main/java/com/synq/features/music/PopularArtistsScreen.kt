@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.synq.ui.SynqLoadingIndicator
 
 @Composable
 fun PopularArtistsScreen(
@@ -92,12 +93,6 @@ fun PopularArtistsScreen(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
-                        Text(
-                            text = if (uiState.isLoading && popularArtists.isEmpty()) "Loading artists..." else "${filteredArtists.size} Artists Available",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = BrandPink
-                        )
                     }
                 }
 
@@ -123,25 +118,26 @@ fun PopularArtistsScreen(
 
                     Spacer(modifier = Modifier.width(10.dp))
 
-                    TextField(
+                    androidx.compose.foundation.text.BasicTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = {
-                            Text(
-                                text = "Search artists...",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontSize = 15.sp
                         ),
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(BrandPink),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = "Search artists...",
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                            }
+                            innerTextField()
+                        }
                     )
 
                     if (searchQuery.isNotEmpty()) {
@@ -169,10 +165,9 @@ fun PopularArtistsScreen(
                     .padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(
-                    color = BrandPink,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(40.dp)
+                SynqLoadingIndicator(
+                    size = 48.dp,
+                    barCount = 5
                 )
             }
         } else if (searchQuery.isNotBlank() && filteredArtists.isEmpty()) {

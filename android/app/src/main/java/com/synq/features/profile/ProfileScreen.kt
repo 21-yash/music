@@ -23,9 +23,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synq.ui.SynqBrandedText
+import com.synq.ui.SynqLogo
+import com.synq.ui.SynqPink
+import com.synq.ui.SynqPinkLight
+import com.synq.ui.SynqPinkDark
+import com.synq.ui.SynqPinkGradient
 
-private val AccentGradient = Brush.linearGradient(
-    listOf(Color(0xFF6366F1), Color(0xFFEC4899))
+private val AvatarBrandGradient = Brush.linearGradient(
+    listOf(SynqPinkLight, SynqPink, SynqPinkDark)
 )
 
 @Composable
@@ -37,9 +42,14 @@ fun ProfileScreen(
     val isLoggedIn by viewModel.isLoggedIn.collectAsState()
     val user by viewModel.user.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
+    var showAppearanceDialog by remember { mutableStateOf(false) }
+    var showCacheDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadCacheSize()
@@ -123,6 +133,363 @@ fun ProfileScreen(
         )
     }
 
+    // Appearance (Theme Selection) Dialog
+    if (showAppearanceDialog) {
+        AlertDialog(
+            onDismissRequest = { showAppearanceDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Appearance",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Select your preferred app theme",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+
+                    // Dark Theme Option
+                    Surface(
+                        onClick = {
+                            viewModel.setDarkTheme(true)
+                            showAppearanceDialog = false
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent,
+                        border = if (isDarkTheme) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.DarkMode,
+                                contentDescription = null,
+                                tint = if (isDarkTheme) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dark Theme",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Sleek dark theme optimized for OLED",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            RadioButton(
+                                selected = isDarkTheme,
+                                onClick = {
+                                    viewModel.setDarkTheme(true)
+                                    showAppearanceDialog = false
+                                }
+                            )
+                        }
+                    }
+
+                    // Light Theme Option
+                    Surface(
+                        onClick = {
+                            viewModel.setDarkTheme(false)
+                            showAppearanceDialog = false
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (!isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent,
+                        border = if (!isDarkTheme) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.LightMode,
+                                contentDescription = null,
+                                tint = if (!isDarkTheme) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = "Light Theme",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Crisp and clear high-contrast look",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            RadioButton(
+                                selected = !isDarkTheme,
+                                onClick = {
+                                    viewModel.setDarkTheme(false)
+                                    showAppearanceDialog = false
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAppearanceDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Cache Option Dialog
+    if (showCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showCacheDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AvatarBrandGradient),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Storage,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Offline Stream Cache",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Cached songs are stored locally on your device for instant offline playback with zero data consumption.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Current Usage",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${formatCacheBytes(cacheSizeBytes)} / 2.0 GB",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            val progress = (cacheSizeBytes.toFloat() / (2L * 1024 * 1024 * 1024)).coerceIn(0.01f, 1f)
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = SynqPink,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            showClearCacheDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Clear Audio Cache", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCacheDialog = false }) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    // About Dialog
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SynqLogo(
+                        size = 32.dp,
+                        showGlow = false
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "About Synq",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SynqBrandedText(
+                            capitalized = true,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "v0.1.0 Beta",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Your unified companion for high-fidelity music streaming, real-time Jam listening sessions, and live cricket match coverage.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    Text(
+                        text = "Key Features",
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "• Lossless audio streaming & offline cache\n• Collaborative live Jam listening rooms\n• Ball-by-ball cricket match tracker & commentary\n• Synced lyrics & automated sleep timer",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    Text(
+                        text = "Crafted with ❤️ by Yash",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Got It")
+                }
+            }
+        )
+    }
+
+    val settingsItems = remember(isDarkTheme, cacheSizeBytes) {
+        listOf(
+            SettingsItem(
+                title = "Appearance",
+                subtitle = if (isDarkTheme) "Dark Theme" else "Light Theme",
+                icon = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
+                onClick = { showAppearanceDialog = true }
+            ),
+            SettingsItem(
+                title = "Cache",
+                subtitle = "${formatCacheBytes(cacheSizeBytes)} cached",
+                icon = Icons.Filled.Storage,
+                onClick = { showCacheDialog = true }
+            ),
+            SettingsItem(
+                title = "Notifications",
+                subtitle = "Score alerts & release updates",
+                icon = Icons.Filled.Notifications,
+                onClick = {
+                    android.widget.Toast.makeText(context, "Notifications are active for match & music updates", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            ),
+            SettingsItem(
+                title = "Privacy & Security",
+                subtitle = "Local storage & app permissions",
+                icon = Icons.Filled.Security,
+                onClick = {
+                    android.widget.Toast.makeText(context, "All streaming data is stored securely on device", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            ),
+            SettingsItem(
+                title = "About",
+                subtitle = "v0.1.0 Beta",
+                icon = Icons.Filled.Info,
+                onClick = { showAboutDialog = true }
+            ),
+        )
+    }
+
     Scaffold(
         topBar = {
             Row(
@@ -154,7 +521,7 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(vertical = 12.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
         ) {
             // User info card
             item {
@@ -167,18 +534,18 @@ fun ProfileScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                     ),
-                    border = if (!isLoggedIn) CardDefaults.outlinedCardBorder().copy(brush = AccentGradient) else null
+                    border = if (!isLoggedIn) CardDefaults.outlinedCardBorder().copy(brush = AvatarBrandGradient) else null
                 ) {
                     Row(
                         modifier = Modifier.padding(20.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Avatar
+                        // Avatar with Synq Brand Pink Gradient
                         Box(
                             modifier = Modifier
                                 .size(60.dp)
                                 .clip(CircleShape)
-                                .background(if (isLoggedIn) AccentGradient else Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primaryContainer))),
+                                .background(if (isLoggedIn) AvatarBrandGradient else Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.primaryContainer))),
                             contentAlignment = Alignment.Center
                         ) {
                             if (isLoggedIn) {
@@ -227,7 +594,7 @@ fun ProfileScreen(
                 }
             }
 
-            // Settings sections
+            // Settings header
             item {
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
@@ -240,101 +607,6 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // Offline Music Cache Card
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(AccentGradient),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Storage,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Offline Stream Cache",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = "Cached songs play offline with zero data",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Cache Usage",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${formatCacheBytes(cacheSizeBytes)} / 2.0 GB",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = { showClearCacheDialog = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Clear Audio Cache", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            val settingsItems = listOf(
-                SettingsItem("Notifications", Icons.Filled.Notifications),
-                SettingsItem("Appearance", Icons.Filled.DarkMode),
-                SettingsItem("Privacy & Security", Icons.Filled.Security),
-                SettingsItem("About Synq", Icons.Filled.Info),
-            )
-
             items(settingsItems.size) { index ->
                 SettingsRow(item = settingsItems[index])
                 if (index < settingsItems.lastIndex) {
@@ -345,7 +617,7 @@ fun ProfileScreen(
                 }
             }
 
-            // Logout or Login button row
+            // Logout button row
             if (isLoggedIn) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
@@ -404,7 +676,9 @@ fun ProfileScreen(
 
 private data class SettingsItem(
     val title: String,
+    val subtitle: String? = null,
     val icon: ImageVector,
+    val onClick: () -> Unit
 )
 
 @Composable
@@ -412,23 +686,40 @@ private fun SettingsRow(item: SettingsItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { /* Setting clicked */ }
+            .clickable(onClick = item.onClick)
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = item.icon,
-            contentDescription = item.title,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp),
-        )
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.title,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
         Spacer(modifier = Modifier.width(14.dp))
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (!item.subtitle.isNullOrBlank()) {
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Icon(
             imageVector = Icons.Filled.ChevronRight,
             contentDescription = null,

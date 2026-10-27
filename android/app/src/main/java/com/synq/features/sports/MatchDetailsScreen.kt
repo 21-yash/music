@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.features.sports.domain.model.*
+import com.synq.ui.SynqLoadingIndicator
 
 // ─── DESIGN TOKENS (from the HTML :root + inline styles) ──────────────
 
@@ -96,7 +97,7 @@ fun MatchDetailsScreen(
                 .background(backgroundBrush)
         ) {
             if (uiState.isLoading && uiState.details == null) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color(0xFF4338CA))
+                SynqLoadingIndicator(modifier = Modifier.align(Alignment.Center), size = 48.dp, barCount = 5)
             } else if (uiState.error != null && uiState.details == null) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),

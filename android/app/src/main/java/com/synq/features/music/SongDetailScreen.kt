@@ -38,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.features.music.components.LocalAddToPlaylist
 import com.synq.features.music.domain.model.Song
+import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
 import java.text.NumberFormat
 import java.util.Locale
@@ -45,6 +46,7 @@ import java.util.Locale
 @Composable
 fun SongDetailScreen(
     songId: String,
+    provider: String? = null,
     viewModel: SongDetailViewModel = hiltViewModel(),
     onBackClick: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
@@ -56,8 +58,8 @@ fun SongDetailScreen(
     val isDark = isAppDark()
     val localAddToPlaylist = LocalAddToPlaylist.current
 
-    LaunchedEffect(songId) {
-        viewModel.loadSong(songId)
+    LaunchedEffect(songId, provider) {
+        viewModel.loadSong(songId, provider)
     }
 
     val song = uiState.song
@@ -112,9 +114,10 @@ fun SongDetailScreen(
                 .padding(innerPadding)
         ) {
             if (uiState.isLoading) {
-                CircularProgressIndicator(
+                SynqLoadingIndicator(
                     modifier = Modifier.align(Alignment.Center),
-                    color = BrandPink
+                    size = 48.dp,
+                    barCount = 5
                 )
             } else if (uiState.error != null && song == null) {
                 Column(

@@ -12,6 +12,7 @@ export interface LikeSongInput {
   artist: string;
   imageUrl?: string | null;
   duration?: number;
+  albumId?: string | null;
 }
 
 export interface SyncLikeItem extends LikeSongInput {
@@ -68,6 +69,7 @@ export async function likeSong(userId: string, data: LikeSongInput) {
       artist: data.artist,
       imageUrl: upgradeImageUrl(data.imageUrl),
       duration: data.duration ?? 0,
+      albumId: data.albumId ?? null,
       likedAt: new Date(),
     },
     {
@@ -156,6 +158,7 @@ export async function syncLikes(
             artist: item.artist,
             imageUrl: upgradeImageUrl(item.imageUrl),
             duration: item.duration ?? 0,
+            albumId: item.albumId ?? null,
             likedAt: item.likedAt ? new Date(item.likedAt) : new Date(),
           },
         },
@@ -350,6 +353,7 @@ export async function addSongToPlaylist(
     duration: songData.duration ?? 0,
     addedAt: new Date(),
     position: newPosition,
+    albumId: songData.albumId ?? null,
   });
 
   if (!playlist.imageUrl && songData.imageUrl) {

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Groups
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -97,12 +100,35 @@ fun SongItem(
         
         var showOptions by remember { mutableStateOf(false) }
 
-        IconButton(onClick = { showOptions = true }) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "More options",
-                tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B)
-            )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            if (onAddToPlaylist != null) {
+                IconButton(
+                    onClick = onAddToPlaylist,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AddCircleOutline,
+                        contentDescription = "Add to playlist",
+                        tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = { showOptions = true },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         if (showOptions) {
@@ -120,7 +146,8 @@ fun SongItem(
     }
 }
 
-val LocalOnNavigateToSongDetails = androidx.compose.runtime.compositionLocalOf<(String) -> Unit> { {} }
+val LocalOnNavigateToSongDetails = androidx.compose.runtime.compositionLocalOf<(String, String?) -> Unit> { { _, _ -> } }
+val LocalOnNavigateToAlbum = androidx.compose.runtime.compositionLocalOf<(String) -> Unit> { {} }
 val LocalToggleLike = androidx.compose.runtime.compositionLocalOf<(Song) -> Unit> { {} }
 val LocalLikedSongIds = androidx.compose.runtime.compositionLocalOf<Set<String>> { emptySet() }
 
@@ -135,6 +162,8 @@ fun SongOptionsSheet(
     onLike: (() -> Unit)? = null,
     isLiked: Boolean = false,
     onSongDetails: (() -> Unit)? = null,
+    onGoToAlbum: (() -> Unit)? = null,
+    onRemoveFromHistory: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -143,7 +172,9 @@ fun SongOptionsSheet(
     val localAddToPlaylist = LocalAddToPlaylist.current
     val effectiveAddToPlaylist = onAddToPlaylist ?: { localAddToPlaylist(song) }
     val localOnNavigateToSongDetails = LocalOnNavigateToSongDetails.current
-    val effectiveOnSongDetails = onSongDetails ?: { localOnNavigateToSongDetails(song.id) }
+    val effectiveOnSongDetails = onSongDetails ?: { localOnNavigateToSongDetails(song.id, song.providerId) }
+    val localOnNavigateToAlbum = LocalOnNavigateToAlbum.current
+    val effectiveOnGoToAlbum = onGoToAlbum ?: { song.album?.id?.let { localOnNavigateToAlbum(it) } }
     val localToggleLike = LocalToggleLike.current
     val globalLikedIds = LocalLikedSongIds.current
     val isCurrentlyLiked = isLiked || globalLikedIds.contains(song.id)
@@ -283,6 +314,28 @@ fun SongOptionsSheet(
                     onDismiss()
                 }
             )
+            if (song.album != null && song.album.id.isNotBlank() && song.providerId != "youtube") {
+                SongOptionItem(
+                    icon = Icons.Default.Album,
+                    text = "Go to Album",
+                    isDark = isDark,
+                    onClick = {
+                        effectiveOnGoToAlbum()
+                        onDismiss()
+                    }
+                )
+            }
+            if (onRemoveFromHistory != null) {
+                SongOptionItem(
+                    icon = Icons.Default.DeleteOutline,
+                    text = "Remove from History",
+                    isDark = isDark,
+                    onClick = {
+                        onRemoveFromHistory()
+                        onDismiss()
+                    }
+                )
+            }
             
             Spacer(modifier = Modifier.height(12.dp))
             

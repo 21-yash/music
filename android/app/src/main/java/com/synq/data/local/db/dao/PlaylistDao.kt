@@ -30,15 +30,27 @@ interface PlaylistDao {
     @Query("DELETE FROM playlists")
     suspend fun clearPlaylists()
 
+    @Query("DELETE FROM playlists WHERE serverId NOT IN (:serverIds)")
+    suspend fun deletePlaylistsNotInList(serverIds: List<String>)
+
     // Playlist Songs
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongs(songs: List<PlaylistSongEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSongsIgnore(songs: List<PlaylistSongEntity>)
+
     @Query("SELECT * FROM playlist_songs WHERE playlistId = :playlistId ORDER BY position ASC")
     fun getSongsForPlaylist(playlistId: String): Flow<List<PlaylistSongEntity>>
 
+    @Query("SELECT playlistId FROM playlist_songs WHERE songId = :songId")
+    fun getPlaylistIdsForSong(songId: String): Flow<List<String>>
+
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun deleteSongsForPlaylist(playlistId: String)
+
+    @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId NOT IN (:songIds)")
+    suspend fun deleteSongsNotInList(playlistId: String, songIds: List<String>)
 
     @Transaction
     suspend fun syncPlaylistWithSongs(

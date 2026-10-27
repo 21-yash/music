@@ -3,6 +3,7 @@ package com.synq.features.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.synq.core.domain.AppResult
+import com.synq.data.local.ThemePreferences
 import com.synq.data.remote.dto.UserDto
 import com.synq.data.repository.AuthRepository
 import com.synq.features.music.playback.AudioCacheProvider
@@ -21,7 +22,18 @@ import javax.inject.Inject
 class ProfileViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val audioCacheProvider: AudioCacheProvider,
+    private val themePreferences: ThemePreferences,
 ) : ViewModel() {
+
+    val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme
+
+    fun setDarkTheme(isDark: Boolean) {
+        themePreferences.setDarkTheme(isDark)
+    }
+
+    fun toggleTheme() {
+        themePreferences.toggleTheme()
+    }
 
     val isLoggedIn: StateFlow<Boolean> = authRepository.isLoggedIn
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)

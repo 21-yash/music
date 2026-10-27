@@ -78,7 +78,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.ArtistCredit
-import androidx.compose.material3.CircularProgressIndicator
+import com.synq.ui.SynqLoadingIndicator
 
 // ─────────────────────────────────────────────────────────────
 // UI models (move to a `model` package when you wire real data)
@@ -361,7 +361,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth().padding(32.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = palette.accent)
+                                SynqLoadingIndicator(size = 48.dp, barCount = 5)
                             }
                         }
                     }
@@ -697,7 +697,7 @@ private fun JamCard(
     val shape = RoundedCornerShape(20.dp)
     val bg = Brush.verticalGradient(
         if (jamState.isInJam) listOf(Color(0xFF059669), Color(0xFF022C22))
-        else listOf(Color(0xFF6366F1), Color(0xFFEC4899))
+        else listOf(Color(0xFF2563EB), Color(0xFF06B6D4))
     )
     Box(
         modifier = Modifier

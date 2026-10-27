@@ -27,16 +27,19 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import com.synq.RootViewModel
 import com.synq.navigation.Screen
 
 private val AvatarGradient = Brush.linearGradient(
-    listOf(Color(0xFF6366F1), Color(0xFFEC4899))
+    listOf(SynqPinkLight, SynqPink, SynqPinkDark)
 )
 
 /**
  * Unified Header for Home, Music, Sports, and Library screens.
- * Ensures identical padding, spacing, font sizes, and in-header profile avatar across all tabs.
+ * Displays the Synq app logo (which triggers the quick options menu when clicked)
+ * alongside the title and subtitle. The user profile logo has been removed from the header
+ * and moved directly into the bottom navigation bar.
  */
 @Composable
 fun AppHeader(
@@ -45,101 +48,115 @@ fun AppHeader(
     rootViewModel: RootViewModel,
     navController: NavController,
     modifier: Modifier = Modifier,
-    showBrandLogo: Boolean = false
+    showBrandLogo: Boolean = true
 ) {
     val isLoggedIn by rootViewModel.isLoggedIn.collectAsState(initial = false)
     val user by rootViewModel.user.collectAsState()
     val isDarkTheme by rootViewModel.isDarkTheme.collectAsState()
+    var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (showBrandLogo) {
+        if (showBrandLogo) {
+            Box {
                 SynqLogo(
-                    size = 38.dp,
-                    showGlow = false
+                    size = 44.dp,
+                    showGlow = false,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(44.dp * 0.22f))
+                        .clickable { menuExpanded = true }
                 )
-                Spacer(modifier = Modifier.width(12.dp))
-            }
 
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (title.equals("synq", ignoreCase = true)) {
-                    SynqBrandedText(
-                        capitalized = title.firstOrNull()?.isUpperCase() ?: true,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp
-                    )
-                } else {
-                    Text(
-                        text = title,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        letterSpacing = (-0.5).sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (!subtitle.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = subtitle,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                AppLogoMenu(
+                    expanded = menuExpanded,
+                    onDismiss = { menuExpanded = false },
+                    isLoggedIn = isLoggedIn,
+                    userName = if (isLoggedIn) (user?.username ?: "User") else "Guest",
+                    planLabel = if (isLoggedIn) (user?.email ?: "Account & Profile") else "Tap to sign in",
+                    onProfileClick = {
+                        if (isLoggedIn) {
+                            navController.navigate(Screen.Profile.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        } else {
+                            navController.navigate(Screen.Auth.route) { launchSingleTop = true }
+                        }
+                    },
+                    onSignInClick = {
+                        navController.navigate(Screen.Auth.route) { launchSingleTop = true }
+                    },
+                    isDarkTheme = isDarkTheme,
+                    onToggleTheme = { rootViewModel.toggleTheme() },
+                    onSettingsClick = {
+                        navController.navigate(Screen.Profile.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onHistoryClick = {
+                        navController.navigate(Screen.ListeningHistory.route) { launchSingleTop = true }
+                    },
+                    onLogoutClick = {
+                        rootViewModel.promptSignOut()
+                    }
+                )
             }
+            Spacer(modifier = Modifier.width(14.dp))
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
-
-        ProfileAvatarMenu(
-            isLoggedIn = isLoggedIn,
-            userName = if (isLoggedIn) (user?.username ?: "User") else "Guest",
-            planLabel = if (isLoggedIn) (user?.email ?: "Account & Profile") else "Tap to sign in",
-            onProfileClick = {
-                if (isLoggedIn) {
-                    navController.navigate(Screen.Profile.route) { launchSingleTop = true }
-                } else {
-                    navController.navigate(Screen.Auth.route) { launchSingleTop = true }
-                }
-            },
-            onSignInClick = {
-                navController.navigate(Screen.Auth.route) { launchSingleTop = true }
-            },
-            isDarkTheme = isDarkTheme,
-            onToggleTheme = { rootViewModel.toggleTheme() },
-            onSettingsClick = {
-                navController.navigate(Screen.Profile.route) { launchSingleTop = true }
-            },
-            onHistoryClick = {
-                navController.navigate(Screen.ListeningHistory.route) { launchSingleTop = true }
-            },
-            onLogoutClick = {
-                rootViewModel.promptSignOut()
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (title.equals("synq", ignoreCase = true)) {
+                SynqBrandedText(
+                    capitalized = title.firstOrNull()?.isUpperCase() ?: true,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp
+                )
+            } else {
+                Text(
+                    text = title,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    letterSpacing = (-0.5).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-        )
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ProfileAvatarMenu(
+private fun AppLogoMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
     isLoggedIn: Boolean,
     userName: String,
     planLabel: String,
@@ -152,70 +169,69 @@ private fun ProfileAvatarMenu(
     onLogoutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
     val initial = if (isLoggedIn) userName.firstOrNull()?.uppercase() ?: "U" else "?"
 
-    Box(modifier = modifier) {
-        GradientAvatar(initial = initial, onClick = { expanded = true })
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            offset = DpOffset(0.dp, 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            containerColor = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.width(220.dp)
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        offset = DpOffset(0.dp, 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = modifier.width(230.dp)
+    ) {
+        // Header row: tapping it opens the Profile or Auth screen
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onDismiss(); onProfileClick() }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Header row: tapping it opens the Profile or Auth screen
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = false; onProfileClick() }
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                GradientAvatar(initial = initial)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = userName,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = planLabel,
-                        color = Color(0xFFEC4899),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+            GradientAvatar(initial = initial)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = userName,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = planLabel,
+                    color = SynqPink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Box(
-                Modifier
-                    .padding(horizontal = 16.dp)
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-            )
-            Spacer(Modifier.height(4.dp))
+        }
+        Box(
+            Modifier
+                .padding(horizontal = 16.dp)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+        )
+        Spacer(Modifier.height(4.dp))
 
-            ProfileMenuItem(
-                label = if (isDarkTheme) "Light Mode" else "Dark Mode",
-                icon = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode
-            ) { expanded = false; onToggleTheme() }
-            if (isLoggedIn) {
-                ProfileMenuItem("Settings", Icons.Default.Settings) { expanded = false; onSettingsClick() }
-                ProfileMenuItem("Listening History", Icons.Default.Refresh) { expanded = false; onHistoryClick() }
-                ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
-                    expanded = false
-                    onLogoutClick()
-                }
-            } else {
-                ProfileMenuItem("Sign In", Icons.Default.AccountCircle, tint = MaterialTheme.colorScheme.primary) {
-                    expanded = false
-                    onSignInClick()
-                }
+        ProfileMenuItem(
+            label = if (isDarkTheme) "Light Mode" else "Dark Mode",
+            icon = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode
+        ) { onDismiss(); onToggleTheme() }
+        if (isLoggedIn) {
+            ProfileMenuItem("Settings", Icons.Default.Settings) { onDismiss(); onSettingsClick() }
+            ProfileMenuItem("Listening History", Icons.Default.Refresh) { onDismiss(); onHistoryClick() }
+            ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
+                onDismiss()
+                onLogoutClick()
+            }
+        } else {
+            ProfileMenuItem("Sign In", Icons.Default.AccountCircle, tint = MaterialTheme.colorScheme.primary) {
+                onDismiss()
+                onSignInClick()
             }
         }
     }

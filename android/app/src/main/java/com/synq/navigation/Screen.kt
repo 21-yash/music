@@ -113,13 +113,27 @@ sealed class Screen(
         fun createRoute(id: String) = "music/album/${android.net.Uri.encode(id)}"
     }
 
+    data object AllPlaylists : Screen(
+        route = "music/playlists",
+        label = "All Playlists",
+        selectedIcon = Icons.Filled.LibraryMusic,
+        unselectedIcon = Icons.Outlined.LibraryMusic,
+    )
+
     data class SongDetails(val songId: String = "{songId}") : Screen(
-        route = "music/song/$songId",
+        route = "music/song/{songId}?provider={provider}",
         label = "Song Details",
         selectedIcon = Icons.Filled.MusicNote,
         unselectedIcon = Icons.Outlined.MusicNote,
     ) {
-        fun createRoute(id: String) = "music/song/${android.net.Uri.encode(id)}"
+        fun createRoute(id: String, provider: String? = null): String {
+            val encodedId = android.net.Uri.encode(id)
+            return if (!provider.isNullOrBlank()) {
+                "music/song/$encodedId?provider=${android.net.Uri.encode(provider)}"
+            } else {
+                "music/song/$encodedId"
+            }
+        }
     }
 
     data object ListeningHistory : Screen(
@@ -145,6 +159,7 @@ sealed class Screen(
 
     companion object {
         /** Ordered list of bottom navigation tabs. */
-        val bottomNavItems = listOf(Home, Music, Sports, Library)
+        val bottomNavItems = listOf(Home, Music, Sports, Library, Profile)
     }
 }
+

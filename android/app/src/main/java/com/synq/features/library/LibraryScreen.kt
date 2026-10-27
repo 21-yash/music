@@ -37,7 +37,9 @@ import com.synq.data.local.db.entity.LikedSongEntity
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.data.local.db.entity.RecentlyPlayedEntity
 import com.synq.features.music.domain.model.Song
+import com.synq.features.music.domain.model.AlbumRef
 import com.synq.features.music.domain.model.ArtistCredit
+import com.synq.features.music.components.CreatePlaylistDialog
 
 private val AccentGradient = Brush.linearGradient(
     listOf(Color(0xFF6366F1), Color(0xFFEC4899))
@@ -55,6 +57,7 @@ fun LibraryScreen(
     rootViewModel: RootViewModel = hiltViewModel(),
     onNavigateToLogin: (() -> Unit)? = null,
     onNavigateToHistory: (() -> Unit)? = null,
+    onNavigateToAllPlaylists: (() -> Unit)? = null,
     onPlaylistClick: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -111,6 +114,7 @@ fun LibraryScreen(
 
     if (showCreateDialog) {
         CreatePlaylistDialog(
+            defaultName = "Playlist #${playlists.size + 1}",
             onDismiss = { viewModel.setCreatePlaylistDialogVisible(false) },
             onCreate = { name, desc -> viewModel.createPlaylist(name, desc) }
         )
@@ -242,7 +246,7 @@ fun LibraryScreen(
                                     id = song.songId,
                                     title = song.title,
                                     artists = listOf(ArtistCredit(id = song.artist, name = song.artist, imageUrl = null)),
-                                    album = null,
+                                    album = song.albumId?.takeIf { it.isNotBlank() }?.let { AlbumRef(id = it) },
                                     durationSeconds = song.durationSeconds,
                                     imageUrl = song.imageUrl,
                                     year = "",
@@ -272,12 +276,57 @@ fun LibraryScreen(
             // 2. User Playlists (if All or Playlists)
             if ((selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.PLAYLISTS) && isLoggedIn) {
                 item {
-                    SectionHeader(
-                        title = "Your Playlists",
-                        subtitle = "${playlists.size} created",
-                        actionText = "New Playlist",
-                        onAction = { viewModel.setCreatePlaylistDialogVisible(true) }
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Your Playlists",
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            Text(
+                                text = "${playlists.size} created",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { viewModel.setCreatePlaylistDialogVisible(true) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "New Playlist",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            if (playlists.isNotEmpty()) {
+                                Spacer(Modifier.width(4.dp))
+                                TextButton(
+                                    onClick = {
+                                        if (onNavigateToAllPlaylists != null) {
+                                            onNavigateToAllPlaylists()
+                                        } else {
+                                            navController.navigate(com.synq.navigation.Screen.AllPlaylists.route)
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = "See all",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
 
@@ -291,13 +340,30 @@ fun LibraryScreen(
                         Spacer(Modifier.height(16.dp))
                     }
                 } else {
-                    items(playlists) { playlist ->
+                    val displayPlaylists = if (selectedTab == LibraryTab.ALL) playlists.take(5) else playlists
+                    items(displayPlaylists) { playlist ->
                         PlaylistItem(
                             playlist = playlist,
                             onClick = { onPlaylistClick?.invoke(playlist.serverId) },
                             onDelete = { playlistToDelete = playlist }
                         )
                         Spacer(Modifier.height(8.dp))
+                    }
+                    if (selectedTab == LibraryTab.ALL && playlists.size > 5) {
+                        item {
+                            TextButton(
+                                onClick = {
+                                    if (onNavigateToAllPlaylists != null) {
+                                        onNavigateToAllPlaylists()
+                                    } else {
+                                        navController.navigate(com.synq.navigation.Screen.AllPlaylists.route)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("View all ${playlists.size} playlists")
+                            }
+                        }
                     }
                     item { Spacer(Modifier.height(16.dp)) }
                 }
@@ -359,7 +425,7 @@ fun LibraryScreen(
                             id = item.songId,
                             title = item.title,
                             artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
-                            album = null,
+                            album = item.albumId?.takeIf { it.isNotBlank() }?.let { AlbumRef(id = it, title = "") },
                             durationSeconds = item.durationSeconds,
                             imageUrl = item.imageUrl,
                             year = "",
@@ -1022,47 +1088,3 @@ private fun EmptyState(
     }
 }
 
-@Composable
-private fun CreatePlaylistDialog(
-    onDismiss: () -> Unit,
-    onCreate: (name: String, desc: String) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Playlist", fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Playlist name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Description (optional)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { if (name.isNotBlank()) onCreate(name.trim(), description.trim()) },
-                enabled = name.isNotBlank()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}

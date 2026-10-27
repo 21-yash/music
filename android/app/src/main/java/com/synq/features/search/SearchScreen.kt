@@ -18,23 +18,32 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import com.synq.ui.SynqPink
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synq.RootViewModel
+import com.synq.features.music.components.LocalAddToPlaylist
 import com.synq.features.music.components.SongItem
 import com.synq.features.music.domain.model.Song
+import com.synq.ui.SynqLoadingIndicator
 
 @Composable
 fun SearchScreen(
@@ -45,6 +54,14 @@ fun SearchScreen(
     val context = LocalContext.current
     val jamState by rootViewModel.jamState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(200)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     Column(
         modifier = Modifier
@@ -85,7 +102,10 @@ fun SearchScreen(
                         onValueChange = { viewModel.updateQuery(it) },
                         textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
                         singleLine = true,
-                        modifier = Modifier.weight(1f),
+                        cursorBrush = SolidColor(SynqPink),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester),
                         decorationBox = { innerTextField ->
                             if (uiState.query.isEmpty()) {
                                 Text(
@@ -352,11 +372,15 @@ fun SearchResultsContent(
     uiState: SearchUiState,
     onSongClick: (Song) -> Unit,
     onPlayNext: (Song) -> Unit = {},
-    onAddToQueue: (Song) -> Unit = {}
+    onAddToQueue: (Song) -> Unit = {},
+    onAddToPlaylist: ((Song) -> Unit)? = null
 ) {
+    val localAddToPlaylist = LocalAddToPlaylist.current
+    val handleAddToPlaylist = onAddToPlaylist ?: { song -> localAddToPlaylist(song) }
+
     if (uiState.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Color(0xFFFF2A5F))
+            SynqLoadingIndicator(size = 48.dp, barCount = 5)
         }
         return
     }
@@ -392,7 +416,8 @@ fun SearchResultsContent(
                     onClick = { onSongClick(song) },
                     onPlayNext = { onPlayNext(song) },
                     onAddToQueue = { onAddToQueue(song) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    onAddToPlaylist = { handleAddToPlaylist(song) },
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }

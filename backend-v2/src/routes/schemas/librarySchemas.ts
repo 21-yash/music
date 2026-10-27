@@ -9,6 +9,7 @@ export const likeSongSchema = z.object({
   artist: z.string().min(1, 'artist is required'),
   imageUrl: z.string().nullable().optional(),
   duration: z.number().int().nonnegative().optional(),
+  albumId: z.string().nullable().optional(),
 });
 
 export const checkLikesQuerySchema = z.object({
@@ -23,6 +24,7 @@ const pendingLikeItemSchema = z.object({
   imageUrl: z.string().nullable().optional(),
   duration: z.number().int().nonnegative().optional(),
   likedAt: z.number().optional(),
+  albumId: z.string().nullable().optional(),
 });
 
 export const syncLikesSchema = z.object({
@@ -52,6 +54,7 @@ export const addPlaylistSongSchema = z.object({
   artist: z.string().min(1, 'artist is required'),
   imageUrl: z.string().nullable().optional(),
   duration: z.number().int().nonnegative().optional(),
+  albumId: z.string().nullable().optional(),
 });
 
 export const reorderPlaylistSongsSchema = z.object({

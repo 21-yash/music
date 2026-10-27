@@ -80,32 +80,37 @@ class SearchViewModel @Inject constructor(
         }
 
         searchJob = viewModelScope.launch {
-            if (debounceMs > 0) {
-                delay(debounceMs)
-            }
-            
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            
-            when (val result = repository.search(query, provider)) {
-                is AppResult.Success -> {
-                    // Record in local recent searches when search succeeds
-                    val updatedRecent = recentSearchManager.addSearch(query)
-                    _uiState.update { 
-                        it.copy(
-                            results = result.data, 
-                            isLoading = false,
-                            recentSearches = updatedRecent
-                        ) 
+            try {
+                if (debounceMs > 0) {
+                    delay(debounceMs)
+                }
+                
+                _uiState.update { it.copy(isLoading = true, error = null) }
+                
+                when (val result = repository.search(query, provider)) {
+                    is AppResult.Success -> {
+                        // Record in local recent searches when search succeeds
+                        val updatedRecent = recentSearchManager.addSearch(query)
+                        _uiState.update { 
+                            it.copy(
+                                results = result.data, 
+                                isLoading = false,
+                                recentSearches = updatedRecent,
+                                error = null
+                            ) 
+                        }
+                    }
+                    is AppResult.Error -> {
+                        _uiState.update { 
+                            it.copy(
+                                isLoading = false, 
+                                error = result.error.message 
+                            ) 
+                        }
                     }
                 }
-                is AppResult.Error -> {
-                    _uiState.update { 
-                        it.copy(
-                            isLoading = false, 
-                            error = result.error.message 
-                        ) 
-                    }
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Cancelled due to query change or back navigation — ignore
             }
         }
     }

@@ -39,7 +39,7 @@ class SongDetailViewModel @Inject constructor(
         likedSongsRepository.isSongLiked(songId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    fun loadSong(songId: String) {
+    fun loadSong(songId: String, provider: String? = null) {
         if (songId.isBlank()) return
         // If already loaded for this song, do not wipe state or re-show spinner
         if (_uiState.value.song?.id == songId && _uiState.value.error == null) {
@@ -53,12 +53,13 @@ class SongDetailViewModel @Inject constructor(
             if (current != null && current.id == songId) {
                 _uiState.update { it.copy(isLoading = false, song = current) }
                 enrichArtistImages(current)
-                if (current.album != null && current.year.isNotBlank()) {
+                if (current.providerId == "youtube" || (current.album != null && current.year.isNotBlank())) {
                     return@launch
                 }
             }
 
-            when (val result = repository.getSong(songId)) {
+            val effectiveProvider = provider ?: current?.takeIf { it.id == songId }?.providerId
+            when (val result = repository.getSong(songId, effectiveProvider)) {
                 is AppResult.Success -> {
                     _uiState.update { it.copy(isLoading = false, song = result.data) }
                     enrichArtistImages(result.data)

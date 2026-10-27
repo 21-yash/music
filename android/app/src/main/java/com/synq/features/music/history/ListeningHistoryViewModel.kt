@@ -81,6 +81,12 @@ class ListeningHistoryViewModel @Inject constructor(
         }
     }
 
+    fun deleteEntry(id: String) {
+        viewModelScope.launch {
+            recentlyPlayedRepository.deleteEntry(id)
+        }
+    }
+
     fun clearHistory() {
         viewModelScope.launch {
             recentlyPlayedRepository.clearHistory()

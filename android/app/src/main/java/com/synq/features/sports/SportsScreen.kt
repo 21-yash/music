@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.synq.ui.SynqLoadingIndicator
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -138,7 +139,7 @@ fun SportsScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 when {
                     uiState.isLoading && uiState.matches.isEmpty() -> {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        SynqLoadingIndicator(size = 48.dp, barCount = 5)
                     }
                     uiState.error != null && uiState.matches.isEmpty() -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {

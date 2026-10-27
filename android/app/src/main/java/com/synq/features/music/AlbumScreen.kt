@@ -34,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.features.music.components.SongItem
 import com.synq.features.music.jam.LocalIsInJam
+import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
 
 @Composable
@@ -59,9 +60,10 @@ fun AlbumScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         if (uiState.isLoading) {
-            CircularProgressIndicator(
+            SynqLoadingIndicator(
                 modifier = Modifier.align(Alignment.Center),
-                color = BrandPink
+                size = 48.dp,
+                barCount = 5
             )
         } else if (uiState.error != null) {
             Column(
