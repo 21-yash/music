@@ -27,7 +27,7 @@ export interface JamSession {
 const activeSessions = new Map<string, JamSession>();
 
 // Map socketId -> Set<code string>
-const socketToSessions = new Map<string, Set<string>>();
+export const socketToSessions = new Map<string, Set<string>>();
 
 // Map `${code}:${userId}` -> NodeJS.Timeout for disconnect grace period
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
@@ -343,6 +343,9 @@ function handleUserLeave(io: Server, socket: Socket, code: string) {
   const userCodes = socketToSessions.get(socket.id);
   if (userCodes) {
     userCodes.delete(code);
+    if (userCodes.size === 0) {
+      socketToSessions.delete(socket.id);
+    }
   }
 
   // If host leaves and other participants remain, promote next participant to host

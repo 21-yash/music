@@ -11,6 +11,7 @@ import { User } from '../../src/models/User';
 import { initializeSocketIO } from '../../src/websocket';
 import { hashInviteCode } from '../../src/utils/invite';
 import * as redisConfig from '../../src/config/redis';
+import { socketToSessions } from '../../src/websocket/jamHandler';
 
 describe('Phase A Security Tests', () => {
   const VALID_KEY = env.APP_API_KEY;
@@ -454,6 +455,35 @@ describe('Phase A Security Tests', () => {
 
       const errMsg = await joinErrorPromise;
       expect(errMsg).toBe('Invalid or expired room code');
+
+      socket.disconnect();
+    });
+
+    it('socketToSessions cleans up map entry when last session code is removed (no memory leak on leave)', async () => {
+      const socket = ioClient(`http://localhost:${port}`, {
+        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
+        transports: ['websocket'],
+        reconnection: false,
+      });
+
+      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+
+      const created = await new Promise<any>((resolve) => {
+        socket.on('jam:created', (data) => resolve(data));
+        socket.emit('jam:create');
+      });
+      const roomCode = created.session.code;
+      expect(roomCode).toBeDefined();
+
+      const serverSocketId = socket.id!;
+      expect(socketToSessions.has(serverSocketId)).toBe(true);
+
+      // Explicit leave
+      socket.emit('jam:leave', { code: roomCode });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Map entry must be completely deleted, not an empty Set
+      expect(socketToSessions.has(serverSocketId)).toBe(false);
 
       socket.disconnect();
     });

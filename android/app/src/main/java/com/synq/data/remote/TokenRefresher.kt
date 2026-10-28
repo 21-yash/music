@@ -54,32 +54,24 @@ class TokenRefresher @Inject constructor(
                     if (freshRefreshToken != null && freshRefreshToken != currentRefreshToken) {
                         return tokenStorage.getAccessTokenSync()
                     }
-                    // Server definitively rejected the current refresh token
-                    tokenStorage.clearTokens()
+                    // 2xx response with success=false: non-clearing, keep tokens
                     null
                 }
             } catch (e: Exception) {
-                if (e is IOException) {
-                    // Network connectivity drop: NEVER clear tokens
-                    null
-                } else if (e is HttpException) {
-                    // Server returned an HTTP error (e.g. 401 Unauthorized)
-                    val freshRefreshToken = tokenStorage.getRefreshTokenSync()
-                    if (freshRefreshToken != null && freshRefreshToken != currentRefreshToken) {
-                        return tokenStorage.getAccessTokenSync()
-                    }
-                    // Server definitively rejected the current stored refresh token
-                    tokenStorage.clearTokens()
-                    null
-                } else {
-                    // Unexpected error: check rotation race before clearing
-                    val freshRefreshToken = tokenStorage.getRefreshTokenSync()
-                    if (freshRefreshToken != null && freshRefreshToken != currentRefreshToken) {
-                        return tokenStorage.getAccessTokenSync()
-                    }
-                    tokenStorage.clearTokens()
-                    null
+                // Check if refresh token changed during the network call (rotation race)
+                val freshRefreshToken = tokenStorage.getRefreshTokenSync()
+                if (freshRefreshToken != null && freshRefreshToken != currentRefreshToken) {
+                    return tokenStorage.getAccessTokenSync()
                 }
+
+                // ONLY clear tokens when server definitively rejects with HTTP 401 Unauthorized
+                if (e is HttpException && e.code() == 401) {
+                    tokenStorage.clearTokens()
+                }
+
+                // For any other HttpException (400, 403, 429, 5xx), IOException,
+                // serialization errors, or other exceptions: keep tokens and return null
+                null
             }
         }
     }

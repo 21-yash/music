@@ -115,7 +115,11 @@ class JamSessionManager @Inject constructor(
                     if (reconnectJob?.isActive != true) {
                         reconnectJob = scope.launch {
                             consecutiveAuthRebuilds++
-                            val freshToken = authRepository.refreshToken()
+                            // Pass thatToken (the token used by this socket connection attempt).
+                            // If another caller already refreshed while we were connecting, TokenRefresher
+                            // returns the updated token without another network call.
+                            // A null stale token short-circuits the refresher to return stored access token.
+                            val freshToken = authRepository.refreshToken(token)
                             if (freshToken != null) {
                                 initSocket(freshToken)
                             }
