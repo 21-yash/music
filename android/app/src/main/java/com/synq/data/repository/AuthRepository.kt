@@ -87,4 +87,28 @@ class AuthRepository @Inject constructor(
         clearLocalData()
         return apiResult
     }
+
+    suspend fun getFreshAccessToken(): String? {
+        val currentToken = tokenStorage.getAccessTokenSync()
+        if (!currentToken.isNullOrBlank()) {
+            return currentToken
+        }
+        return refreshToken()
+    }
+
+    suspend fun refreshToken(): String? {
+        val refreshToken = tokenStorage.getRefreshTokenSync() ?: return null
+        val userId = tokenStorage.getUserIdSync() ?: return null
+        return try {
+            val response = authApi.refreshToken(RefreshTokenRequest(userId, refreshToken))
+            if (response.success && response.data != null) {
+                tokenStorage.saveTokens(response.data.accessToken, response.data.refreshToken, userId)
+                response.data.accessToken
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

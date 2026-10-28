@@ -1,5 +1,6 @@
 package com.synq.data.remote
 
+import com.synq.BuildConfig
 import com.synq.data.local.TokenStorage
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
@@ -8,12 +9,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * OkHttp interceptor that attaches the Bearer access token to
- * every request (unless the request is to a public auth endpoint).
- *
- * Uses runBlocking to read the token synchronously from DataStore,
- * which is acceptable in an OkHttp interceptor since it runs on
- * OkHttp's own thread pool (not the main thread).
+ * OkHttp interceptor that attaches:
+ * 1. The X-Api-Key header to every request.
+ * 2. The Bearer access token to non-public endpoints.
  */
 @Singleton
 class AuthInterceptor @Inject constructor(
@@ -21,7 +19,7 @@ class AuthInterceptor @Inject constructor(
 ) : Interceptor {
 
     companion object {
-        /** Paths that don't need an auth header */
+        /** Paths that don't need a user Authorization header */
         private val PUBLIC_PATHS = listOf(
             "auth/register",
             "auth/login",
@@ -34,20 +32,20 @@ class AuthInterceptor @Inject constructor(
         val request = chain.request()
         val path = request.url.encodedPath
 
-        // Skip auth header for public endpoints
-        if (PUBLIC_PATHS.any { path.contains(it) }) {
-            return chain.proceed(request)
+        val builder = request.newBuilder()
+
+        // Always add X-Api-Key
+        builder.header("X-Api-Key", BuildConfig.API_KEY)
+
+        // Add Authorization header only for non-public paths
+        val isPublic = PUBLIC_PATHS.any { path.contains(it) }
+        if (!isPublic) {
+            val token = runBlocking { tokenStorage.getAccessTokenSync() }
+            if (token != null) {
+                builder.header("Authorization", "Bearer $token")
+            }
         }
 
-        val token = runBlocking { tokenStorage.getAccessTokenSync() }
-
-        return if (token != null) {
-            val authenticatedRequest = request.newBuilder()
-                .header("Authorization", "Bearer $token")
-                .build()
-            chain.proceed(authenticatedRequest)
-        } else {
-            chain.proceed(request)
-        }
+        return chain.proceed(builder.build())
     }
 }

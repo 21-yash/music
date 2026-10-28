@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,14 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+val appApiKey = localProperties.getProperty("API_KEY") ?: ""
 
 android {
     namespace = "com.synq"
@@ -22,6 +32,7 @@ android {
 
         // Base URL for the backend API — configurable per build type
         buildConfigField("String", "API_BASE_URL", "\"https://api.21yash.online/api/v1/\"")
+        buildConfigField("String", "API_KEY", "\"$appApiKey\"")
     }
 
     buildTypes {

@@ -27,17 +27,20 @@ import android.widget.Toast
 import com.synq.features.music.playback.JamPlaybackInterceptor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
+import com.synq.data.repository.AuthRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class JamSessionManager @Inject constructor(
     private val playerManager: MusicPlayerManager,
+    private val authRepository: AuthRepository,
     @ApplicationContext private val context: Context
 ) : JamPlaybackInterceptor {
     private var socket: Socket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var syncJob: Job? = null
+    private var isReconnecting = false
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
 
@@ -46,21 +49,62 @@ class JamSessionManager @Inject constructor(
 
     private var myUserId: String = ""
 
-
-
     private fun connectSocket() {
-        if (socket?.connected() == true) return
+        scope.launch {
+            ensureSocketConnected()
+        }
+    }
 
+    private suspend fun ensureSocketConnected() {
+        if (socket?.connected() == true) return
+        val token = authRepository.getFreshAccessToken()
+        initSocket(token)
+    }
+
+    private fun initSocket(token: String?) {
         try {
+            socket?.disconnect()
+            socket?.off()
+
             val url = BuildConfig.API_BASE_URL.replace("/api/v1/", "")
+            val authMap = mutableMapOf<String, String>()
+            if (BuildConfig.API_KEY.isNotEmpty()) {
+                authMap["apiKey"] = BuildConfig.API_KEY
+            }
+            if (!token.isNullOrBlank()) {
+                authMap["token"] = token
+            }
+
             val options = IO.Options.builder()
                 .setTransports(arrayOf("websocket"))
+                .setAuth(authMap)
                 .build()
 
             socket = IO.socket(url, options)
 
             socket?.on(Socket.EVENT_CONNECT) {
-                // Connected
+                isReconnecting = false
+                val currentCode = _jamState.value.sessionCode
+                if (!currentCode.isNullOrBlank() && _jamState.value.isInJam) {
+                    val payload = JSONObject().apply {
+                        put("code", currentCode.trim().uppercase())
+                    }
+                    socket?.emit("jam:join", payload)
+                }
+            }
+
+            socket?.on(Socket.EVENT_CONNECT_ERROR) {
+                if (!isReconnecting) {
+                    isReconnecting = true
+                    scope.launch {
+                        val freshToken = authRepository.refreshToken()
+                        if (freshToken != null) {
+                            initSocket(freshToken)
+                        } else {
+                            isReconnecting = false
+                        }
+                    }
+                }
             }
 
             socket?.on("jam:created") { args ->
@@ -156,27 +200,31 @@ class JamSessionManager @Inject constructor(
 
     fun createJam(userId: String, username: String, avatarUrl: String? = null) {
         myUserId = userId
-        connectSocket()
-
-        val payload = JSONObject().apply {
-            put("userId", userId)
-            put("username", username)
-            if (avatarUrl != null) put("avatarUrl", avatarUrl)
+        scope.launch {
+            ensureSocketConnected()
+            val payload = JSONObject().apply {
+                put("userId", userId)
+                put("username", username)
+                if (avatarUrl != null) put("avatarUrl", avatarUrl)
+            }
+            socket?.emit("jam:create", payload)
         }
-        socket?.emit("jam:create", payload)
     }
 
     fun joinJam(code: String, userId: String, username: String, avatarUrl: String? = null) {
         myUserId = userId
-        connectSocket()
-
-        val payload = JSONObject().apply {
-            put("code", code.trim().uppercase())
-            put("userId", userId)
-            put("username", username)
-            if (avatarUrl != null) put("avatarUrl", avatarUrl)
+        val cleanCode = code.trim().uppercase()
+        _jamState.update { it.copy(sessionCode = cleanCode) }
+        scope.launch {
+            ensureSocketConnected()
+            val payload = JSONObject().apply {
+                put("code", cleanCode)
+                put("userId", userId)
+                put("username", username)
+                if (avatarUrl != null) put("avatarUrl", avatarUrl)
+            }
+            socket?.emit("jam:join", payload)
         }
-        socket?.emit("jam:join", payload)
     }
 
     fun leaveJam() {
@@ -190,6 +238,9 @@ class JamSessionManager @Inject constructor(
         playerManager.restorePersonalQueue()
         playerManager.jamInterceptor = null
         _jamState.value = JamState()
+        socket?.disconnect()
+        socket?.off()
+        socket = null
     }
 
     companion object {

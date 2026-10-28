@@ -4,6 +4,7 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import com.synq.BuildConfig
 import com.synq.data.remote.AuthInterceptor
 import com.synq.data.remote.AuthAuthenticator
+import com.synq.data.remote.RateLimitInterceptor
 import com.synq.data.remote.api.AuthApi
 import dagger.Module
 import dagger.Provides
@@ -21,7 +22,7 @@ import javax.inject.Singleton
  * Hilt module providing networking dependencies.
  *
  * All API interfaces are created from a single Retrofit instance
- * backed by a single OkHttpClient with auth and logging interceptors.
+ * backed by a single OkHttpClient with auth, rate-limit, and logging interceptors.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -39,18 +40,22 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         authInterceptor: AuthInterceptor,
-        authAuthenticator: AuthAuthenticator
+        authAuthenticator: AuthAuthenticator,
+        rateLimitInterceptor: RateLimitInterceptor,
     ): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(authInterceptor)
+            .addInterceptor(rateLimitInterceptor)
             .authenticator(authAuthenticator)
 
         if (BuildConfig.DEBUG) {
             val loggingInterceptor = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BODY
+                redactHeader("Authorization")
+                redactHeader("X-Api-Key")
             }
             builder.addInterceptor(loggingInterceptor)
         }

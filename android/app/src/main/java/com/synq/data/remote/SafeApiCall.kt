@@ -36,6 +36,8 @@ suspend fun <T> safeApiCall(
             @Suppress("UNCHECKED_CAST")
             AppResult.Success(Unit as T)
         }
+    } catch (e: RateLimitException) {
+        AppResult.Error(AppError.Server("TOO_MANY_REQUESTS", "Too many requests, try again in ${e.retryAfterSeconds} seconds"))
     } catch (e: IOException) {
         AppResult.Error(AppError.Network())
     } catch (e: HttpException) {
