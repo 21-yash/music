@@ -23,6 +23,11 @@ export default defineConfig({
     },
     env: {
       NODE_ENV: 'test',
+      MONGODB_URI: 'mongodb://localhost:27017/synq-test',
+      REDIS_URL: 'redis://localhost:6379',
+      CORS_ORIGINS: '*',
+      JWT_ACCESS_SECRET: 'test-jwt-access-secret-for-vitest-environment',
+      JWT_REFRESH_SECRET: 'test-jwt-refresh-secret-for-vitest-environment',
       APP_API_KEY: 'test-api-key-for-vitest-environment-must-be-min-32-chars-long',
     },
   },

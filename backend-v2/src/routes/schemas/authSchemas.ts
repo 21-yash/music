@@ -20,7 +20,10 @@ export const registerSchema = z.object({
     .string()
     .min(8, 'Password must be at least 8 characters')
     .max(128, 'Password must be at most 128 characters'),
-  inviteCode: z.string().min(1, 'Invite code is required'),
+  inviteCode: z
+    .string()
+    .min(1, 'Invite code is required')
+    .max(64, 'Invite code must be at most 64 characters'),
   deviceName: z.string().max(100).optional(),
 });
 

@@ -87,6 +87,16 @@ describe('registerSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('rejects inviteCode longer than 64 chars', () => {
+    const result = registerSchema.safeParse({
+      username: 'testuser',
+      email: 'test@example.com',
+      password: 'password123',
+      inviteCode: 'A'.repeat(65),
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('loginSchema', () => {

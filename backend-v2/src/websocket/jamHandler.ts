@@ -29,6 +29,9 @@ const activeSessions = new Map<string, JamSession>();
 // Map socketId -> Set<code string>
 const socketToSessions = new Map<string, Set<string>>();
 
+// Map `${code}:${userId}` -> NodeJS.Timeout for disconnect grace period
+const disconnectTimers = new Map<string, NodeJS.Timeout>();
+
 function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // exclude confusing chars (I, 1, O, 0)
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -63,8 +66,12 @@ export function registerJamHandlers(io: Server, socket: Socket) {
   socket.on('jam:create', (payload?: { avatarUrl?: string }) => {
     try {
       const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-      const userId = authUser?.userId || socket.id;
-      const username = authUser?.username || 'Host';
+      if (!authUser?.userId || !authUser?.username) {
+        socket.emit('jam:error', { message: 'Authentication required' });
+        return;
+      }
+      const userId = authUser.userId;
+      const username = authUser.username;
 
       const code = generateRoomCode();
       const hostUser: JamParticipant = {
@@ -118,8 +125,34 @@ export function registerJamHandlers(io: Server, socket: Socket) {
       }
 
       const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-      const userId = authUser?.userId || socket.id;
-      const username = authUser?.username || 'Guest';
+      if (!authUser?.userId || !authUser?.username) {
+        socket.emit('jam:error', { message: 'Authentication required' });
+        return;
+      }
+      const userId = authUser.userId;
+      const username = authUser.username;
+
+      // If user rejoins before disconnect grace timer fired, cancel the pending leave timer
+      const timerKey = `${code}:${userId}`;
+      const pendingTimer = disconnectTimers.get(timerKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        disconnectTimers.delete(timerKey);
+      }
+
+      // Drop stale entries with the same userId to avoid duplicates
+      for (const [sId, p] of session.participants.entries()) {
+        if (p.userId === userId && sId !== socket.id) {
+          session.participants.delete(sId);
+          const oldSocketCodes = socketToSessions.get(sId);
+          if (oldSocketCodes) {
+            oldSocketCodes.delete(code);
+            if (oldSocketCodes.size === 0) {
+              socketToSessions.delete(sId);
+            }
+          }
+        }
+      }
 
       const isHost = session.hostUserId === userId || session.hostSocketId === socket.id;
       if (isHost) {
@@ -254,16 +287,47 @@ export function registerJamHandlers(io: Server, socket: Socket) {
   // ─── Leave Jam Session ──────────────────────────────────────────────
   socket.on('jam:leave', (payload: { code: string }) => {
     const code = (payload.code || '').trim().toUpperCase();
+    const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+    if (authUser?.userId) {
+      const timerKey = `${code}:${authUser.userId}`;
+      const pendingTimer = disconnectTimers.get(timerKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        disconnectTimers.delete(timerKey);
+      }
+    }
     handleUserLeave(io, socket, code);
   });
 
   // ─── Socket Disconnect cleanup ──────────────────────────────────────
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason: string) => {
     const userCodes = socketToSessions.get(socket.id);
-    if (userCodes) {
-      for (const code of userCodes) {
+    if (!userCodes) return;
+    const codes = Array.from(userCodes);
+
+    const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+    const isExplicit =
+      reason === 'client namespace disconnect' || reason === 'server namespace disconnect';
+
+    for (const code of codes) {
+      if (isExplicit || !authUser?.userId) {
         handleUserLeave(io, socket, code);
+      } else {
+        const timerKey = `${code}:${authUser.userId}`;
+        const existingTimer = disconnectTimers.get(timerKey);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+        const timer = setTimeout(() => {
+          disconnectTimers.delete(timerKey);
+          handleUserLeave(io, socket, code);
+        }, 30_000);
+        timer.unref();
+        disconnectTimers.set(timerKey, timer);
       }
+    }
+
+    if (isExplicit) {
       socketToSessions.delete(socket.id);
     }
   });
@@ -299,8 +363,15 @@ function handleUserLeave(io: Server, socket: Socket, code: string) {
         });
       }
     } else {
-      // Room empty, delete
+      // Room empty, delete session
       activeSessions.delete(code);
+      // Clear any pending timers for this room
+      for (const [key, timer] of disconnectTimers.entries()) {
+        if (key.startsWith(`${code}:`)) {
+          clearTimeout(timer);
+          disconnectTimers.delete(key);
+        }
+      }
       logger.info({ code }, 'Jam session closed (no participants left)');
       return;
     }

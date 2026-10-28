@@ -381,6 +381,82 @@ describe('Phase A Security Tests', () => {
 
       socket.disconnect();
     });
+
+    it('Host reconnect within disconnect grace keeps the room, host role, and avoids duplicate participants', async () => {
+      // Socket 1: Host creates room
+      const socket1 = ioClient(`http://localhost:${port}`, {
+        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
+        transports: ['websocket'],
+        reconnection: false,
+      });
+
+      await new Promise<void>((resolve) => socket1.on('connect', () => resolve()));
+
+      const created = await new Promise<any>((resolve) => {
+        socket1.on('jam:created', (data) => resolve(data));
+        socket1.emit('jam:create');
+      });
+      const roomCode = created.session.code;
+      expect(roomCode).toBeDefined();
+
+      // Simulate network drop on socket 1 (engine close triggers transport close, not explicit client namespace disconnect)
+      (socket1.io.engine as any).close();
+
+      // Socket 2: Host reconnects with same user ID within grace period
+      const socket2 = ioClient(`http://localhost:${port}`, {
+        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
+        transports: ['websocket'],
+        reconnection: false,
+      });
+
+      await new Promise<void>((resolve) => socket2.on('connect', () => resolve()));
+
+      const joined = await new Promise<any>((resolve) => {
+        socket2.on('jam:joined', (data) => resolve(data));
+        socket2.emit('jam:join', { code: roomCode });
+      });
+
+      // Host privileges and room are preserved
+      expect(joined.session.code).toBe(roomCode);
+      expect(joined.session.hostUserId).toBe('user-123456789012345678901234');
+      // Duplicate participant entry for the same user is purged
+      expect(joined.session.participants.length).toBe(1);
+      expect(joined.session.participants[0].socketId).toBe(socket2.id);
+
+      socket2.disconnect();
+    });
+
+    it('Explicit jam:leave is immediate (room deleted immediately if host alone)', async () => {
+      const socket = ioClient(`http://localhost:${port}`, {
+        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
+        transports: ['websocket'],
+        reconnection: false,
+      });
+
+      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
+
+      const created = await new Promise<any>((resolve) => {
+        socket.on('jam:created', (data) => resolve(data));
+        socket.emit('jam:create');
+      });
+      const roomCode = created.session.code;
+
+      // Explicit leave
+      socket.emit('jam:leave', { code: roomCode });
+      // Allow event loop to process leave
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Attempt to join the closed room should fail immediately
+      const joinErrorPromise = new Promise<string>((resolve) => {
+        socket.on('jam:error', (data) => resolve(data.message));
+        socket.emit('jam:join', { code: roomCode });
+      });
+
+      const errMsg = await joinErrorPromise;
+      expect(errMsg).toBe('Invalid or expired room code');
+
+      socket.disconnect();
+    });
   });
 
   // ─── 4. Rate Limiting & Proxy Trust ──────────────────────────────────
@@ -473,8 +549,9 @@ describe('Phase A Security Tests', () => {
       }
     });
 
-    it('Server boots with Redis unavailable and first request does not crash (fails open)', async () => {
+    it('Server boots with Redis unavailable and limited route does not crash (fails open to 401)', async () => {
       const app = createApp();
+      vi.spyOn(User, 'findOne').mockResolvedValue(null);
 
       // Mock Redis client call to reject (simulating connection refused/down)
       const mockFailingRedis = {
@@ -486,10 +563,76 @@ describe('Phase A Security Tests', () => {
       process.env.NODE_ENV = 'production';
 
       try {
-        const res = await request(app).get('/api/v1/health');
-        // Health route should succeed (200) without crashing despite Redis outage
-        expect(res.status).toBe(200);
-        expect(res.body.data.status).toBe('ok');
+        const res = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ login: 'victim@example.com', password: 'wrongpassword' });
+        // Traffic passes through to authController, returning 401 Unauthorized instead of 500 Internal Server Error
+        expect(res.status).toBe(401);
+        expect(res.body.error?.code).toBe('UNAUTHORIZED');
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+      }
+    });
+
+    it('Redis recovery: limits start counting again after Redis reconnects (11th wrong login -> 429)', async () => {
+      const app = createApp();
+      vi.spyOn(User, 'findOne').mockResolvedValue(null);
+
+      let redisIsDown = true;
+      const hits = new Map<string, number>();
+
+      const mockRecoveringRedis = {
+        call: vi.fn().mockImplementation(async (cmd: string, ...args: string[]) => {
+          if (redisIsDown) {
+            throw new Error('Connection refused to redis:6379');
+          }
+          const lowerCmd = cmd.toLowerCase();
+          if (lowerCmd === 'script') {
+            return 'mock-script-sha';
+          }
+          if (lowerCmd === 'eval' || lowerCmd === 'evalsha') {
+            const key = args[2] || 'key';
+            const count = (hits.get(key) || 0) + 1;
+            hits.set(key, count);
+            return [count, 900000];
+          }
+          if (lowerCmd === 'decr') {
+            const key = args[0] || 'key';
+            const count = Math.max(0, (hits.get(key) || 0) - 1);
+            hits.set(key, count);
+            return count;
+          }
+          return null;
+        }),
+      };
+      vi.spyOn(redisConfig, 'getRedisClient').mockReturnValue(mockRecoveringRedis as any);
+
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      try {
+        // 1. Initial request when Redis is down: fails open, returns 401
+        const resDown = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ login: 'victim@example.com', password: 'wrongpassword' });
+        expect(resDown.status).toBe(401);
+
+        // 2. Redis comes back up
+        redisIsDown = false;
+
+        // 3. Perform 10 wrong logins (should be allowed through, returning 401)
+        for (let i = 1; i <= 10; i++) {
+          const res = await request(app)
+            .post('/api/v1/auth/login')
+            .send({ login: 'victim@example.com', password: 'wrongpassword' });
+          expect(res.status).toBe(401);
+        }
+
+        // 4. 11th wrong login must trigger rate limit (429)
+        const res11 = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ login: 'victim@example.com', password: 'wrongpassword' });
+        expect(res11.status).toBe(429);
       } finally {
         process.env.NODE_ENV = originalEnv;
       }

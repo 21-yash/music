@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { getRedisClient } from '../config/redis';
 import { TooManyRequestsError } from '../utils/errors';
@@ -36,14 +36,19 @@ function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
         passOnStoreError: true, // Allow traffic if Redis becomes unavailable
         validate: {
           creationStack: false,
-          keyGeneratorIpFallback: false,
         },
         skip: options.skip,
         skipSuccessfulRequests: options.skipSuccessfulRequests,
         keyGenerator: options.keyGenerator,
         store: new RedisStore({
           sendCommand: async (cmd: string, ...args: string[]) => {
-            return (await getRedisClient().call(cmd, ...args)) as any;
+            try {
+              return (await getRedisClient().call(cmd, ...args)) as any;
+            } catch (err) {
+              // Invalidate cached limiter so store re-initializes on Redis recovery
+              limiterInstance = null;
+              throw err;
+            }
           },
           prefix: `rl:${options.keyPrefix}:`,
         }),
@@ -65,7 +70,7 @@ export const globalLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 1000,
   keyPrefix: 'global',
-  skip: (req) => req.path.includes('/health') || Boolean(req.originalUrl?.includes('/health')),
+  skip: (req) => req.originalUrl.split('?')[0] === '/api/v1/health',
 });
 
 /** Music routes general: 120 req / 1 min per IP */
@@ -101,7 +106,7 @@ export const loginLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   keyPrefix: 'login',
-  keyGenerator: (req) => `${req.ip ?? 'unknown'}:${String(req.body?.login ?? '').trim().toLowerCase()}`,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? 'unknown')}:${String(req.body?.login ?? '').trim().toLowerCase()}`,
   skipSuccessfulRequests: true,
 });
 
