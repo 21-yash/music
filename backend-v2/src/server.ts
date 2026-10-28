@@ -26,7 +26,14 @@ async function start(): Promise<void> {
   try {
     // ─── Connect to databases ──────────────────────────────────
     await connectMongoDB();
-    await connectRedis();
+    try {
+      await connectRedis();
+    } catch (error) {
+      logger.warn(
+        { error },
+        'Redis unavailable at startup — continuing without Redis (rate limiting will fail open)',
+      );
+    }
 
     // ─── Initialize Services ───────────────────────────────────
     registerMusicProvider(new JioSaavnProvider(), true);

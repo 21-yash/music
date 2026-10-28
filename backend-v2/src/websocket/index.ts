@@ -1,7 +1,9 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import crypto from 'crypto';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { verifyAccessToken } from '../utils/tokens';
 import { registerSportsHandlers } from './sportsHandler';
 import { registerJamHandlers } from './jamHandler';
 import { SportsWorker } from '../jobs/sportsWorker';
@@ -21,10 +23,53 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
       methods: ['GET', 'POST'],
       credentials: true,
     },
+    maxHttpBufferSize: 50_000,
     pingInterval: 25_000,
     pingTimeout: 20_000,
   });
   io = server;
+
+  // Socket.IO authentication middleware: verifies API key and JWT access token at handshake
+  server.use((socket, next) => {
+    try {
+      const apiKey = socket.handshake.auth?.apiKey;
+      const isValidKey =
+        typeof apiKey === 'string' &&
+        Buffer.byteLength(apiKey) === Buffer.byteLength(env.APP_API_KEY) &&
+        crypto.timingSafeEqual(Buffer.from(apiKey), Buffer.from(env.APP_API_KEY));
+
+      if (!isValidKey) {
+        logger.warn(
+          { ip: socket.handshake.address },
+          'Socket.IO connection rejected: invalid or missing API key',
+        );
+        return next(new Error('Invalid or missing API key'));
+      }
+
+      const token = socket.handshake.auth?.token;
+      if (typeof token !== 'string' || !token) {
+        logger.warn(
+          { ip: socket.handshake.address },
+          'Socket.IO connection rejected: missing auth token',
+        );
+        return next(new Error('Authentication token required'));
+      }
+
+      const payload = verifyAccessToken(token);
+      socket.data.user = {
+        userId: payload.userId,
+        username: payload.username,
+      };
+
+      next();
+    } catch (err) {
+      logger.warn(
+        { ip: socket.handshake.address, err },
+        'Socket.IO connection rejected: invalid auth token',
+      );
+      next(new Error('Invalid or expired authentication token'));
+    }
+  });
 
   // Start the demand-driven sports worker
   sportsWorker = new SportsWorker(server, 15_000); // 15 second polling interval

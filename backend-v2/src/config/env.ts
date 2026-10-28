@@ -32,6 +32,9 @@ const envSchema = z.object({
 
   // JioSaavn Vercel proxy API key (required in production to prevent open relay abuse)
   JIOSAAVN_PROXY_KEY: z.string().optional(),
+
+  // App internal API key (min 32 characters)
+  APP_API_KEY: z.string().min(32, 'APP_API_KEY is required and must be at least 32 characters'),
 });
 
 export type Env = z.infer<typeof envSchema>;

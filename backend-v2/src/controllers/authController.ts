@@ -16,11 +16,11 @@ export async function register(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, inviteCode } = req.body;
     const deviceName = req.body.deviceName as string | undefined;
 
     const result = await authService.register(
-      { username, email, password },
+      { username, email, password, inviteCode },
       deviceName,
     );
 

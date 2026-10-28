@@ -21,5 +21,9 @@ export default defineConfig({
       '@middleware': path.resolve(__dirname, 'src/middleware'),
       '@utils': path.resolve(__dirname, 'src/utils'),
     },
+    env: {
+      NODE_ENV: 'test',
+      APP_API_KEY: 'test-api-key-for-vitest-environment-must-be-min-32-chars-long',
+    },
   },
 });

@@ -10,6 +10,12 @@ import {
   changePasswordSchema,
   deleteAccountSchema,
 } from './schemas/authSchemas';
+import {
+  loginLimiter,
+  loginIpLimiter,
+  registerLimiter,
+  refreshLimiter,
+} from '../middleware/rateLimit';
 
 const router = Router();
 
@@ -18,6 +24,7 @@ const router = Router();
 /** Register a new user */
 router.post(
   '/register',
+  registerLimiter,
   validate({ body: registerSchema }),
   authController.register,
 );
@@ -25,6 +32,8 @@ router.post(
 /** Login with username/email + password */
 router.post(
   '/login',
+  loginIpLimiter,
+  loginLimiter,
   validate({ body: loginSchema }),
   authController.login,
 );
@@ -32,6 +41,7 @@ router.post(
 /** Refresh access token (no auth header needed — access token is expired) */
 router.post(
   '/refresh',
+  refreshLimiter,
   validate({ body: refreshTokenSchema }),
   authController.refresh,
 );

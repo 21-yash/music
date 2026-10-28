@@ -14,6 +14,7 @@ describe('registerSchema', () => {
       username: 'testuser',
       email: 'test@example.com',
       password: 'password123',
+      inviteCode: 'TEST-CODE-1234',
     });
     expect(result.success).toBe(true);
   });
@@ -23,6 +24,7 @@ describe('registerSchema', () => {
       username: 'ab',
       email: 'test@example.com',
       password: 'password123',
+      inviteCode: 'TEST-CODE-1234',
     });
     expect(result.success).toBe(false);
   });
@@ -32,6 +34,7 @@ describe('registerSchema', () => {
       username: 'test user!',
       email: 'test@example.com',
       password: 'password123',
+      inviteCode: 'TEST-CODE-1234',
     });
     expect(result.success).toBe(false);
   });
@@ -41,6 +44,7 @@ describe('registerSchema', () => {
       username: 'test_user_123',
       email: 'test@example.com',
       password: 'password123',
+      inviteCode: 'TEST-CODE-1234',
     });
     expect(result.success).toBe(true);
   });
@@ -50,6 +54,7 @@ describe('registerSchema', () => {
       username: 'testuser',
       email: 'not-an-email',
       password: 'password123',
+      inviteCode: 'TEST-CODE-1234',
     });
     expect(result.success).toBe(false);
   });
@@ -59,6 +64,26 @@ describe('registerSchema', () => {
       username: 'testuser',
       email: 'test@example.com',
       password: 'short',
+      inviteCode: 'TEST-CODE-1234',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing inviteCode', () => {
+    const result = registerSchema.safeParse({
+      username: 'testuser',
+      email: 'test@example.com',
+      password: 'password123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty inviteCode', () => {
+    const result = registerSchema.safeParse({
+      username: 'testuser',
+      email: 'test@example.com',
+      password: 'password123',
+      inviteCode: '',
     });
     expect(result.success).toBe(false);
   });

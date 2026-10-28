@@ -2,7 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { env } from './config/env';
-import { requestLogger, notFoundHandler, errorHandler } from './middleware';
+import { requestLogger, notFoundHandler, errorHandler, globalLimiter } from './middleware';
 import apiV1Router from './routes';
 
 /**
@@ -14,6 +14,10 @@ import apiV1Router from './routes';
  */
 export function createApp(): express.Application {
   const app = express();
+
+  // ─── Reverse Proxy Trust ─────────────────────────────────────────
+  // Trust exactly 1 upstream proxy hop (Fly.io edge / Nginx) to securely read req.ip without spoofing
+  app.set('trust proxy', 1);
 
   // ─── Security ───────────────────────────────────────────────────
   app.use(helmet());
@@ -31,7 +35,7 @@ export function createApp(): express.Application {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
     }),
   );
 
@@ -42,6 +46,9 @@ export function createApp(): express.Application {
 
   // ─── Request logging ───────────────────────────────────────────
   app.use(requestLogger);
+
+  // ─── Global Rate Limiting ──────────────────────────────────────
+  app.use(globalLimiter);
 
   // ─── API routes ────────────────────────────────────────────────
   app.use('/api/v1', apiV1Router);

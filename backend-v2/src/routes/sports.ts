@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import * as sportsController from '../controllers/sportsController';
 import { validate } from '../middleware/validate';
+import { authenticate } from '../middleware/authenticate';
+import { requireApiKey } from '../middleware/apiKey';
+import { sportsLimiter } from '../middleware/rateLimit';
 import { matchesSchema, matchIdSchema } from './schemas/sportsSchemas';
 
 /**
@@ -15,6 +18,11 @@ import { matchesSchema, matchIdSchema } from './schemas/sportsSchemas';
  *   GET /matches/:matchId/squads              — Playing XI & bench
  */
 const router = Router();
+
+// All sports routes require valid API key, authenticated session, and rate limiting
+router.use(requireApiKey, authenticate);
+router.use(sportsLimiter);
+
 
 router.get(
   '/matches',

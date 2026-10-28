@@ -10,3 +10,6 @@ export type { IPlaylist, IPlaylistSong } from './Playlist';
 export { FollowedTeam } from './FollowedTeam';
 export type { IFollowedTeam } from './FollowedTeam';
 
+export { Invite } from './Invite';
+export type { IInvite } from './Invite';
+

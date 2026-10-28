@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { User, IUser } from '../models/User';
+import { Invite } from '../models/Invite';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -9,8 +10,10 @@ import {
   ConflictError,
   UnauthorizedError,
   NotFoundError,
+  ForbiddenError,
 } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { hashInviteCode } from '../utils/invite';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -18,6 +21,7 @@ export interface RegisterInput {
   username: string;
   email: string;
   password: string;
+  inviteCode: string;
 }
 
 export interface LoginInput {
@@ -53,44 +57,86 @@ export interface SessionInfo {
 /**
  * Register a new user.
  *
- * Validates uniqueness of username and email, creates the user (password
- * is hashed automatically by the pre-save hook), and issues tokens.
+ * Validates and atomically claims the single-use invite code before checking
+ * for existing users (to prevent username/email enumeration). If registration fails,
+ * the invite code is released so it remains usable.
  */
 export async function register(
   input: RegisterInput,
   deviceName?: string,
 ): Promise<{ user: UserProfile; tokens: AuthTokens }> {
-  // Check for existing user by email or username
-  const existing = await User.findOne({
-    $or: [
-      { email: input.email.toLowerCase() },
-      { username: input.username },
-    ],
-  });
+  // 1. Atomically claim invite code BEFORE any username/email lookup
+  const codeHash = hashInviteCode(input.inviteCode);
+  const now = new Date();
 
-  if (existing) {
-    if (existing.email === input.email.toLowerCase()) {
-      throw new ConflictError('Email is already registered');
-    }
-    throw new ConflictError('Username is already taken');
+  const claimedInvite = await Invite.findOneAndUpdate(
+    {
+      codeHash,
+      usedAt: null,
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+    },
+    { $set: { usedAt: now } },
+    { new: true },
+  );
+
+  if (!claimedInvite) {
+    throw new ForbiddenError('Invalid or already used invite code');
   }
 
-  // Create user — password hashing happens in the pre-save hook
-  const user = await User.create({
-    username: input.username,
-    email: input.email.toLowerCase(),
-    password: input.password,
-  });
+  let inviteBound = false;
 
-  // Issue tokens
-  const tokens = await issueTokens(user, deviceName ?? null);
+  try {
+    // 2. Check for existing user by email or username
+    const existing = await User.findOne({
+      $or: [
+        { email: input.email.toLowerCase() },
+        { username: input.username },
+      ],
+    });
 
-  logger.info({ userId: user._id }, 'User registered');
+    if (existing) {
+      if (existing.email === input.email.toLowerCase()) {
+        throw new ConflictError('Email is already registered');
+      }
+      throw new ConflictError('Username is already taken');
+    }
 
-  return {
-    user: toUserProfile(user),
-    tokens,
-  };
+    // 3. Create user — password hashing happens in the pre-save hook
+    const user = await User.create({
+      username: input.username,
+      email: input.email.toLowerCase(),
+      password: input.password,
+    });
+
+    // 4. Mark invite as usedBy new user
+    await Invite.updateOne(
+      { _id: claimedInvite._id },
+      { $set: { usedBy: user._id } },
+    );
+    inviteBound = true;
+
+    // 5. Issue tokens
+    const tokens = await issueTokens(user, deviceName ?? null);
+
+    logger.info({ userId: user._id }, 'User registered');
+
+    return {
+      user: toUserProfile(user),
+      tokens,
+    };
+  } catch (error) {
+    // If registration fails before linking the user, release the invite back to usable
+    if (!inviteBound) {
+      await Invite.updateOne(
+        { _id: claimedInvite._id, usedBy: null },
+        { $set: { usedAt: null } },
+      ).catch((releaseErr) => {
+        logger.error({ releaseErr }, 'Failed to release claimed invite code');
+      });
+    }
+
+    throw error;
+  }
 }
 
 /**

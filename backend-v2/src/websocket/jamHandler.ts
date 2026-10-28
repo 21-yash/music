@@ -60,14 +60,18 @@ function serializeSession(session: JamSession) {
 
 export function registerJamHandlers(io: Server, socket: Socket) {
   // ─── Create Jam Session ─────────────────────────────────────────────
-  socket.on('jam:create', (payload: { userId: string; username: string; avatarUrl?: string }) => {
+  socket.on('jam:create', (payload?: { avatarUrl?: string }) => {
     try {
+      const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+      const userId = authUser?.userId || socket.id;
+      const username = authUser?.username || 'Host';
+
       const code = generateRoomCode();
       const hostUser: JamParticipant = {
         socketId: socket.id,
-        userId: payload.userId || socket.id,
-        username: payload.username || 'Host',
-        avatarUrl: payload.avatarUrl,
+        userId,
+        username,
+        avatarUrl: payload?.avatarUrl,
         isHost: true,
       };
 
@@ -103,7 +107,7 @@ export function registerJamHandlers(io: Server, socket: Socket) {
   });
 
   // ─── Join Jam Session ───────────────────────────────────────────────
-  socket.on('jam:join', (payload: { code: string; userId: string; username: string; avatarUrl?: string }) => {
+  socket.on('jam:join', (payload: { code: string; avatarUrl?: string }) => {
     try {
       const code = (payload.code || '').trim().toUpperCase();
       const session = activeSessions.get(code);
@@ -113,12 +117,21 @@ export function registerJamHandlers(io: Server, socket: Socket) {
         return;
       }
 
+      const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+      const userId = authUser?.userId || socket.id;
+      const username = authUser?.username || 'Guest';
+
+      const isHost = session.hostUserId === userId || session.hostSocketId === socket.id;
+      if (isHost) {
+        session.hostSocketId = socket.id;
+      }
+
       const participant: JamParticipant = {
         socketId: socket.id,
-        userId: payload.userId || socket.id,
-        username: payload.username || 'Guest',
+        userId,
+        username,
         avatarUrl: payload.avatarUrl,
-        isHost: session.hostSocketId === socket.id,
+        isHost,
       };
 
       session.participants.set(socket.id, participant);
