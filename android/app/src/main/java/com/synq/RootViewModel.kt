@@ -33,7 +33,8 @@ class RootViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     val sleepTimerManager: SleepTimerManager,
     val jamSessionManager: JamSessionManager,
-    private val themePreferences: com.synq.data.local.ThemePreferences
+    private val themePreferences: com.synq.data.local.ThemePreferences,
+    val jamPreferences: com.synq.features.music.jam.JamPreferences
 ) : ViewModel() {
     val playbackState = playerManager.playbackState
     val queue = playerManager.queue
@@ -48,6 +49,10 @@ class RootViewModel @Inject constructor(
     val sleepRemainingSeconds = sleepTimerManager.remainingSeconds
 
     val jamState = jamSessionManager.jamState
+
+    fun clearJamError() {
+        jamSessionManager.clearError()
+    }
 
     val isLoggedIn: StateFlow<Boolean?> = authRepository.isLoggedIn
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)

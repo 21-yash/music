@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import com.synq.features.music.jam.JamSessionManager
 import com.synq.workers.SyncManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,9 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import javax.inject.Singleton
-
 import javax.inject.Provider
+import javax.inject.Singleton
 
 @Singleton
 class NetworkMonitor @Inject constructor(
@@ -40,29 +38,54 @@ class NetworkMonitor @Inject constructor(
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    fun startMonitoring() {
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
+    private fun hasValidInternetConnection(): Boolean {
+        val activeNetwork = connectivityManager?.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
 
-        connectivityManager?.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+    fun startMonitoring() {
+        connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 scope.launch {
                     val previouslyOffline = !_isOnline.value || wasOffline
                     _isOnline.value = true
+                    wasOffline = false
                     if (previouslyOffline) {
-                        wasOffline = false
-                        // On network restored: trigger library sync and jam reconnect
+                        // On network restored: trigger library sync
                         SyncManager.triggerOneTimeSync(context)
-                        jamSessionManagerProvider.get().onNetworkRestored()
                     }
+                    // On default-network change/restore (Wi-Fi <-> 4G), force socket to reconnect
+                    jamSessionManagerProvider.get().onNetworkRestored()
                 }
             }
 
             override fun onLost(network: Network) {
                 scope.launch {
-                    wasOffline = true
-                    _isOnline.value = false
+                    // Check if another validated network is still available before marking offline
+                    if (hasValidInternetConnection()) {
+                        _isOnline.value = true
+                        wasOffline = false
+                        jamSessionManagerProvider.get().onNetworkRestored()
+                    } else {
+                        wasOffline = true
+                        _isOnline.value = false
+                    }
+                }
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                scope.launch {
+                    if (hasInternet && !_isOnline.value) {
+                        _isOnline.value = true
+                        wasOffline = false
+                        SyncManager.triggerOneTimeSync(context)
+                        jamSessionManagerProvider.get().onNetworkRestored()
+                    }
                 }
             }
         })

@@ -75,6 +75,59 @@ fun JamScreen(
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
 
     var showIntroDialog by remember { mutableStateOf(false) }
+    val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
+    var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(jamState.isInJam, hasSeenBatteryTip) {
+        if (jamState.isInJam && !hasSeenBatteryTip && !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
+            showBatteryOptimizationDialog = true
+        }
+    }
+
+    if (showBatteryOptimizationDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                showBatteryOptimizationDialog = false
+            },
+            title = {
+                Text(
+                    text = "Smooth Background Jam",
+                    fontWeight = FontWeight.Bold,
+                    color = textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "To keep Jam sessions smoothly in sync when your phone is locked or another app is open, Synq works best with unrestricted battery usage.",
+                    color = textSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                        showBatteryOptimizationDialog = false
+                        BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
+                    }
+                ) {
+                    Text("Optimize", color = Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                        showBatteryOptimizationDialog = false
+                    }
+                ) {
+                    Text("Dismiss", color = textSecondary)
+                }
+            },
+            containerColor = cardBg
+        )
+    }
 
     if (showIntroDialog) {
         JamIntroDialog(

@@ -127,6 +127,8 @@ class JamSessionManager @Inject constructor(
                     }
                 } else if (consecutiveAuthRebuilds >= 3) {
                     _jamState.update { it.copy(error = "Authentication failed. Disconnected from Jam.") }
+                } else if (errMessage.isNotBlank()) {
+                    _jamState.update { it.copy(error = "Connection error: $errMessage") }
                 }
             }
 
@@ -216,9 +218,20 @@ class JamSessionManager @Inject constructor(
     }
 
     fun onNetworkRestored() {
-        if (_jamState.value.isInJam && socket?.connected() != true) {
-            socket?.connect()
+        if (_jamState.value.isInJam) {
+            scope.launch {
+                try {
+                    val freshToken = authRepository.getFreshAccessToken()
+                    initSocket(freshToken)
+                } catch (e: Exception) {
+                    _jamState.update { it.copy(error = "Network reconnect failed: ${e.message}") }
+                }
+            }
         }
+    }
+
+    fun clearError() {
+        _jamState.update { it.copy(error = null) }
     }
 
     fun createJam(userId: String, username: String, avatarUrl: String? = null) {

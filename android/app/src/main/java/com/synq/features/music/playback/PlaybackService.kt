@@ -22,6 +22,9 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var audioCacheProvider: AudioCacheProvider
 
+    @Inject
+    lateinit var jamSessionManagerProvider: javax.inject.Provider<com.synq.features.music.jam.JamSessionManager>
+
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
 
@@ -73,7 +76,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
-        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
+        val isInJam = try {
+            jamSessionManagerProvider.get().jamState.value.isInJam
+        } catch (_: Exception) {
+            false
+        }
+        if (!isInJam && (player == null || !player.playWhenReady || player.mediaItemCount == 0)) {
             stopSelf()
         }
     }

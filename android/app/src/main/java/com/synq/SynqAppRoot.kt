@@ -95,6 +95,13 @@ private fun MainAppContent(
     
     var showFullPlayer by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
+    LaunchedEffect(jamState.error) {
+        jamState.error?.let { err ->
+            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+            rootViewModel.clearJamError()
+        }
+    }
+
     LaunchedEffect(playbackState.error) {
         playbackState.error?.let { err ->
             android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()

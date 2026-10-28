@@ -61,274 +61,364 @@ function serializeSession(session: JamSession) {
   };
 }
 
+function safeHandler<T>(
+  socket: Socket,
+  eventName: string,
+  fn: (payload: T) => Promise<void> | void,
+  allowEmpty = false,
+) {
+  return async (payload: any) => {
+    try {
+      if (!allowEmpty && (!payload || typeof payload !== 'object')) {
+        socket.emit('jam:error', { message: 'Invalid payload' });
+        return;
+      }
+      await fn(payload as T);
+    } catch (err) {
+      logger.error({ err, event: eventName, socketId: socket.id }, 'Unhandled error in jam handler');
+      try {
+        socket.emit('jam:error', { message: 'Internal server error' });
+      } catch {
+        // ignore secondary emit failures
+      }
+    }
+  };
+}
+
 export function registerJamHandlers(io: Server, socket: Socket) {
   // ─── Create Jam Session ─────────────────────────────────────────────
-  socket.on('jam:create', (payload?: { avatarUrl?: string }) => {
-    try {
-      const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-      if (!authUser?.userId || !authUser?.username) {
-        socket.emit('jam:error', { message: 'Authentication required' });
-        return;
-      }
-      const userId = authUser.userId;
-      const username = authUser.username;
+  socket.on(
+    'jam:create',
+    safeHandler(
+      socket,
+      'jam:create',
+      async (payload?: { avatarUrl?: string }) => {
+        const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+        if (!authUser?.userId || !authUser?.username) {
+          socket.emit('jam:error', { message: 'Authentication required' });
+          return;
+        }
+        const userId = authUser.userId;
+        const username = authUser.username;
 
-      const code = generateRoomCode();
-      const hostUser: JamParticipant = {
-        socketId: socket.id,
-        userId,
-        username,
-        avatarUrl: payload?.avatarUrl,
-        isHost: true,
-      };
+        const code = generateRoomCode();
+        const hostUser: JamParticipant = {
+          socketId: socket.id,
+          userId,
+          username,
+          avatarUrl: typeof payload?.avatarUrl === 'string' ? payload.avatarUrl : undefined,
+          isHost: true,
+        };
 
-      const session: JamSession = {
-        code,
-        hostSocketId: socket.id,
-        hostUserId: hostUser.userId,
-        hostName: hostUser.username,
-        allowAttendeeReorder: false, // by default, only host can reorder
-        participants: new Map([[socket.id, hostUser]]),
-        currentSong: null,
-        isPlaying: false,
-        positionMs: 0,
-        lastSyncTimestamp: Date.now(),
-        queue: [],
-      };
+        const session: JamSession = {
+          code,
+          hostSocketId: socket.id,
+          hostUserId: hostUser.userId,
+          hostName: hostUser.username,
+          allowAttendeeReorder: false, // by default, only host can reorder
+          participants: new Map([[socket.id, hostUser]]),
+          currentSong: null,
+          isPlaying: false,
+          positionMs: 0,
+          lastSyncTimestamp: Date.now(),
+          queue: [],
+        };
 
-      activeSessions.set(code, session);
-      if (!socketToSessions.has(socket.id)) {
-        socketToSessions.set(socket.id, new Set());
-      }
-      socketToSessions.get(socket.id)!.add(code);
+        activeSessions.set(code, session);
+        if (!socketToSessions.has(socket.id)) {
+          socketToSessions.set(socket.id, new Set());
+        }
+        socketToSessions.get(socket.id)!.add(code);
 
-      const roomName = `jam:${code}`;
-      socket.join(roomName);
+        const roomName = `jam:${code}`;
+        socket.join(roomName);
 
-      logger.info({ code, host: hostUser.username }, 'Jam session created');
-      socket.emit('jam:created', { session: serializeSession(session) });
-    } catch (err) {
-      logger.error({ err }, 'Failed to create jam session');
-      socket.emit('jam:error', { message: 'Failed to create jam session' });
-    }
-  });
+        logger.info({ code, host: hostUser.username }, 'Jam session created');
+        socket.emit('jam:created', { session: serializeSession(session) });
+      },
+      true,
+    ),
+  );
 
   // ─── Join Jam Session ───────────────────────────────────────────────
-  socket.on('jam:join', (payload: { code: string; avatarUrl?: string }) => {
-    try {
-      const code = (payload.code || '').trim().toUpperCase();
-      const session = activeSessions.get(code);
+  socket.on(
+    'jam:join',
+    safeHandler(
+      socket,
+      'jam:join',
+      async (payload: { code: string; avatarUrl?: string }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) {
+          socket.emit('jam:error', { message: 'Invalid or expired room code' });
+          return;
+        }
+        const session = activeSessions.get(code);
 
-      if (!session) {
-        socket.emit('jam:error', { message: 'Invalid or expired room code' });
-        return;
-      }
+        if (!session) {
+          socket.emit('jam:error', { message: 'Invalid or expired room code' });
+          return;
+        }
 
-      const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-      if (!authUser?.userId || !authUser?.username) {
-        socket.emit('jam:error', { message: 'Authentication required' });
-        return;
-      }
-      const userId = authUser.userId;
-      const username = authUser.username;
+        const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+        if (!authUser?.userId || !authUser?.username) {
+          socket.emit('jam:error', { message: 'Authentication required' });
+          return;
+        }
+        const userId = authUser.userId;
+        const username = authUser.username;
 
-      // If user rejoins before disconnect grace timer fired, cancel the pending leave timer
-      const timerKey = `${code}:${userId}`;
-      const pendingTimer = disconnectTimers.get(timerKey);
-      if (pendingTimer) {
-        clearTimeout(pendingTimer);
-        disconnectTimers.delete(timerKey);
-      }
+        // If user rejoins before disconnect grace timer fired, cancel the pending leave timer
+        const timerKey = `${code}:${userId}`;
+        const pendingTimer = disconnectTimers.get(timerKey);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          disconnectTimers.delete(timerKey);
+        }
 
-      // Drop stale entries with the same userId to avoid duplicates
-      for (const [sId, p] of session.participants.entries()) {
-        if (p.userId === userId && sId !== socket.id) {
-          session.participants.delete(sId);
-          const oldSocketCodes = socketToSessions.get(sId);
-          if (oldSocketCodes) {
-            oldSocketCodes.delete(code);
-            if (oldSocketCodes.size === 0) {
-              socketToSessions.delete(sId);
+        // Drop stale entries with the same userId to avoid duplicates
+        for (const [sId, p] of session.participants.entries()) {
+          if (p.userId === userId && sId !== socket.id) {
+            session.participants.delete(sId);
+            const oldSocketCodes = socketToSessions.get(sId);
+            if (oldSocketCodes) {
+              oldSocketCodes.delete(code);
+              if (oldSocketCodes.size === 0) {
+                socketToSessions.delete(sId);
+              }
             }
           }
         }
-      }
 
-      const isHost = session.hostUserId === userId || session.hostSocketId === socket.id;
-      if (isHost) {
-        session.hostSocketId = socket.id;
-      }
+        const isHost = session.hostUserId === userId || session.hostSocketId === socket.id;
+        if (isHost) {
+          session.hostSocketId = socket.id;
+        }
 
-      const participant: JamParticipant = {
-        socketId: socket.id,
-        userId,
-        username,
-        avatarUrl: payload.avatarUrl,
-        isHost,
-      };
+        const participant: JamParticipant = {
+          socketId: socket.id,
+          userId,
+          username,
+          avatarUrl: typeof payload?.avatarUrl === 'string' ? payload.avatarUrl : undefined,
+          isHost,
+        };
 
-      session.participants.set(socket.id, participant);
-      if (!socketToSessions.has(socket.id)) {
-        socketToSessions.set(socket.id, new Set());
-      }
-      socketToSessions.get(socket.id)!.add(code);
+        session.participants.set(socket.id, participant);
+        if (!socketToSessions.has(socket.id)) {
+          socketToSessions.set(socket.id, new Set());
+        }
+        socketToSessions.get(socket.id)!.add(code);
 
-      const roomName = `jam:${code}`;
-      socket.join(roomName);
+        const roomName = `jam:${code}`;
+        socket.join(roomName);
 
-      logger.info({ code, user: participant.username }, 'User joined jam session');
+        logger.info({ code, user: participant.username }, 'User joined jam session');
 
-      // Send initial full session state to joiner
-      socket.emit('jam:joined', { session: serializeSession(session) });
+        // Send initial full session state to joiner
+        socket.emit('jam:joined', { session: serializeSession(session) });
 
-      // Broadcast participant list to all members in the room
-      io.to(roomName).emit('jam:participants_updated', {
-        participants: Array.from(session.participants.values()),
-      });
-    } catch (err) {
-      logger.error({ err }, 'Failed to join jam session');
-      socket.emit('jam:error', { message: 'Failed to join jam session' });
-    }
-  });
+        // Broadcast participant list to all members in the room
+        io.to(roomName).emit('jam:participants_updated', {
+          participants: Array.from(session.participants.values()),
+        });
+      },
+    ),
+  );
 
   // ─── Sync Playback (Host Only) ──────────────────────────────────────
-  socket.on('jam:sync_playback', (payload: { code: string; currentSong: any; isPlaying: boolean; positionMs: number }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const session = activeSessions.get(code);
-    if (!session) return;
+  socket.on(
+    'jam:sync_playback',
+    safeHandler(
+      socket,
+      'jam:sync_playback',
+      async (payload: { code: string; currentSong: any; isPlaying: boolean; positionMs: number }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const session = activeSessions.get(code);
+        if (!session) return;
 
-    // Only host can control/sync playback
-    if (session.hostSocketId !== socket.id) {
-      socket.emit('jam:error', { message: 'Only the host can control playback' });
-      return;
-    }
+        // Only host can control/sync playback
+        if (session.hostSocketId !== socket.id) {
+          socket.emit('jam:error', { message: 'Only the host can control playback' });
+          return;
+        }
 
-    session.currentSong = payload.currentSong ?? session.currentSong;
-    session.isPlaying = payload.isPlaying;
-    session.positionMs = payload.positionMs;
-    session.lastSyncTimestamp = Date.now();
+        session.currentSong = payload.currentSong ?? session.currentSong;
+        session.isPlaying = Boolean(payload.isPlaying);
+        session.positionMs =
+          typeof payload.positionMs === 'number' && Number.isFinite(payload.positionMs)
+            ? payload.positionMs
+            : 0;
+        session.lastSyncTimestamp = Date.now();
 
-    // Broadcast to attendees
-    socket.to(`jam:${code}`).emit('jam:playback_updated', {
-      currentSong: session.currentSong,
-      isPlaying: session.isPlaying,
-      positionMs: session.positionMs,
-      timestamp: session.lastSyncTimestamp,
-    });
-  });
+        // Broadcast to attendees
+        socket.to(`jam:${code}`).emit('jam:playback_updated', {
+          currentSong: session.currentSong,
+          isPlaying: session.isPlaying,
+          positionMs: session.positionMs,
+          timestamp: session.lastSyncTimestamp,
+        });
+      },
+    ),
+  );
 
   // ─── Add to Shared Queue (Any participant) ──────────────────────────
-  socket.on('jam:add_to_queue', (payload: { code: string; song: any }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const session = activeSessions.get(code);
-    if (!session || !payload.song) return;
+  socket.on(
+    'jam:add_to_queue',
+    safeHandler(
+      socket,
+      'jam:add_to_queue',
+      async (payload: { code: string; song: any }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const session = activeSessions.get(code);
+        if (!session || !payload?.song) return;
 
-    session.queue.push(payload.song);
-    logger.info({ code, song: payload.song.title }, 'Song added to jam queue');
+        session.queue.push(payload.song);
+        logger.info({ code, song: payload.song?.title }, 'Song added to jam queue');
 
-    io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
-  });
+        io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
+      },
+    ),
+  );
 
   // ─── Remove from Queue (Host or with permission) ────────────────────
-  socket.on('jam:remove_from_queue', (payload: { code: string; index: number }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const session = activeSessions.get(code);
-    if (!session) return;
+  socket.on(
+    'jam:remove_from_queue',
+    safeHandler(
+      socket,
+      'jam:remove_from_queue',
+      async (payload: { code: string; index: number }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const session = activeSessions.get(code);
+        if (!session) return;
 
-    const isHost = session.hostSocketId === socket.id;
-    if (!isHost && !session.allowAttendeeReorder) {
-      socket.emit('jam:error', { message: 'Only host can remove songs from queue' });
-      return;
-    }
+        const isHost = session.hostSocketId === socket.id;
+        if (!isHost && !session.allowAttendeeReorder) {
+          socket.emit('jam:error', { message: 'Only host can remove songs from queue' });
+          return;
+        }
 
-    if (payload.index >= 0 && payload.index < session.queue.length) {
-      session.queue.splice(payload.index, 1);
-      io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
-    }
-  });
+        const idx = typeof payload?.index === 'number' ? payload.index : -1;
+        if (idx >= 0 && idx < session.queue.length) {
+          session.queue.splice(idx, 1);
+          io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
+        }
+      },
+    ),
+  );
 
   // ─── Reorder Queue (Host only, or attendees if permitted) ───────────
-  socket.on('jam:reorder_queue', (payload: { code: string; fromIndex: number; toIndex: number }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const session = activeSessions.get(code);
-    if (!session) return;
+  socket.on(
+    'jam:reorder_queue',
+    safeHandler(
+      socket,
+      'jam:reorder_queue',
+      async (payload: { code: string; fromIndex: number; toIndex: number }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const session = activeSessions.get(code);
+        if (!session) return;
 
-    const isHost = session.hostSocketId === socket.id;
-    if (!isHost && !session.allowAttendeeReorder) {
-      socket.emit('jam:error', { message: 'Only the host can reorder the queue' });
-      return;
-    }
+        const isHost = session.hostSocketId === socket.id;
+        if (!isHost && !session.allowAttendeeReorder) {
+          socket.emit('jam:error', { message: 'Only the host can reorder the queue' });
+          return;
+        }
 
-    const { fromIndex, toIndex } = payload;
-    if (
-      fromIndex >= 0 &&
-      fromIndex < session.queue.length &&
-      toIndex >= 0 &&
-      toIndex < session.queue.length
-    ) {
-      const [moved] = session.queue.splice(fromIndex, 1);
-      session.queue.splice(toIndex, 0, moved);
-      io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
-    }
-  });
+        const fromIndex = typeof payload?.fromIndex === 'number' ? payload.fromIndex : -1;
+        const toIndex = typeof payload?.toIndex === 'number' ? payload.toIndex : -1;
+        if (
+          fromIndex >= 0 &&
+          fromIndex < session.queue.length &&
+          toIndex >= 0 &&
+          toIndex < session.queue.length
+        ) {
+          const [moved] = session.queue.splice(fromIndex, 1);
+          session.queue.splice(toIndex, 0, moved);
+          io.to(`jam:${code}`).emit('jam:queue_updated', { queue: session.queue });
+        }
+      },
+    ),
+  );
 
   // ─── Set Permissions (Host Only) ────────────────────────────────────
-  socket.on('jam:set_permissions', (payload: { code: string; allowAttendeeReorder: boolean }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const session = activeSessions.get(code);
-    if (!session || session.hostSocketId !== socket.id) return;
+  socket.on(
+    'jam:set_permissions',
+    safeHandler(
+      socket,
+      'jam:set_permissions',
+      async (payload: { code: string; allowAttendeeReorder: boolean }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const session = activeSessions.get(code);
+        if (!session || session.hostSocketId !== socket.id) return;
 
-    session.allowAttendeeReorder = payload.allowAttendeeReorder;
-    io.to(`jam:${code}`).emit('jam:permissions_updated', {
-      allowAttendeeReorder: session.allowAttendeeReorder,
-    });
-  });
+        session.allowAttendeeReorder = Boolean(payload?.allowAttendeeReorder);
+        io.to(`jam:${code}`).emit('jam:permissions_updated', {
+          allowAttendeeReorder: session.allowAttendeeReorder,
+        });
+      },
+    ),
+  );
 
   // ─── Leave Jam Session ──────────────────────────────────────────────
-  socket.on('jam:leave', (payload: { code: string }) => {
-    const code = (payload.code || '').trim().toUpperCase();
-    const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-    if (authUser?.userId) {
-      const timerKey = `${code}:${authUser.userId}`;
-      const pendingTimer = disconnectTimers.get(timerKey);
-      if (pendingTimer) {
-        clearTimeout(pendingTimer);
-        disconnectTimers.delete(timerKey);
-      }
-    }
-    handleUserLeave(io, socket, code);
-  });
+  socket.on(
+    'jam:leave',
+    safeHandler(
+      socket,
+      'jam:leave',
+      async (payload: { code: string }) => {
+        const code = typeof payload?.code === 'string' ? payload.code.trim().toUpperCase() : '';
+        if (!code) return;
+        const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+        if (authUser?.userId) {
+          const timerKey = `${code}:${authUser.userId}`;
+          const pendingTimer = disconnectTimers.get(timerKey);
+          if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            disconnectTimers.delete(timerKey);
+          }
+        }
+        handleUserLeave(io, socket, code);
+      },
+    ),
+  );
 
   // ─── Socket Disconnect cleanup ──────────────────────────────────────
   socket.on('disconnect', (reason: string) => {
-    const userCodes = socketToSessions.get(socket.id);
-    if (!userCodes) return;
-    const codes = Array.from(userCodes);
+    try {
+      const userCodes = socketToSessions.get(socket.id);
+      if (!userCodes) return;
+      const codes = Array.from(userCodes);
 
-    const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-    const isExplicit =
-      reason === 'client namespace disconnect' || reason === 'server namespace disconnect';
+      const authUser = socket.data?.user as { userId: string; username: string } | undefined;
+      const isExplicit =
+        reason === 'client namespace disconnect' || reason === 'server namespace disconnect';
 
-    for (const code of codes) {
-      if (isExplicit || !authUser?.userId) {
-        handleUserLeave(io, socket, code);
-      } else {
-        const timerKey = `${code}:${authUser.userId}`;
-        const existingTimer = disconnectTimers.get(timerKey);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-        }
-        const timer = setTimeout(() => {
-          disconnectTimers.delete(timerKey);
+      for (const code of codes) {
+        if (isExplicit || !authUser?.userId) {
           handleUserLeave(io, socket, code);
-        }, 30_000);
-        timer.unref();
-        disconnectTimers.set(timerKey, timer);
+        } else {
+          const timerKey = `${code}:${authUser.userId}`;
+          const existingTimer = disconnectTimers.get(timerKey);
+          if (existingTimer) {
+            clearTimeout(existingTimer);
+          }
+          const timer = setTimeout(() => {
+            disconnectTimers.delete(timerKey);
+            handleUserLeave(io, socket, code);
+          }, 30_000);
+          timer.unref();
+          disconnectTimers.set(timerKey, timer);
+        }
       }
-    }
 
-    if (isExplicit) {
-      socketToSessions.delete(socket.id);
+      if (isExplicit) {
+        socketToSessions.delete(socket.id);
+      }
+    } catch (err) {
+      logger.error({ err, socketId: socket.id }, 'Error during socket disconnect cleanup');
     }
   });
 }

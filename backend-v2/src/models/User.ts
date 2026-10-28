@@ -80,6 +80,7 @@ const userSchema = new Schema<IUser>(
 
 // ─── Indexes ──────────────────────────────────────────────────────────
 // unique: true on the schema already creates unique indexes for username and email
+userSchema.index({ 'refreshTokens.tokenHash': 1 });
 
 // ─── Pre-save: hash password ──────────────────────────────────────────
 userSchema.pre('save', async function (next) {

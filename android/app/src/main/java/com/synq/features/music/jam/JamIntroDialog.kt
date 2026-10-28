@@ -163,7 +163,7 @@ fun JamIntroDialog(
                 ) {
                     OutlinedTextField(
                         value = enterCode,
-                        onValueChange = { enterCode = it.take(6).uppercase() },
+                        onValueChange = { enterCode = it.take(4).uppercase() },
                         placeholder = {
                             Text(
                                 "Enter code",
