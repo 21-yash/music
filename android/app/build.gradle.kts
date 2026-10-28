@@ -15,7 +15,23 @@ val localProperties = Properties().apply {
         localPropertiesFile.inputStream().use { load(it) }
     }
 }
-val appApiKey = localProperties.getProperty("API_KEY") ?: ""
+
+val appApiKey: String = localProperties.getProperty("API_KEY")
+    ?: System.getenv("API_KEY")
+    ?: ""
+
+if (appApiKey.isBlank()) {
+    val isPackagingTask = gradle.startParameter.taskNames.any {
+        it.contains("assemble", ignoreCase = true) ||
+        it.contains("bundle", ignoreCase = true) ||
+        it.contains("install", ignoreCase = true)
+    }
+    if (isPackagingTask) {
+        throw GradleException("API_KEY is not set in local.properties or environment variables. All network requests will fail with 403 Forbidden.")
+    } else {
+        logger.warn("WARNING: API_KEY is empty in local.properties and environment variables.")
+    }
+}
 
 android {
     namespace = "com.synq"

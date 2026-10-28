@@ -21,17 +21,24 @@ class SportsSocketService @Inject constructor(
     private var socket: Socket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeMatches = mutableSetOf<String>()
-    private var isReconnecting = false
+    private var isConnecting = false
+    private var consecutiveAuthRebuilds = 0
+    private var reconnectJob: kotlinx.coroutines.Job? = null
 
     private val _matchUpdates = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val matchUpdates: SharedFlow<String> = _matchUpdates
 
     fun connect() {
-        if (socket?.connected() == true) return
+        if (socket?.connected() == true || isConnecting) return
+        isConnecting = true
 
         scope.launch {
-            val token = authRepository.getFreshAccessToken()
-            initSocket(token)
+            try {
+                val token = authRepository.getFreshAccessToken()
+                initSocket(token)
+            } finally {
+                isConnecting = false
+            }
         }
     }
 
@@ -57,7 +64,8 @@ class SportsSocketService @Inject constructor(
             socket = IO.socket(url, options)
 
             socket?.on(Socket.EVENT_CONNECT) {
-                isReconnecting = false
+                consecutiveAuthRebuilds = 0
+                isConnecting = false
                 // Re-join matches on connect/reconnect
                 for (matchId in activeMatches) {
                     val payload = JSONObject().apply { put("matchId", matchId) }
@@ -65,15 +73,24 @@ class SportsSocketService @Inject constructor(
                 }
             }
 
-            socket?.on(Socket.EVENT_CONNECT_ERROR) {
-                if (!isReconnecting) {
-                    isReconnecting = true
-                    scope.launch {
-                        val freshToken = authRepository.refreshToken()
-                        if (freshToken != null) {
-                            initSocket(freshToken)
-                        } else {
-                            isReconnecting = false
+            socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                isConnecting = false
+                val errMessage = (args.getOrNull(0) as? Throwable)?.message
+                    ?: args.getOrNull(0)?.toString().orEmpty()
+
+                val isTokenError = errMessage.contains("Invalid or expired authentication token", ignoreCase = true) ||
+                                   errMessage.contains("Authentication token required", ignoreCase = true) ||
+                                   errMessage.contains("jwt", ignoreCase = true)
+
+                // Only refresh & rebuild socket if the error indicates a token authentication problem
+                if (isTokenError && consecutiveAuthRebuilds < 3) {
+                    if (reconnectJob?.isActive != true) {
+                        reconnectJob = scope.launch {
+                            consecutiveAuthRebuilds++
+                            val freshToken = authRepository.refreshToken()
+                            if (freshToken != null) {
+                                initSocket(freshToken)
+                            }
                         }
                     }
                 }
@@ -93,7 +110,7 @@ class SportsSocketService @Inject constructor(
             socket?.connect()
         } catch (e: Exception) {
             e.printStackTrace()
-            isReconnecting = false
+            isConnecting = false
         }
     }
 
@@ -110,6 +127,10 @@ class SportsSocketService @Inject constructor(
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        isConnecting = false
+        consecutiveAuthRebuilds = 0
         activeMatches.clear()
         socket?.disconnect()
         socket?.off()

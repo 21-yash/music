@@ -40,7 +40,9 @@ class JamSessionManager @Inject constructor(
     private var socket: Socket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var syncJob: Job? = null
-    private var isReconnecting = false
+    private var isConnecting = false
+    private var consecutiveAuthRebuilds = 0
+    private var reconnectJob: Job? = null
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
 
@@ -56,9 +58,14 @@ class JamSessionManager @Inject constructor(
     }
 
     private suspend fun ensureSocketConnected() {
-        if (socket?.connected() == true) return
-        val token = authRepository.getFreshAccessToken()
-        initSocket(token)
+        if (socket?.connected() == true || isConnecting) return
+        isConnecting = true
+        try {
+            val token = authRepository.getFreshAccessToken()
+            initSocket(token)
+        } finally {
+            isConnecting = false
+        }
     }
 
     private fun initSocket(token: String?) {
@@ -83,7 +90,8 @@ class JamSessionManager @Inject constructor(
             socket = IO.socket(url, options)
 
             socket?.on(Socket.EVENT_CONNECT) {
-                isReconnecting = false
+                consecutiveAuthRebuilds = 0
+                isConnecting = false
                 val currentCode = _jamState.value.sessionCode
                 if (!currentCode.isNullOrBlank() && _jamState.value.isInJam) {
                     val payload = JSONObject().apply {
@@ -93,17 +101,28 @@ class JamSessionManager @Inject constructor(
                 }
             }
 
-            socket?.on(Socket.EVENT_CONNECT_ERROR) {
-                if (!isReconnecting) {
-                    isReconnecting = true
-                    scope.launch {
-                        val freshToken = authRepository.refreshToken()
-                        if (freshToken != null) {
-                            initSocket(freshToken)
-                        } else {
-                            isReconnecting = false
+            socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                isConnecting = false
+                val errMessage = (args.getOrNull(0) as? Throwable)?.message
+                    ?: args.getOrNull(0)?.toString().orEmpty()
+
+                val isTokenError = errMessage.contains("Invalid or expired authentication token", ignoreCase = true) ||
+                                   errMessage.contains("Authentication token required", ignoreCase = true) ||
+                                   errMessage.contains("jwt", ignoreCase = true)
+
+                // Only refresh & rebuild socket if the error indicates a token authentication problem
+                if (isTokenError && consecutiveAuthRebuilds < 3) {
+                    if (reconnectJob?.isActive != true) {
+                        reconnectJob = scope.launch {
+                            consecutiveAuthRebuilds++
+                            val freshToken = authRepository.refreshToken()
+                            if (freshToken != null) {
+                                initSocket(freshToken)
+                            }
                         }
                     }
+                } else if (consecutiveAuthRebuilds >= 3) {
+                    _jamState.update { it.copy(error = "Authentication failed. Disconnected from Jam.") }
                 }
             }
 
@@ -238,6 +257,10 @@ class JamSessionManager @Inject constructor(
         playerManager.restorePersonalQueue()
         playerManager.jamInterceptor = null
         _jamState.value = JamState()
+        reconnectJob?.cancel()
+        reconnectJob = null
+        isConnecting = false
+        consecutiveAuthRebuilds = 0
         socket?.disconnect()
         socket?.off()
         socket = null

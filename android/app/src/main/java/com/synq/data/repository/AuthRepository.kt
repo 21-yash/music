@@ -24,6 +24,7 @@ class AuthRepository @Inject constructor(
     private val authApi: AuthApi,
     private val tokenStorage: TokenStorage,
     private val appDatabase: AppDatabase,
+    private val tokenRefresher: com.synq.data.remote.TokenRefresher,
 ) {
     val isLoggedIn: Flow<Boolean> = tokenStorage.isLoggedIn
     val currentUserId: Flow<String?> = tokenStorage.userId
@@ -90,25 +91,14 @@ class AuthRepository @Inject constructor(
 
     suspend fun getFreshAccessToken(): String? {
         val currentToken = tokenStorage.getAccessTokenSync()
-        if (!currentToken.isNullOrBlank()) {
+        if (!currentToken.isNullOrBlank() && !com.synq.data.remote.JwtUtils.isExpiredOrNearExpiry(currentToken, 30L)) {
             return currentToken
         }
-        return refreshToken()
+        return tokenRefresher.refresh(currentToken)
     }
 
-    suspend fun refreshToken(): String? {
-        val refreshToken = tokenStorage.getRefreshTokenSync() ?: return null
-        val userId = tokenStorage.getUserIdSync() ?: return null
-        return try {
-            val response = authApi.refreshToken(RefreshTokenRequest(userId, refreshToken))
-            if (response.success && response.data != null) {
-                tokenStorage.saveTokens(response.data.accessToken, response.data.refreshToken, userId)
-                response.data.accessToken
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
-        }
+    suspend fun refreshToken(staleAccessToken: String? = null): String? {
+        return tokenRefresher.refresh(staleAccessToken)
     }
 }
+
