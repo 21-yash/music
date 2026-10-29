@@ -236,6 +236,10 @@ class RootViewModel @Inject constructor(
         jamSessionManager.leaveJam()
     }
 
+    fun endJam() {
+        jamSessionManager.endJam()
+    }
+
     fun addSongToJam(song: Song) {
         jamSessionManager.addSongToJam(song)
     }

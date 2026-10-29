@@ -1,13 +1,16 @@
 package com.synq.features.music.jam
 
-import com.synq.BuildConfig
-import com.synq.features.music.data.dto.AlbumRefDto
-import com.synq.features.music.data.dto.ArtistCreditDto
-import com.synq.features.music.data.dto.SongDto
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import com.synq.core.network.NetworkMonitor
+import com.synq.data.repository.AuthRepository
+import com.synq.features.music.domain.model.Artist
 import com.synq.features.music.domain.model.Song
+import com.synq.features.music.playback.JamPlaybackInterceptor
 import com.synq.features.music.playback.MusicPlayerManager
-import io.socket.client.IO
-import io.socket.client.Socket
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,18 +22,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.json.JSONArray
-import android.content.Context
-import android.widget.Toast
-import com.synq.features.music.playback.JamPlaybackInterceptor
-import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
-import com.synq.core.network.NetworkMonitor
-import javax.inject.Provider
-import com.synq.data.repository.AuthRepository
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
@@ -38,346 +33,568 @@ class JamSessionManager @Inject constructor(
     private val playerManager: MusicPlayerManager,
     private val authRepository: AuthRepository,
     private val networkMonitorProvider: Provider<NetworkMonitor>,
+    private val jamPreferences: JamPreferences,
     @ApplicationContext private val context: Context
 ) : JamPlaybackInterceptor {
-    private var socket: Socket? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var syncJob: Job? = null
-    private var isConnecting = false
-    private var consecutiveAuthRebuilds = 0
-    private var reconnectJob: Job? = null
-    private var networkRestoreJob: Job? = null
-    private var hasReportedConnectionError = false
 
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var myUserId: String = ""
+
+    val transport: JamTransport = SocketIoTransport(
+        baseUrl = com.synq.BuildConfig.API_BASE_URL,
+        apiKey = com.synq.BuildConfig.API_KEY
+    )
+    val clockSync: ClockSync = ClockSync()
+    val stateStore: JamStateStore = JamStateStore(myUserId)
+    val jamClient: JamClient = JamClient(
+        transport = transport,
+        clockSync = clockSync,
+        stateStore = stateStore,
+        tokenProvider = { authRepository.getFreshAccessToken() },
+        scope = scope
+    )
 
     private val _jamState = MutableStateFlow(JamState())
     val jamState: StateFlow<JamState> = _jamState.asStateFlow()
 
-    private var myUserId: String = ""
+    private var currentTrackSeq: Long = 0L
+    private var reconcilerJob: Job? = null
+    private var isReconciling = false
 
-    private fun connectSocket() {
+    companion object {
+        const val MAX_JAM_QUEUE_SIZE = 50
+    }
+
+    init {
+        // Observe transport events (server notifications)
         scope.launch {
-            ensureSocketConnected()
+            transport.events.collect { event ->
+                handleTransportEvent(event)
+            }
+        }
+
+        // Observe JamClient state transitions
+        scope.launch {
+            jamClient.clientState.collect { state ->
+                handleClientStateChange(state)
+            }
+        }
+
+        // Observe authoritative room snapshot and sync legacy JamState
+        scope.launch {
+            stateStore.room.collect { room ->
+                updateLegacyState(room, jamClient.clientState.value)
+            }
+        }
+
+        // Start reconciliation loop
+        startReconcilerLoop()
+    }
+
+    private fun handleTransportEvent(event: JamTransport.Event) {
+        when (event) {
+            is JamTransport.Event.JamEvent -> {
+                when (event.event.kind) {
+                    "member_joined" -> {
+                        showToast("${event.event.username} joined the Jam")
+                    }
+                    "member_left" -> {
+                        showToast("${event.event.username} left the Jam")
+                    }
+                    "host_changed" -> {
+                        showToast("${event.event.username} is now the host")
+                    }
+                    "kicked" -> {
+                        showToast("You were removed from the Jam session")
+                        teardownJam()
+                    }
+                    "server_restarting" -> {
+                        showToast("Server restarting, reconnecting...")
+                    }
+                    "perm_changed" -> {
+                        showToast("Your Jam permissions were updated")
+                    }
+                }
+            }
+
+            is JamTransport.Event.Closed -> {
+                val msg = when (event.reason) {
+                    "ended" -> "The host ended the Jam session."
+                    "kicked" -> "You were removed from the Jam session."
+                    "expired" -> "The Jam session expired."
+                    else -> "The Jam session was closed."
+                }
+                showToast(msg)
+                teardownJam()
+            }
+
+            else -> {}
         }
     }
 
-    private suspend fun ensureSocketConnected() {
-        if (socket?.connected() == true || isConnecting) return
-        isConnecting = true
-        try {
-            val token = authRepository.getFreshAccessToken()
-            initSocket(token)
-        } catch (e: Exception) {
-            isConnecting = false
-            throw e
+    private fun handleClientStateChange(state: JamClientState) {
+        when (state) {
+            is JamClientState.Active -> {
+                jamPreferences.saveLastJam(state.code)
+                playerManager.jamInterceptor = this
+                updateLegacyState(stateStore.room.value, state)
+            }
+
+            is JamClientState.Closed -> {
+                jamPreferences.clearLastJam()
+                showToast(state.message)
+                teardownJam()
+            }
+
+            is JamClientState.Reconnecting -> {
+                updateLegacyState(stateStore.room.value, state)
+            }
+
+            is JamClientState.Disconnected -> {
+                if (_jamState.value.isInJam && jamClient.clientState.value !is JamClientState.Reconnecting) {
+                    teardownJam()
+                }
+            }
+
+            else -> {
+                updateLegacyState(stateStore.room.value, state)
+            }
         }
     }
 
-    private fun initSocket(token: String?) {
-        try {
-            isConnecting = true
-            socket?.disconnect()
-            socket?.off()
+    private fun updateLegacyState(snapshot: RoomSnapshot?, clientState: JamClientState) {
+        val isInJam = clientState is JamClientState.Active ||
+                clientState is JamClientState.Reconnecting ||
+                clientState is JamClientState.Joining
 
-            val url = BuildConfig.API_BASE_URL.replace("/api/v1/", "")
-            val authMap = mutableMapOf<String, String>()
-            if (BuildConfig.API_KEY.isNotEmpty()) {
-                authMap["apiKey"] = BuildConfig.API_KEY
+        if (!isInJam || snapshot == null) {
+            val code = (clientState as? JamClientState.Joining)?.code
+                ?: (clientState as? JamClientState.Active)?.code
+                ?: (clientState as? JamClientState.Reconnecting)?.code
+
+            _jamState.update { prev ->
+                prev.copy(
+                    isInJam = isInJam,
+                    sessionCode = code ?: prev.sessionCode,
+                    participants = if (isInJam) prev.participants else emptyList(),
+                    queue = if (isInJam) prev.queue else emptyList()
+                )
             }
-            if (!token.isNullOrBlank()) {
-                authMap["token"] = token
-            }
-
-            val options = IO.Options.builder()
-                .setTransports(arrayOf("websocket"))
-                .setAuth(authMap)
-                .build()
-
-            socket = IO.socket(url, options)
-
-            socket?.on(Socket.EVENT_CONNECT) {
-                consecutiveAuthRebuilds = 0
-                isConnecting = false
-                hasReportedConnectionError = false
-                val currentCode = _jamState.value.sessionCode
-                if (!currentCode.isNullOrBlank() && _jamState.value.isInJam) {
-                    val payload = JSONObject().apply {
-                        put("code", currentCode.trim().uppercase())
-                    }
-                    socket?.emit("jam:join", payload)
-                }
-            }
-
-            socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
-                isConnecting = false
-                val errMessage = (args.getOrNull(0) as? Throwable)?.message
-                    ?: args.getOrNull(0)?.toString().orEmpty()
-
-                val isTokenError = errMessage.contains("Invalid or expired authentication token", ignoreCase = true) ||
-                                   errMessage.contains("Authentication token required", ignoreCase = true) ||
-                                   errMessage.contains("jwt", ignoreCase = true)
-
-                // Only refresh & rebuild socket if the error indicates a token authentication problem
-                if (isTokenError && consecutiveAuthRebuilds < 3) {
-                    if (reconnectJob?.isActive != true) {
-                        reconnectJob = scope.launch {
-                            consecutiveAuthRebuilds++
-                            // Pass thatToken (the token used by this socket connection attempt).
-                            // If another caller already refreshed while we were connecting, TokenRefresher
-                            // returns the updated token without another network call.
-                            // A null stale token short-circuits the refresher to return stored access token.
-                            val freshToken = authRepository.refreshToken(token)
-                            if (freshToken != null) {
-                                initSocket(freshToken)
-                            }
-                        }
-                    }
-                } else if (consecutiveAuthRebuilds >= 3) {
-                    _jamState.update { it.copy(error = "Authentication failed. Disconnected from Jam.") }
-                } else if (errMessage.isNotBlank()) {
-                    val isOnline = try { networkMonitorProvider.get().isOnline.value } catch (_: Exception) { true }
-                    if (isOnline && !hasReportedConnectionError) {
-                        hasReportedConnectionError = true
-                        _jamState.update { it.copy(error = "Connection error: $errMessage") }
-                    }
-                }
-            }
-
-            socket?.on("jam:created") { args ->
-                scope.launch {
-                    handleSessionPayload(args, isHostCreated = true)
-                }
-            }
-
-            socket?.on("jam:joined") { args ->
-                scope.launch {
-                    handleSessionPayload(args, isHostCreated = false)
-                }
-            }
-
-            socket?.on("jam:participants_updated") { args ->
-                scope.launch {
-                    if (args.isNotEmpty()) {
-                        val obj = args[0] as? JSONObject
-                        val array = obj?.optJSONArray("participants")
-                        if (array != null) {
-                            val participants = parseParticipants(array)
-                            _jamState.update { it.copy(participants = participants) }
-                        }
-                    }
-                }
-            }
-
-            socket?.on("jam:playback_updated") { args ->
-                scope.launch {
-                    if (!_jamState.value.isHost && args.isNotEmpty()) {
-                        handlePlaybackUpdateFromHost(args[0] as? JSONObject)
-                    }
-                }
-            }
-
-            socket?.on("jam:queue_updated") { args ->
-                scope.launch {
-                    if (args.isNotEmpty()) {
-                        val obj = args[0] as? JSONObject
-                        val array = obj?.optJSONArray("queue")
-                        if (array != null) {
-                            val newQueue = parseSongs(array)
-                            _jamState.update { it.copy(queue = newQueue) }
-                            if (_jamState.value.isInJam) {
-                                playerManager.setJamQueue(newQueue, playerManager.playbackState.value.currentSong)
-                            }
-                        }
-                    }
-                }
-            }
-
-            socket?.on("jam:permissions_updated") { args ->
-                scope.launch {
-                    if (args.isNotEmpty()) {
-                        val obj = args[0] as? JSONObject
-                        val allow = obj?.optBoolean("allowAttendeeReorder", false) ?: false
-                        _jamState.update { it.copy(allowAttendeeReorder = allow) }
-                    }
-                }
-            }
-
-            socket?.on("jam:host_changed") { args ->
-                scope.launch {
-                    if (args.isNotEmpty()) {
-                        val obj = args[0] as? JSONObject
-                        val hostId = obj?.optString("hostUserId") ?: ""
-                        val hostName = obj?.optString("hostName") ?: ""
-                        val amIHost = hostId == myUserId
-                        _jamState.update { it.copy(isHost = amIHost, hostUserId = hostId, hostName = hostName) }
-                    }
-                }
-            }
-
-            socket?.on("jam:error") { args ->
-                scope.launch {
-                    val msg = (args.firstOrNull() as? JSONObject)?.optString("message") ?: "Jam session error"
-                    _jamState.update { it.copy(error = msg) }
-                }
-            }
-
-            socket?.connect()
-        } catch (e: Exception) {
-            isConnecting = false
-            e.printStackTrace()
-            _jamState.update { it.copy(error = e.message) }
+            return
         }
+
+        val isHost = snapshot.hostUserId == myUserId
+        val hostMember = snapshot.members.firstOrNull { it.userId == snapshot.hostUserId }
+        val participants = snapshot.members.map { m ->
+            JamParticipantUi(
+                socketId = m.userId,
+                userId = m.userId,
+                username = m.username,
+                avatarUrl = m.avatarUrl,
+                isHost = m.userId == snapshot.hostUserId
+            )
+        }
+        val queueSongs = snapshot.queue.map { it.song }
+
+        _jamState.value = JamState(
+            isInJam = true,
+            sessionCode = snapshot.code,
+            isHost = isHost,
+            hostUserId = snapshot.hostUserId,
+            hostName = hostMember?.username ?: "",
+            allowAttendeeReorder = snapshot.defaults.queueManage,
+            participants = participants,
+            queue = queueSongs,
+            error = null
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Reconciler Loop (Pure Decision Engine -> Player Mirror)
+    // ─────────────────────────────────────────────────────────────
+
+    private fun startReconcilerLoop() {
+        reconcilerJob?.cancel()
+        reconcilerJob = scope.launch {
+            while (isActive) {
+                delay(1000L)
+                reconcilePlayback()
+            }
+        }
+
+        // Also trigger reconciliation whenever authoritative room updates
+        scope.launch {
+            stateStore.room.collect {
+                reconcilePlayback()
+            }
+        }
+    }
+
+    private fun reconcilePlayback() {
+        if (!_jamState.value.isInJam) return
+        val currentRoom = stateStore.room.value ?: return
+        if (isReconciling) return
+
+        try {
+            isReconciling = true
+            val playback = playerManager.playbackState.value
+            val localSpeed = playerManager.getPlaybackSpeed()
+
+            val localState = LocalPlayerState(
+                currentSongId = playback.currentSong?.id,
+                currentTrackSeq = currentTrackSeq,
+                currentPositionMs = playback.playbackPositionMs,
+                isPlaying = playback.isPlaying,
+                playbackSpeed = localSpeed
+            )
+
+            val action = JamReconciler.decide(localState, currentRoom, clockSync)
+            when (action) {
+                is ReconcilerAction.ChangeTrack -> {
+                    currentTrackSeq = action.trackSeq
+                    val recIds = currentRoom.queue.filter { it.recommended }.map { it.song.id }.toSet()
+                    playerManager.setJamQueue(
+                        jamQueue = currentRoom.queue.map { it.song },
+                        targetSong = action.song,
+                        recommendedIds = recIds
+                    )
+
+                    if (action.song != null) {
+                        playerManager.playJamSyncSong(
+                            song = action.song,
+                            initialPositionMs = action.positionMs,
+                            playWhenReady = action.playWhenReady
+                        )
+                        // Pre-cache upcoming track
+                        val nextSong = currentRoom.queue.firstOrNull()?.song
+                        if (nextSong != null) {
+                            playerManager.prefetchTrack(nextSong)
+                        }
+                    } else {
+                        playerManager.stop()
+                    }
+                }
+
+                is ReconcilerAction.SetPlayWhenReady -> {
+                    if (action.playWhenReady) {
+                        playerManager.play()
+                    } else {
+                        playerManager.pause()
+                    }
+                }
+
+                is ReconcilerAction.Seek -> {
+                    playerManager.seekTo(action.positionMs)
+                }
+
+                is ReconcilerAction.SpeedRamp -> {
+                    playerManager.setPlaybackSpeed(action.factor)
+                }
+
+                is ReconcilerAction.Nothing -> {
+                    val recIds = currentRoom.queue.filter { it.recommended }.map { it.song.id }.toSet()
+                    playerManager.setJamQueue(
+                        jamQueue = currentRoom.queue.map { it.song },
+                        targetSong = playback.currentSong,
+                        recommendedIds = recIds
+                    )
+                }
+            }
+        } finally {
+            isReconciling = false
+        }
+    }
+
+    private fun reportTrackEnded() {
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("trackSeq", currentTrackSeq)
+            }
+            jamClient.sendCommand("trackEnded", payload)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Public Session Controls
+    // ─────────────────────────────────────────────────────────────
+
+    fun createJam(userId: String, username: String, avatarUrl: String? = null) {
+        myUserId = userId
+        stateStore.setMyUserId(userId)
+        playerManager.jamInterceptor = this
+        playerManager.stashPersonalQueue()
+        _jamState.update { it.copy(isInJam = true, error = null) }
+
+        scope.launch {
+            val res = jamClient.createRoom(avatarUrl)
+            res.onFailure { err ->
+                showToast("Failed to create Jam: ${err.message}")
+                teardownJam()
+            }
+        }
+    }
+
+    fun joinJam(code: String, userId: String, username: String, avatarUrl: String? = null) {
+        myUserId = userId
+        stateStore.setMyUserId(userId)
+        val cleanCode = code.trim().uppercase()
+        playerManager.jamInterceptor = this
+        playerManager.stashPersonalQueue()
+        _jamState.update { it.copy(isInJam = true, sessionCode = cleanCode, error = null) }
+
+        scope.launch {
+            val res = jamClient.joinRoom(cleanCode, avatarUrl)
+            res.onFailure { err ->
+                showToast("Failed to join Jam: ${err.message}")
+                teardownJam()
+            }
+        }
+    }
+
+    fun leaveJam() {
+        jamPreferences.clearLastJam()
+        scope.launch {
+            jamClient.leaveRoom()
+        }
+        teardownJam()
+    }
+
+    fun endJam() {
+        jamPreferences.clearLastJam()
+        scope.launch {
+            jamClient.endRoom()
+        }
+        teardownJam()
+    }
+
+    private fun teardownJam() {
+        playerManager.jamInterceptor = null
+        playerManager.restorePersonalQueue()
+        playerManager.setPlaybackSpeed(1.0f)
+        _jamState.value = JamState()
+        currentTrackSeq = 0L
     }
 
     fun onNetworkRestored() {
         if (!_jamState.value.isInJam) return
-        networkRestoreJob?.cancel()
-        networkRestoreJob = scope.launch {
-            delay(1500L)
-            if (!_jamState.value.isInJam) return@launch
-            if (isConnecting) return@launch
-            if (socket?.connected() == true) return@launch
-
-            isConnecting = true
-            try {
-                val freshToken = authRepository.getFreshAccessToken()
-                initSocket(freshToken)
-            } catch (e: Exception) {
-                _jamState.update { it.copy(error = "Network reconnect failed: ${e.message}") }
-            } finally {
-                isConnecting = false
-            }
-        }
+        jamClient.onNetworkRestored()
     }
 
     fun clearError() {
         _jamState.update { it.copy(error = null) }
     }
 
-    fun createJam(userId: String, username: String, avatarUrl: String? = null) {
-        myUserId = userId
+    // ─────────────────────────────────────────────────────────────
+    // Transport & Playback API
+    // ─────────────────────────────────────────────────────────────
+
+    fun togglePlayPause() {
+        val room = stateStore.room.value ?: return
+        val isPlaying = room.nowPlaying.status == JamPlaybackStatus.PLAYING
         scope.launch {
-            ensureSocketConnected()
-            val payload = JSONObject().apply {
-                put("userId", userId)
-                put("username", username)
-                if (avatarUrl != null) put("avatarUrl", avatarUrl)
+            val cmd = if (isPlaying) "pause" else "play"
+            val res = jamClient.sendCommand(cmd)
+            res.onFailure { err ->
+                showToast(err.message ?: "Failed to change playback state")
             }
-            socket?.emit("jam:create", payload)
         }
     }
 
-    fun joinJam(code: String, userId: String, username: String, avatarUrl: String? = null) {
-        myUserId = userId
-        val cleanCode = code.trim().uppercase()
-        _jamState.update { it.copy(sessionCode = cleanCode) }
+    fun play() {
         scope.launch {
-            ensureSocketConnected()
-            val payload = JSONObject().apply {
-                put("code", cleanCode)
-                put("userId", userId)
-                put("username", username)
-                if (avatarUrl != null) put("avatarUrl", avatarUrl)
-            }
-            socket?.emit("jam:join", payload)
+            val res = jamClient.sendCommand("play")
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
         }
     }
 
-    fun leaveJam() {
-        networkRestoreJob?.cancel()
-        networkRestoreJob = null
-        hasReportedConnectionError = false
-        val code = _jamState.value.sessionCode
-        if (!code.isNullOrBlank()) {
-            val payload = JSONObject().apply { put("code", code) }
-            socket?.emit("jam:leave", payload)
+    fun pause() {
+        scope.launch {
+            val res = jamClient.sendCommand("pause")
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
         }
-
-        stopHostSync()
-        playerManager.restorePersonalQueue()
-        playerManager.jamInterceptor = null
-        _jamState.value = JamState()
-        reconnectJob?.cancel()
-        reconnectJob = null
-        isConnecting = false
-        consecutiveAuthRebuilds = 0
-        socket?.disconnect()
-        socket?.off()
-        socket = null
     }
 
-    companion object {
-        const val MAX_JAM_QUEUE_SIZE = 50
+    fun seekTo(positionMs: Long) {
+        scope.launch {
+            val payload = JSONObject().apply { put("positionMs", positionMs) }
+            val res = jamClient.sendCommand("seek", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
     }
 
-    fun addSongToJam(song: Song): Boolean {
-        if (_jamState.value.queue.size >= MAX_JAM_QUEUE_SIZE) {
+    fun nextTrack() {
+        scope.launch {
+            val res = jamClient.sendCommand("next")
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun previousTrack() {
+        scope.launch {
+            val res = jamClient.sendCommand("prev")
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun playQueueIndex(index: Int) {
+        val room = stateStore.room.value ?: return
+        val item = room.queue.getOrNull(index) ?: return
+        scope.launch {
+            val payload = JSONObject().apply { put("qid", item.qid) }
+            val res = jamClient.sendCommand("playItem", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun addSongToJam(song: Song, playNext: Boolean = false): Boolean {
+        val currentSize = stateStore.room.value?.queue?.size ?: _jamState.value.queue.size
+        if (currentSize >= MAX_JAM_QUEUE_SIZE) {
+            showToast("Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)")
             return false
         }
-        val code = _jamState.value.sessionCode ?: return false
-        try {
-            val dto = song.toDto()
-            val songJson = JSONObject(json.encodeToString(dto))
+        scope.launch {
             val payload = JSONObject().apply {
-                put("code", code)
-                put("song", songJson)
+                put("song", song.toJsonObject())
+                if (playNext) put("playNext", true)
             }
-            socket?.emit("jam:add_to_queue", payload)
-            return true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            return false
+            val res = jamClient.sendCommand("queueAdd", payload)
+            res.onFailure { err ->
+                showToast(err.message ?: "Failed to add song")
+            }
         }
+        return true
     }
 
     fun addSongsToJam(songs: List<Song>, limit: Int = 20): Int {
-        val code = _jamState.value.sessionCode ?: return 0
-        val currentSize = _jamState.value.queue.size
+        val currentSize = stateStore.room.value?.queue?.size ?: _jamState.value.queue.size
         val availableSlots = (MAX_JAM_QUEUE_SIZE - currentSize).coerceAtLeast(0)
-        val songsToAdd = songs.take(limit).take(availableSlots)
+        val toAdd = songs.take(limit).take(availableSlots)
+        if (toAdd.isEmpty()) return 0
 
-        songsToAdd.forEach { song ->
-            try {
-                val dto = song.toDto()
-                val songJson = JSONObject(json.encodeToString(dto))
-                val payload = JSONObject().apply {
-                    put("code", code)
-                    put("song", songJson)
-                }
-                socket?.emit("jam:add_to_queue", payload)
-            } catch (e: Exception) {
-                e.printStackTrace()
+        scope.launch {
+            val array = JSONArray()
+            toAdd.forEach { array.put(it.toJsonObject()) }
+            val payload = JSONObject().apply {
+                put("songs", array)
+            }
+            val res = jamClient.sendCommand("queueAddMany", payload)
+            res.onFailure { err ->
+                showToast(err.message ?: "Failed to add songs")
             }
         }
-        return songsToAdd.size
+        return toAdd.size
+    }
+
+    fun removeSongFromJam(index: Int) {
+        val room = stateStore.room.value ?: return
+        val item = room.queue.getOrNull(index) ?: return
+        scope.launch {
+            val payload = JSONObject().apply { put("qid", item.qid) }
+            val res = jamClient.sendCommand("queueRemove", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun reorderJamQueue(fromIndex: Int, toIndex: Int) {
+        val room = stateStore.room.value ?: return
+        val item = room.queue.getOrNull(fromIndex) ?: return
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("qid", item.qid)
+                put("toIndex", toIndex)
+            }
+            val res = jamClient.sendCommand("queueMove", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun promoteRecommended(qid: String) {
+        scope.launch {
+            val payload = JSONObject().apply { put("qid", qid) }
+            val res = jamClient.sendCommand("promote", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun setAttendeeReorderPermission(allow: Boolean) {
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("perms", JSONObject().apply {
+                    put("queueManage", allow)
+                })
+            }
+            val res = jamClient.sendCommand("setDefaults", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun setMemberPerms(targetUserId: String, perms: JamPermissions) {
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("userId", targetUserId)
+                put("perms", JSONObject().apply {
+                    put("playback", perms.playback)
+                    put("queueAdd", perms.queueAdd)
+                    put("queueManage", perms.queueManage)
+                })
+            }
+            val res = jamClient.sendCommand("setMemberPerms", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun kickMember(targetUserId: String) {
+        scope.launch {
+            val payload = JSONObject().apply { put("userId", targetUserId) }
+            val res = jamClient.sendCommand("kick", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    fun transferHost(targetUserId: String) {
+        scope.launch {
+            val payload = JSONObject().apply { put("userId", targetUserId) }
+            val res = jamClient.sendCommand("transferHost", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
+    private fun showToast(message: String) {
+        mainHandler.post {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // JamPlaybackInterceptor implementations
+    // JamPlaybackInterceptor implementations (Player Mirror Mode)
     // ─────────────────────────────────────────────────────────────
 
     override fun onPlaySong(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song)
-        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        val added = addSongToJam(song, playNext = true)
+        if (added) {
+            showToast("Added to Jam queue: ${song.title}")
+        }
         return true
     }
 
     override fun onPlayNext(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song)
-        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        val added = addSongToJam(song, playNext = true)
+        if (added) {
+            showToast("Added to Jam queue: ${song.title}")
+        }
         return true
     }
 
     override fun onAddToQueue(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song)
-        val msg = if (added) "Added to Jam queue: ${song.title}" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        val added = addSongToJam(song, playNext = false)
+        if (added) {
+            showToast("Added to Jam queue: ${song.title}")
+        }
         return true
     }
 
@@ -385,189 +602,87 @@ class JamSessionManager @Inject constructor(
         if (!_jamState.value.isInJam) return false
         val toAdd = songs.drop(startIndex).ifEmpty { songs }
         val count = addSongsToJam(toAdd, limit = 20)
-        val msg = if (count > 0) "Added top $count songs to Jam queue" else "Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)"
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        if (count > 0) {
+            showToast("Added top $count songs to Jam queue")
+        }
         return true
     }
 
-    override fun onStartArtistRadio(artist: com.synq.features.music.domain.model.Artist): Boolean {
+    override fun onStartArtistRadio(artist: Artist): Boolean {
         if (!_jamState.value.isInJam) return false
-        Toast.makeText(context, "Artist Radio is disabled during a Jam session", Toast.LENGTH_SHORT).show()
+        showToast("Artist Radio is disabled during a Jam session")
         return true
     }
 
-    fun removeSongFromJam(index: Int) {
-        val code = _jamState.value.sessionCode ?: return
-        val payload = JSONObject().apply {
-            put("code", code)
-            put("index", index)
-        }
-        socket?.emit("jam:remove_from_queue", payload)
+    override fun onTogglePlayPause(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        togglePlayPause()
+        return true
     }
 
-    fun reorderJamQueue(fromIndex: Int, toIndex: Int) {
-        val code = _jamState.value.sessionCode ?: return
-        val payload = JSONObject().apply {
-            put("code", code)
-            put("fromIndex", fromIndex)
-            put("toIndex", toIndex)
-        }
-        socket?.emit("jam:reorder_queue", payload)
+    override fun onPlay(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        play()
+        return true
     }
 
-    fun setAttendeeReorderPermission(allow: Boolean) {
-        val code = _jamState.value.sessionCode ?: return
-        if (!_jamState.value.isHost) return
-        val payload = JSONObject().apply {
-            put("code", code)
-            put("allowAttendeeReorder", allow)
-        }
-        socket?.emit("jam:set_permissions", payload)
+    override fun onPause(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        pause()
+        return true
     }
 
-    private fun handleSessionPayload(args: Array<Any>, isHostCreated: Boolean) {
-        if (args.isEmpty()) return
-        val root = args[0] as? JSONObject ?: return
-        val session = root.optJSONObject("session") ?: return
-
-        val code = session.optString("code")
-        val hostUserId = session.optString("hostUserId")
-        val hostName = session.optString("hostName")
-        val allowAttendeeReorder = session.optBoolean("allowAttendeeReorder", false)
-        val participants = parseParticipants(session.optJSONArray("participants"))
-        val queue = parseSongs(session.optJSONArray("queue"))
-
-        // Stash personal queue and activate jam playback interceptor when entering jam
-        playerManager.jamInterceptor = this
-        playerManager.stashPersonalQueue()
-
-        val isHost = isHostCreated || (hostUserId == myUserId)
-        _jamState.value = JamState(
-            isInJam = true,
-            sessionCode = code,
-            isHost = isHost,
-            hostUserId = hostUserId,
-            hostName = hostName,
-            allowAttendeeReorder = allowAttendeeReorder,
-            participants = participants,
-            queue = queue,
-            error = null
-        )
-
-        playerManager.setJamQueue(queue)
-
-        if (isHost) {
-            startHostSync(code)
-            val currentSong = playerManager.playbackState.value.currentSong
-            if (currentSong != null && queue.none { it.id == currentSong.id }) {
-                addSongToJam(currentSong)
-            }
-        }
+    override fun onSeekTo(positionMs: Long): Boolean {
+        if (!_jamState.value.isInJam) return false
+        seekTo(positionMs)
+        return true
     }
 
-    private fun handlePlaybackUpdateFromHost(obj: JSONObject?) {
-        if (obj == null) return
-        val songObj = obj.optJSONObject("currentSong")
-        val isPlaying = obj.optBoolean("isPlaying", false)
-        val positionMs = obj.optLong("positionMs", 0L)
-
-        val hostSong = songObj?.let {
-            try {
-                json.decodeFromString<SongDto>(it.toString()).toDomain()
-            } catch (_: Exception) { null }
-        }
-
-        val myPlayback = playerManager.playbackState.value
-        val isNewSong = hostSong != null && hostSong.id != myPlayback.currentSong?.id
-
-        if (isNewSong) {
-            playerManager.playJamSyncSong(hostSong, positionMs)
-        } else {
-            val drift = Math.abs(positionMs - myPlayback.playbackPositionMs)
-            if (drift > 1500) {
-                playerManager.seekTo(positionMs)
-            }
-        }
-
-        if (isPlaying != myPlayback.isPlaying) {
-            if (isPlaying) {
-                playerManager.play()
-            } else {
-                playerManager.pause()
-            }
-        }
+    override fun onSkipToNext(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        nextTrack()
+        return true
     }
 
-    private fun startHostSync(code: String) {
-        syncJob?.cancel()
-        syncJob = scope.launch {
-            while (isActive) {
-                delay(1500)
-                if (_jamState.value.isInJam && _jamState.value.isHost) {
-                    val state = playerManager.playbackState.value
-                    val payload = JSONObject().apply {
-                        put("code", code)
-                        if (state.currentSong != null) {
-                            put("currentSong", JSONObject(json.encodeToString(state.currentSong.toDto())))
-                        }
-                        put("isPlaying", state.isPlaying)
-                        put("positionMs", state.playbackPositionMs)
-                    }
-                    socket?.emit("jam:sync_playback", payload)
-                }
-            }
-        }
+    override fun onSkipToPrevious(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        previousTrack()
+        return true
     }
 
-    private fun stopHostSync() {
-        syncJob?.cancel()
-        syncJob = null
+    override fun onPlayQueueIndex(index: Int): Boolean {
+        if (!_jamState.value.isInJam) return false
+        playQueueIndex(index)
+        return true
     }
 
-    private fun parseParticipants(array: JSONArray?): List<JamParticipantUi> {
-        if (array == null) return emptyList()
-        val list = mutableListOf<JamParticipantUi>()
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            list.add(
-                JamParticipantUi(
-                    socketId = item.optString("socketId"),
-                    userId = item.optString("userId"),
-                    username = item.optString("username"),
-                    avatarUrl = item.optString("avatarUrl").takeIf { it.isNotEmpty() },
-                    isHost = item.optBoolean("isHost", false)
-                )
-            )
-        }
-        return list
+    override fun onRemoveFromQueue(index: Int): Boolean {
+        if (!_jamState.value.isInJam) return false
+        removeSongFromJam(index)
+        return true
     }
 
-    private fun parseSongs(array: JSONArray?): List<Song> {
-        if (array == null) return emptyList()
-        val list = mutableListOf<Song>()
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            try {
-                val dto = json.decodeFromString<SongDto>(item.toString())
-                list.add(dto.toDomain())
-            } catch (_: Exception) {}
-        }
-        return list
+    override fun onReorderQueue(fromIndex: Int, toIndex: Int): Boolean {
+        if (!_jamState.value.isInJam) return false
+        reorderJamQueue(fromIndex, toIndex)
+        return true
     }
 
-    private fun Song.toDto(): SongDto = SongDto(
-        id = id,
-        title = title,
-        artists = artists.map { ArtistCreditDto(it.id, it.name, it.imageUrl) },
-        album = album?.let { AlbumRefDto(it.id, it.title, it.imageUrl) },
-        duration = durationSeconds,
-        imageUrl = imageUrl,
-        year = year,
-        language = language,
-        hasLyrics = hasLyrics,
-        playCount = playCount,
-        label = label,
-        streamRef = streamRef,
-        providerId = providerId
-    )
+    override fun onToggleShuffle(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        showToast("Shuffle is managed by the Jam session")
+        return true
+    }
+
+    override fun onToggleRepeat(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        showToast("Repeat is disabled during a Jam session")
+        return true
+    }
+
+    override fun onTrackEnded(): Boolean {
+        if (!_jamState.value.isInJam) return false
+        reportTrackEnded()
+        return true
+    }
 }

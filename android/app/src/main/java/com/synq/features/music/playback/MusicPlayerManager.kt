@@ -41,6 +41,19 @@ interface JamPlaybackInterceptor {
     fun onAddToQueue(song: Song): Boolean
     fun onPlayQueue(songs: List<Song>, startIndex: Int): Boolean
     fun onStartArtistRadio(artist: Artist): Boolean
+
+    fun onTogglePlayPause(): Boolean = false
+    fun onPlay(): Boolean = false
+    fun onPause(): Boolean = false
+    fun onSeekTo(positionMs: Long): Boolean = false
+    fun onSkipToNext(): Boolean = false
+    fun onSkipToPrevious(): Boolean = false
+    fun onPlayQueueIndex(index: Int): Boolean = false
+    fun onRemoveFromQueue(index: Int): Boolean = false
+    fun onReorderQueue(fromIndex: Int, toIndex: Int): Boolean = false
+    fun onToggleShuffle(): Boolean = false
+    fun onToggleRepeat(): Boolean = false
+    fun onTrackEnded(): Boolean = false
 }
 
 @Singleton
@@ -263,7 +276,7 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L) {
+    private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         // If this song was part of recommended songs, push it above the separator
         if (song.id in _recommendedSongIds.value) {
             _recommendedSongIds.update { recs ->
@@ -284,7 +297,7 @@ class MusicPlayerManager @Inject constructor(
             it.copy(
                 currentSong = song, 
                 error = null, 
-                isPlaying = true,
+                isPlaying = playWhenReady,
                 playbackPositionMs = initialPositionMs,
                 bufferedPositionMs = 0L
             ) 
@@ -305,7 +318,7 @@ class MusicPlayerManager @Inject constructor(
 
             if (isCached) {
                 val streamUri = cachedStreamUri ?: "https://audio.cache/${song.id}.mp4"
-                playMediaUri(song, streamUri, initialPositionMs)
+                playMediaUri(song, streamUri, initialPositionMs, playWhenReady)
                 return@launch
             }
 
@@ -353,7 +366,7 @@ class MusicPlayerManager @Inject constructor(
                 streamCacheStorage.saveStreamUri(song.id, finalUri)
 
                 // 6. Play media item
-                playMediaUri(song, finalUri, initialPositionMs)
+                playMediaUri(song, finalUri, initialPositionMs, playWhenReady)
 
             } catch (e: Exception) {
                 if (!networkMonitor.isOnline.value) {
@@ -384,7 +397,7 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L) {
+    private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.primaryArtistName)
@@ -412,10 +425,16 @@ class MusicPlayerManager @Inject constructor(
                 seekTo(initialPositionMs)
             }
             prepare()
-            play()
+            if (playWhenReady) {
+                play()
+            } else {
+                pause()
+            }
         }
 
-        startPositionTracking()
+        if (playWhenReady) {
+            startPositionTracking()
+        }
     }
 
     private fun fetchLyrics(song: Song) {
@@ -449,6 +468,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun prefetchAutoplayRecommendations(seedSong: Song) {
+        if (jamInterceptor != null) return // Server owns recommendations during Jam
         if (activeRadioArtist != null) return // Never add third-party songs during Artist Radio
         if (isFetchingRecommendations) return
         isFetchingRecommendations = true
@@ -504,6 +524,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun togglePlayPause() {
+        if (jamInterceptor?.onTogglePlayPause() == true) return
         controller?.let {
             if (it.isPlaying) {
                 it.pause()
@@ -516,6 +537,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun play() {
+        if (jamInterceptor?.onPlay() == true) return
         controller?.let {
             if (!it.isPlaying) {
                 it.play()
@@ -525,6 +547,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun pause() {
+        if (jamInterceptor?.onPause() == true) return
         controller?.pause()
         stopPositionTracking()
     }
@@ -545,6 +568,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun seekTo(positionMs: Long) {
+        if (jamInterceptor?.onSeekTo(positionMs) == true) return
         controller?.seekTo(positionMs)
         _playbackState.update { it.copy(playbackPositionMs = positionMs) }
     }
@@ -559,6 +583,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun skipToNext() {
+        if (jamInterceptor?.onSkipToNext() == true) return
         if (_isRepeatOne.value) {
             seekTo(0)
             controller?.play()
@@ -664,6 +689,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun skipToPrevious() {
+        if (jamInterceptor?.onSkipToPrevious() == true) return
         val currentPos = controller?.currentPosition ?: 0L
         if (currentPos > 3000L) {
             seekTo(0)
@@ -718,6 +744,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun playQueueIndex(index: Int) {
+        if (jamInterceptor?.onPlayQueueIndex(index) == true) return
         val q = _queue.value
         if (index in q.indices) {
             _currentIndex.value = index
@@ -779,6 +806,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun removeQueueItem(index: Int) {
+        if (jamInterceptor?.onRemoveFromQueue(index) == true) return
         val list = _queue.value.toMutableList()
         if (index !in list.indices) return
         val removed = list.removeAt(index)
@@ -794,6 +822,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        if (jamInterceptor?.onReorderQueue(fromIndex, toIndex) == true) return
         val list = _queue.value.toMutableList()
         if (fromIndex !in list.indices || toIndex !in list.indices || fromIndex == toIndex) return
         val item = list.removeAt(fromIndex)
@@ -812,10 +841,12 @@ class MusicPlayerManager @Inject constructor(
 
     // Binary repeat mode: OFF vs ON
     fun toggleRepeat() {
+        if (jamInterceptor?.onToggleRepeat() == true) return
         _isRepeatOne.update { !it }
     }
 
     fun toggleShuffle() {
+        if (jamInterceptor?.onToggleShuffle() == true) return
         val willBeShuffle = !_isShuffle.value
         _isShuffle.value = willBeShuffle
 
@@ -892,8 +923,9 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun setJamQueue(jamQueue: List<Song>, targetSong: Song? = null) {
+    fun setJamQueue(jamQueue: List<Song>, targetSong: Song? = null, recommendedIds: Set<String> = emptySet()) {
         _queue.value = jamQueue
+        _recommendedSongIds.value = recommendedIds
         if (targetSong != null) {
             val idx = jamQueue.indexOfFirst { it.id == targetSong.id }
             if (idx >= 0) {
@@ -902,17 +934,43 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun playJamSyncSong(song: Song, initialPositionMs: Long = 0L) {
+    fun playJamSyncSong(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         activeRadioArtist = null
         sourcePlaylist = null
         nextSourceIndex = 0
-        _recommendedSongIds.value = emptySet()
         sessionPlayedIds.add(song.id)
         val idx = _queue.value.indexOfFirst { it.id == song.id }
         if (idx >= 0) {
             _currentIndex.value = idx
         }
-        loadAndPlay(song, initialPositionMs)
+        loadAndPlay(song, initialPositionMs, playWhenReady)
+    }
+
+    fun prefetchTrack(song: Song) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (audioCacheProvider.isSongCached(song.id)) return@launch
+                val streamResult = repository.resolveStream(song.id, song.providerId)
+                if (streamResult is AppResult.Success) {
+                    val finalUri = when (val info = streamResult.data) {
+                        is StreamInfo.JioSaavn -> info.url
+                        is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
+                        is StreamInfo.None -> null
+                    }
+                    if (!finalUri.isNullOrBlank()) {
+                        streamCacheStorage.saveStreamUri(song.id, finalUri)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        controller?.setPlaybackSpeed(speed)
+    }
+
+    fun getPlaybackSpeed(): Float {
+        return controller?.playbackParameters?.speed ?: 1.0f
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -970,6 +1028,9 @@ class MusicPlayerManager @Inject constructor(
                 if (listener != null) {
                     onTrackEndedListener = null
                     listener.invoke()
+                    return
+                }
+                if (jamInterceptor?.onTrackEnded() == true) {
                     return
                 }
                 if (_isRepeatOne.value) {

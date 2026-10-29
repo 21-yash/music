@@ -60,6 +60,33 @@ class PlaybackService : MediaSessionService() {
                 }.toMutableList()
                 return com.google.common.util.concurrent.Futures.immediateFuture(updatedItems)
             }
+
+            override fun onPlayerCommandRequest(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                playerCommand: Int
+            ): Int {
+                val jamManager = jamSessionManagerProvider.get()
+                if (jamManager.jamState.value.isInJam) {
+                    when (playerCommand) {
+                        androidx.media3.common.Player.COMMAND_PLAY_PAUSE -> {
+                            jamManager.togglePlayPause()
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT,
+                        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
+                            jamManager.nextTrack()
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS,
+                        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
+                            jamManager.previousTrack()
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                    }
+                }
+                return super.onPlayerCommandRequest(session, controller, playerCommand)
+            }
         }
 
         mediaSession = MediaSession.Builder(this, player!!)

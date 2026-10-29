@@ -270,6 +270,12 @@ class JamClient(
         _clientState.value = JamClientState.Closed(reason, userMessage)
     }
 
+    fun onNetworkRestored() {
+        val code = activeRoomCode ?: return
+        if (_clientState.value !is JamClientState.Active && _clientState.value !is JamClientState.Reconnecting) return
+        scheduleReconnect(code, attempt = 1)
+    }
+
     private fun handleConnectionLoss() {
         val code = activeRoomCode ?: return
         if (_clientState.value is JamClientState.Closed) return

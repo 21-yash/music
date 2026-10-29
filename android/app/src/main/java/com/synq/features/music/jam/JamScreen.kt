@@ -75,13 +75,60 @@ fun JamScreen(
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
 
     var showIntroDialog by remember { mutableStateOf(false) }
+    var showConfirmEndDialog by remember { mutableStateOf(false) }
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(jamState.error) {
+        jamState.error?.let { err ->
+            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+            rootViewModel.clearJamError()
+        }
+    }
 
     LaunchedEffect(jamState.isInJam, hasSeenBatteryTip) {
         if (jamState.isInJam && !hasSeenBatteryTip && !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
             showBatteryOptimizationDialog = true
         }
+    }
+
+    if (showConfirmEndDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmEndDialog = false },
+            title = {
+                Text(
+                    text = "End Jam Session?",
+                    fontWeight = FontWeight.Bold,
+                    color = textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "This will end the session and stop playback for all listeners.",
+                    color = textSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmEndDialog = false
+                        rootViewModel.endJam()
+                        onBackClick()
+                    }
+                ) {
+                    Text("End Jam", color = Danger, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showConfirmEndDialog = false }
+                ) {
+                    Text("Cancel", color = textSecondary)
+                }
+            },
+            containerColor = cardBg
+        )
     }
 
     if (showBatteryOptimizationDialog) {
@@ -477,13 +524,15 @@ fun JamScreen(
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    // Leave / End Jam Button
+                    // Leave / End Jam Buttons
                     val pill = RoundedCornerShape(100.dp)
+
+                    // Leave Button (available to both host and guest)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(pill)
-                            .border(1.dp, Danger.copy(alpha = 0.6f), pill)   // outline only, no tinted fill
+                            .border(1.dp, if (jamState.isHost) textSecondary.copy(alpha = 0.4f) else Danger.copy(alpha = 0.6f), pill)
                             .clickable {
                                 rootViewModel.leaveJam()
                                 onBackClick()
@@ -495,16 +544,47 @@ fun JamScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                             contentDescription = null,
-                            tint = Danger,
+                            tint = if (jamState.isHost) textPrimary else Danger,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (jamState.isHost) "End Jam Session" else "Leave Jam Session",
+                            text = "Leave Jam Session",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Danger
+                            color = if (jamState.isHost) textPrimary else Danger
                         )
+                    }
+
+                    // Host-Only: End Jam Session for all
+                    if (jamState.isHost) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(pill)
+                                .border(1.dp, Danger.copy(alpha = 0.6f), pill)
+                                .clickable {
+                                    showConfirmEndDialog = true
+                                }
+                                .padding(vertical = 14.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                tint = Danger,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "End Jam for Everyone",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Danger
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(if (playbackState.currentSong != null) 92.dp else 24.dp))
