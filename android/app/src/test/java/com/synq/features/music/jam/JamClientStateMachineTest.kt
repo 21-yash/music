@@ -175,44 +175,77 @@ class JamClientStateMachineTest {
         val state = client.clientState.value
         assertTrue(state is JamClientState.Closed)
         assertEquals("ended", (state as JamClientState.Closed).reason)
-        assertEquals("The host ended the Jam session.", state.message)
+        assertEquals("This Jam has ended.", state.message)
     }
 
     @Test
-    fun `buffers commands when Reconnecting and drops expired commands on replay`() = runTest {
+    fun `when not ACTIVE sendCommand fails fast with error Reconnecting try again`() = runTest {
         val client = createClient()
         tokenToProvide = "valid_token"
-        transport.nextEmitResult = Result.success(makeRoomJson("BUFF", "user_me"))
+        transport.nextEmitResult = Result.success(makeRoomJson("FAST", "user_me"))
 
         client.createRoom()
         runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
 
-        // Disconnect to trigger Reconnecting
+        // Drop connection to enter Reconnecting
         transport.emitEvent(JamTransport.Event.Disconnected("network drop"))
         runCurrent()
-
         assertTrue(client.clientState.value is JamClientState.Reconnecting)
 
-        // Queue command 1 at t = 1000ms
-        currentTime = 1000L
-        client.sendCommand("play")
+        // Send command while Reconnecting -> must fail fast with specific message
+        val res = client.sendCommand("play")
+        assertTrue(res.isFailure)
+        assertEquals("Reconnecting… try again", res.exceptionOrNull()?.message)
+    }
 
-        // Advance time by 20s (command 1 now expired: 21000 - 1000 = 20000 > 15000ms TTL)
-        currentTime = 21000L
-        // Queue command 2 at t = 21000ms (fresh)
-        client.sendCommand("pause")
+    @Test
+    fun `on rejoin NOT_FOUND retries up to 4 times 2s apart before declaring room ended`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RETRY", "user_me"))
 
-        // Simulate reconnect and successful rejoin
-        transport.nextEmitResult = Result.success(makeRoomJson("BUFF", "user_me"))
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Disconnect
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        // Reconnect socket successfully, but jam2:join fails with NOT_FOUND
+        transport.nextEmitResult = Result.failure(JamProtocolException("NOT_FOUND", "Room not found"))
         transport.emitEvent(JamTransport.Event.Connected)
         runCurrent()
 
-        // Check emitted commands: "play" should have been dropped because TTL expired,
-        // and only "pause" should have been replayed!
-        val cmdEmits = transport.emittedEvents.filter { it.first == "jam2:cmd" }
-        assertEquals(1, cmdEmits.size)
-        val payload = cmdEmits[0].second as JSONObject
-        assertEquals("pause", payload.getString("type"))
+        // Attempt 1 fails with NOT_FOUND, should schedule retry after 2s (still reconnecting)
+        assertTrue("Still reconnecting after attempt 1 NOT_FOUND", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance 2s: Attempt 2
+        advanceTimeBy(2050L)
+        runCurrent()
+        assertTrue("Still reconnecting after attempt 2 NOT_FOUND", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance 2s: Attempt 3
+        advanceTimeBy(2050L)
+        runCurrent()
+        assertTrue("Still reconnecting after attempt 3 NOT_FOUND", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance 2s: Attempt 4
+        advanceTimeBy(2050L)
+        runCurrent()
+        assertTrue("Still reconnecting after attempt 4 NOT_FOUND", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance 2s: Attempt 5 (exceeds 4 retries) -> must declare room Closed("ended", "This Jam has ended")
+        advanceTimeBy(2050L)
+        runCurrent()
+
+        val state = client.clientState.value
+        assertTrue("State must be Closed after 4 retries", state is JamClientState.Closed)
+        val closed = state as JamClientState.Closed
+        assertEquals("ended", closed.reason)
+        assertTrue(closed.message.contains("This Jam has ended") || closed.message.contains("ended"))
     }
 
     @Test

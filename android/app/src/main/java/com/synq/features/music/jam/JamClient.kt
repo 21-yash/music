@@ -13,14 +13,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.LinkedList
 import kotlin.random.Random
-
-data class BufferedCommand(
-    val type: String,
-    val payload: JSONObject,
-    val queuedAt: Long
-)
 
 class JamClient(
     private val transport: JamTransport,
@@ -44,10 +37,8 @@ class JamClient(
     private var reconnectJob: Job? = null
     private var clockSyncJob: Job? = null
     private var eventListenerJob: Job? = null
-
-    private val commandQueue = LinkedList<BufferedCommand>()
-    private val maxQueueCapacity = 10
-    private val commandTtlMs = 15_000L
+    private var notFoundRetryJob: Job? = null
+    private var notFoundRetryCount = 0
 
     init {
         startEventListener()
@@ -65,6 +56,9 @@ class JamClient(
     private fun handleTransportEvent(event: JamTransport.Event) {
         when (event) {
             is JamTransport.Event.Connected -> {
+                reconnectJob?.cancel()
+                reconnectJob = null
+
                 if (autoClockSync) {
                     // Trigger clock sync immediately
                     scope.launch(ioDispatcher) {
@@ -198,22 +192,15 @@ class JamClient(
      * Sends a command to the room. If currently reconnecting, buffers the command with a 15s TTL.
      */
     suspend fun sendCommand(type: String, params: JSONObject = JSONObject()): Result<Long> {
+        val currentState = _clientState.value
+        if (currentState !is JamClientState.Active) {
+            return Result.failure(IllegalStateException("Reconnecting… try again"))
+        }
+
         val code = activeRoomCode ?: return Result.failure(IllegalStateException("Not in a room"))
         val cmdPayload = JSONObject(params.toString()).apply {
             put("code", code)
             put("type", type)
-        }
-
-        // If reconnecting, buffer command up to capacity with 15s TTL
-        val currentState = _clientState.value
-        if (currentState is JamClientState.Reconnecting) {
-            synchronized(commandQueue) {
-                if (commandQueue.size >= maxQueueCapacity) {
-                    commandQueue.pollFirst()
-                }
-                commandQueue.addLast(BufferedCommand(type, cmdPayload, wallClockNowMs()))
-            }
-            return Result.success(-1L)
         }
 
         val res = transport.emit("jam2:cmd", cmdPayload)
@@ -262,7 +249,7 @@ class JamClient(
 
         val userMessage = when (reason) {
             "kicked" -> "You were removed from the Jam session."
-            "ended" -> "The host ended the Jam session."
+            "ended" -> "This Jam has ended."
             "expired" -> "The Jam session expired due to inactivity."
             else -> "The Jam session was closed ($reason)."
         }
@@ -288,8 +275,8 @@ class JamClient(
     private fun scheduleReconnect(code: String, attempt: Int) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch(ioDispatcher) {
-            // Infinite exponential backoff with jitter: initial 1s, max 30s
-            val baseDelay = minOf(30_000L, 1000L * (1L shl minOf(attempt - 1, 5)))
+            // Reconnect backoff: 1–5 s with jitter
+            val baseDelay = minOf(5000L, 1000L * (1L shl minOf(attempt - 1, 2)))
             val jitter = Random.nextLong(0, 500)
             delay(baseDelay + jitter)
 
@@ -323,33 +310,31 @@ class JamClient(
             stateStore.applySnapshot(snapshot, isEpoch = true)
             val role = if (snapshot.hostUserId == stateStore.uiState.value.myUserId) JamRole.HOST else JamRole.GUEST
             _clientState.value = JamClientState.Active(code, role)
-
-            // Replay buffered commands that haven't expired
-            replayBufferedCommands()
+            notFoundRetryCount = 0
+            notFoundRetryJob?.cancel()
+            notFoundRetryJob = null
         }.onFailure { err ->
-            if (err is JamProtocolException && (err.code == "NOT_FOUND" || err.code == "FORBIDDEN")) {
-                handleServerClosed(err.code.lowercase())
+            if (err is JamProtocolException && err.code == "NOT_FOUND") {
+                if (notFoundRetryCount < 4) {
+                    notFoundRetryCount++
+                    notFoundRetryJob?.cancel()
+                    notFoundRetryJob = scope.launch(ioDispatcher) {
+                        delay(2000L)
+                        if (isActive && _clientState.value is JamClientState.Reconnecting) {
+                            rejoinAfterReconnect(code)
+                        }
+                    }
+                } else {
+                    notFoundRetryCount = 0
+                    handleServerClosed("ended")
+                }
+            } else if (err is JamProtocolException && err.code == "FORBIDDEN") {
+                notFoundRetryCount = 0
+                handleServerClosed("kicked")
             } else {
                 val currentAttempt = (_clientState.value as? JamClientState.Reconnecting)?.attempt ?: 1
                 scheduleReconnect(code, currentAttempt + 1)
             }
-        }
-    }
-
-    private suspend fun replayBufferedCommands() {
-        val now = wallClockNowMs()
-        val toReplay = mutableListOf<BufferedCommand>()
-        synchronized(commandQueue) {
-            while (commandQueue.isNotEmpty()) {
-                val cmd = commandQueue.pollFirst() ?: break
-                if (now - cmd.queuedAt <= commandTtlMs) {
-                    toReplay.add(cmd)
-                }
-            }
-        }
-
-        for (cmd in toReplay) {
-            transport.emit("jam2:cmd", cmd.payload)
         }
     }
 
@@ -386,12 +371,12 @@ class JamClient(
     private fun stopAll() {
         reconnectJob?.cancel()
         reconnectJob = null
+        notFoundRetryJob?.cancel()
+        notFoundRetryJob = null
+        notFoundRetryCount = 0
         clockSyncJob?.cancel()
         clockSyncJob = null
         clockSync.reset()
-        synchronized(commandQueue) {
-            commandQueue.clear()
-        }
     }
 
     fun destroy() {
