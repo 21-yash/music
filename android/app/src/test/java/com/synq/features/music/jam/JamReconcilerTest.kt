@@ -109,70 +109,79 @@ class JamReconcilerTest {
         assertEquals(6000L, (action as ReconcilerAction.Seek).positionMs)
     }
 
-    @Test
-    fun `returns SpeedRamp 0_98 when local is ahead between 300ms and 2000ms`() {
-        val local = LocalPlayerState(
-            currentSongId = "song_1",
-            currentTrackSeq = 1L,
-            currentPositionMs = 5800L, // 800ms ahead
-            playWhenReady = true,
-            playbackSpeed = 1.0f
-        )
-        // Expected pos = 5000ms
-        val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
-
-        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
-        assertTrue(action is ReconcilerAction.SpeedRamp)
-        assertEquals(0.98f, (action as ReconcilerAction.SpeedRamp).factor, 0.001f)
-    }
+    data class DriftBoundaryCase(
+        val name: String,
+        val deltaMs: Long,
+        val initialSpeed: Float,
+        val expectedAction: String, // "Nothing", "Seek", "SpeedRamp"
+        val expectedSpeed: Float? = null,
+        val expectedSeekPos: Long? = null
+    )
 
     @Test
-    fun `returns SpeedRamp 1_02 when local is behind between 300ms and 2000ms`() {
-        val local = LocalPlayerState(
-            currentSongId = "song_1",
-            currentTrackSeq = 1L,
-            currentPositionMs = 4300L, // 700ms behind
-            playWhenReady = true,
-            playbackSpeed = 1.0f
+    fun `table-driven tests for drift thresholds and hysteresis boundaries`() {
+        val basePos = 5000L
+        val room = makeRoom(
+            songId = "song_1",
+            trackSeq = 1L,
+            status = JamPlaybackStatus.PLAYING,
+            positionMs = basePos,
+            anchorTs = 50_000L
         )
-        // Expected pos = 5000ms
-        val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
 
-        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
-        assertTrue(action is ReconcilerAction.SpeedRamp)
-        assertEquals(1.02f, (action as ReconcilerAction.SpeedRamp).factor, 0.001f)
-    }
+        val testCases = listOf(
+            // Boundary: > 2000ms hard seek
+            DriftBoundaryCase("ahead hard seek (>2s)", deltaMs = +2001L, initialSpeed = 1.0f, expectedAction = "Seek", expectedSeekPos = basePos),
+            DriftBoundaryCase("behind hard seek (>2s)", deltaMs = -2001L, initialSpeed = 1.0f, expectedAction = "Seek", expectedSeekPos = basePos),
 
-    @Test
-    fun `returns SpeedRamp 1_0 to restore normal speed once delta is within 300ms`() {
-        val local = LocalPlayerState(
-            currentSongId = "song_1",
-            currentTrackSeq = 1L,
-            currentPositionMs = 5100L, // 100ms ahead (within 300ms)
-            playWhenReady = true,
-            playbackSpeed = 0.98f // Was previously slowed down
+            // Boundary: exactly 2000ms is soft speed ramp (not hard seek)
+            DriftBoundaryCase("ahead 2000ms ramp", deltaMs = +2000L, initialSpeed = 1.0f, expectedAction = "SpeedRamp", expectedSpeed = 0.96f),
+            DriftBoundaryCase("behind 2000ms ramp", deltaMs = -2000L, initialSpeed = 1.0f, expectedAction = "SpeedRamp", expectedSpeed = 1.04f),
+
+            // Boundary: exactly 200ms entry threshold
+            DriftBoundaryCase("ahead 200ms entry", deltaMs = +200L, initialSpeed = 1.0f, expectedAction = "SpeedRamp", expectedSpeed = 0.96f),
+            DriftBoundaryCase("behind 200ms entry", deltaMs = -200L, initialSpeed = 1.0f, expectedAction = "SpeedRamp", expectedSpeed = 1.04f),
+
+            // Below 200ms when speed is 1.0: do nothing
+            DriftBoundaryCase("below 200ms ahead (199ms)", deltaMs = +199L, initialSpeed = 1.0f, expectedAction = "Nothing"),
+            DriftBoundaryCase("below 200ms behind (-199ms)", deltaMs = -199L, initialSpeed = 1.0f, expectedAction = "Nothing"),
+            DriftBoundaryCase("in sync (0ms)", deltaMs = 0L, initialSpeed = 1.0f, expectedAction = "Nothing"),
+
+            // Flapping around 200ms: hysteresis maintains active speed ramp
+            DriftBoundaryCase("flapping below 200ms maintains 1.04 (-199ms)", deltaMs = -199L, initialSpeed = 1.04f, expectedAction = "Nothing"),
+            DriftBoundaryCase("flapping below 200ms maintains 0.96 (+199ms)", deltaMs = +199L, initialSpeed = 0.96f, expectedAction = "Nothing"),
+            DriftBoundaryCase("hysteresis boundary at 100ms maintains 1.04 (-100ms)", deltaMs = -100L, initialSpeed = 1.04f, expectedAction = "Nothing"),
+            DriftBoundaryCase("hysteresis boundary at 100ms maintains 0.96 (+100ms)", deltaMs = +100L, initialSpeed = 0.96f, expectedAction = "Nothing"),
+
+            // Restore speed 1.0 ONLY below 100ms
+            DriftBoundaryCase("restore 1.0 below 100ms from 1.04 (-99ms)", deltaMs = -99L, initialSpeed = 1.04f, expectedAction = "SpeedRamp", expectedSpeed = 1.0f),
+            DriftBoundaryCase("restore 1.0 below 100ms from 0.96 (+99ms)", deltaMs = +99L, initialSpeed = 0.96f, expectedAction = "SpeedRamp", expectedSpeed = 1.0f),
+            DriftBoundaryCase("restore 1.0 at 0ms drift from 1.04", deltaMs = 0L, initialSpeed = 1.04f, expectedAction = "SpeedRamp", expectedSpeed = 1.0f),
+            DriftBoundaryCase("restore 1.0 at 0ms drift from 0.96", deltaMs = 0L, initialSpeed = 0.96f, expectedAction = "SpeedRamp", expectedSpeed = 1.0f)
         )
-        // Expected pos = 5000ms
-        val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
 
-        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
-        assertTrue(action is ReconcilerAction.SpeedRamp)
-        assertEquals(1.0f, (action as ReconcilerAction.SpeedRamp).factor, 0.001f)
-    }
+        for (tc in testCases) {
+            val local = LocalPlayerState(
+                currentSongId = "song_1",
+                currentTrackSeq = 1L,
+                currentPositionMs = basePos + tc.deltaMs,
+                playWhenReady = true,
+                playbackSpeed = tc.initialSpeed
+            )
+            val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
 
-    @Test
-    fun `returns Nothing when already in sync within 300ms and normal speed`() {
-        val local = LocalPlayerState(
-            currentSongId = "song_1",
-            currentTrackSeq = 1L,
-            currentPositionMs = 5050L, // 50ms ahead
-            playWhenReady = true,
-            playbackSpeed = 1.0f
-        )
-        val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
-
-        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
-        assertEquals(ReconcilerAction.Nothing, action)
+            when (tc.expectedAction) {
+                "Nothing" -> assertEquals("${tc.name}: expected Nothing", ReconcilerAction.Nothing, action)
+                "Seek" -> {
+                    assertTrue("${tc.name}: expected Seek", action is ReconcilerAction.Seek)
+                    assertEquals("${tc.name}: expected seek position", tc.expectedSeekPos, (action as ReconcilerAction.Seek).positionMs)
+                }
+                "SpeedRamp" -> {
+                    assertTrue("${tc.name}: expected SpeedRamp", action is ReconcilerAction.SpeedRamp)
+                    assertEquals("${tc.name}: expected speed factor", tc.expectedSpeed!!, (action as ReconcilerAction.SpeedRamp).factor, 0.001f)
+                }
+            }
+        }
     }
 
     @Test

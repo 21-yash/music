@@ -101,11 +101,11 @@ object JamReconciler {
         val delta = local.currentPositionMs - expectedPos
 
         if (!serverIsPlaying) {
-            // While paused, accept up to 500ms jitter before seeking
-            return if (abs(delta) > 500L) {
-                ReconcilerAction.Seek(expectedPos)
-            } else {
-                ReconcilerAction.Nothing
+            // While paused, restore 1.0f speed if needed and accept up to 500ms jitter before seeking
+            return when {
+                abs(delta) > 500L -> ReconcilerAction.Seek(expectedPos)
+                local.playbackSpeed != 1.0f -> ReconcilerAction.SpeedRamp(1.0f)
+                else -> ReconcilerAction.Nothing
             }
         }
 
@@ -115,20 +115,26 @@ object JamReconciler {
             abs(delta) > 2000L -> {
                 ReconcilerAction.Seek(expectedPos)
             }
-            // 300 ms < delta <= 2000 ms: soft speed ramp
-            abs(delta) > 300L -> {
-                val factor = if (delta > 0) 0.98f else 1.02f
-                if (local.playbackSpeed != factor) {
-                    ReconcilerAction.SpeedRamp(factor)
+            // 200 ms <= |delta| <= 2000 ms: soft speed ramp (1.04 if behind, 0.96 if ahead)
+            abs(delta) >= 200L -> {
+                val targetSpeed = if (delta > 0) 0.96f else 1.04f
+                if (local.playbackSpeed != targetSpeed) {
+                    ReconcilerAction.SpeedRamp(targetSpeed)
                 } else {
                     ReconcilerAction.Nothing
                 }
             }
-            // Within 300 ms: already in sync; restore 1.0f speed if ramp was active
+            // |delta| < 200 ms:
             else -> {
-                if (local.playbackSpeed != 1.0f) {
-                    ReconcilerAction.SpeedRamp(1.0f)
+                // Hysteresis: restore 1.0 only below 100 ms
+                if (abs(delta) < 100L) {
+                    if (local.playbackSpeed != 1.0f) {
+                        ReconcilerAction.SpeedRamp(1.0f)
+                    } else {
+                        ReconcilerAction.Nothing
+                    }
                 } else {
+                    // Retain existing speed ramp between 100ms and 199ms
                     ReconcilerAction.Nothing
                 }
             }
