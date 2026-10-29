@@ -55,6 +55,10 @@ class JamEngineFixesTest {
             emitEvent(JamTransport.Event.Connected)
         }
 
+        override suspend fun awaitConnected(timeoutMs: Long): Result<Unit> {
+            return if (isConnected) Result.success(Unit) else Result.failure(IllegalStateException("Socket is not connected"))
+        }
+
         override fun disconnect() {
             isConnected = false
         }

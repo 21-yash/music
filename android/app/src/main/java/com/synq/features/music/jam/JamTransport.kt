@@ -3,11 +3,14 @@ package com.synq.features.music.jam
 import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.coroutines.resume
@@ -29,6 +32,7 @@ interface JamTransport {
     val isConnected: Boolean
 
     fun connect(token: String?)
+    suspend fun awaitConnected(timeoutMs: Long = 10000L): Result<Unit>
     fun disconnect()
     suspend fun emit(event: String, data: Any?, ackTimeoutMs: Long = 5000L): Result<JSONObject>
 }
@@ -39,6 +43,8 @@ class SocketIoTransport(
 ) : JamTransport {
 
     private var socket: Socket? = null
+    @Volatile
+    private var connectionDeferred = CompletableDeferred<Unit>()
 
     private val _events = MutableSharedFlow<JamTransport.Event>(
         extraBufferCapacity = 64,
@@ -68,20 +74,25 @@ class SocketIoTransport(
         }
 
         val options = IO.Options.builder()
-            .setTransports(arrayOf("websocket"))
+            .setTransports(arrayOf("websocket", "polling"))
             .setAuth(authMap)
             .setReconnection(false) // Reconnection is explicitly orchestrated by JamClient state machine
             .build()
+
+        val deferred = CompletableDeferred<Unit>()
+        connectionDeferred = deferred
 
         val s = IO.socket(url, options)
         socket = s
 
         s.on(Socket.EVENT_CONNECT) {
+            deferred.complete(Unit)
             _events.tryEmit(JamTransport.Event.Connected)
         }
 
         s.on(Socket.EVENT_CONNECT_ERROR) { args ->
             val err = args.firstOrNull() as? Throwable ?: Exception(args.firstOrNull()?.toString() ?: "Connect error")
+            deferred.completeExceptionally(err)
             _events.tryEmit(JamTransport.Event.ConnectError(err))
         }
 
@@ -123,18 +134,48 @@ class SocketIoTransport(
         s.connect()
     }
 
+    override suspend fun awaitConnected(timeoutMs: Long): Result<Unit> {
+        if (isConnected) return Result.success(Unit)
+        if (socket == null) {
+            return Result.failure(IllegalStateException("Socket is not initialized"))
+        }
+        val currentDeferred = connectionDeferred
+        return try {
+            withTimeout(timeoutMs) {
+                currentDeferred.await()
+                Result.success(Unit)
+            }
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("Timed out waiting for Jam server connection (${timeoutMs / 1000}s)"))
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+    }
+
     override fun disconnect() {
         socket?.apply {
             off()
             disconnect()
         }
         socket = null
+        if (connectionDeferred.isActive) {
+            connectionDeferred.cancel()
+        }
+        connectionDeferred = CompletableDeferred()
     }
 
     override suspend fun emit(event: String, data: Any?, ackTimeoutMs: Long): Result<JSONObject> {
         val currentSocket = socket
-        if (currentSocket == null || !currentSocket.connected()) {
-            return Result.failure(IllegalStateException("Socket is not connected"))
+        if (currentSocket == null) {
+            return Result.failure(IllegalStateException("Socket is not initialized"))
+        }
+
+        if (!currentSocket.connected()) {
+            val awaitRes = awaitConnected(minOf(ackTimeoutMs, 5000L))
+            if (awaitRes.isFailure || !currentSocket.connected()) {
+                val reason = awaitRes.exceptionOrNull()?.message ?: "Socket is not connected"
+                return Result.failure(IllegalStateException(reason))
+            }
         }
 
         return withTimeoutOrNull(ackTimeoutMs) {

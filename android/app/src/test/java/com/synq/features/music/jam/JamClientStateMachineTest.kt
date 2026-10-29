@@ -38,6 +38,12 @@ class JamClientStateMachineTest {
             emitEvent(JamTransport.Event.Connected)
         }
 
+        var awaitConnectedResult: Result<Unit> = Result.success(Unit)
+
+        override suspend fun awaitConnected(timeoutMs: Long): Result<Unit> {
+            return awaitConnectedResult
+        }
+
         override fun disconnect() {
             isConnected = false
         }
@@ -273,5 +279,19 @@ class JamClientStateMachineTest {
         val state = client.clientState.value
         assertTrue(state is JamClientState.Closed)
         assertEquals("auth_failed", (state as JamClientState.Closed).reason)
+    }
+
+    @Test
+    fun `when awaitConnected fails createRoom returns failure and transitions to Disconnected`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("Timed out waiting for Jam server connection (10s)"))
+
+        val res = client.createRoom()
+        runCurrent()
+
+        assertTrue(res.isFailure)
+        assertTrue(res.exceptionOrNull()?.message?.contains("Timed out waiting for Jam server") == true)
+        assertEquals(JamClientState.Disconnected, client.clientState.value)
     }
 }

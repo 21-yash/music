@@ -123,6 +123,12 @@ class JamClient(
         }
 
         transport.connect(token)
+        val connectRes = transport.awaitConnected(10000L)
+        if (connectRes.isFailure) {
+            _clientState.value = JamClientState.Disconnected
+            val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
+            return Result.failure(IllegalStateException(msg))
+        }
 
         val payload = JSONObject().apply {
             put("protocol", 2)
@@ -157,6 +163,12 @@ class JamClient(
         }
 
         transport.connect(token)
+        val connectRes = transport.awaitConnected(10000L)
+        if (connectRes.isFailure) {
+            _clientState.value = JamClientState.Disconnected
+            val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
+            return Result.failure(IllegalStateException(msg))
+        }
 
         val payload = JSONObject().apply {
             put("protocol", 2)
