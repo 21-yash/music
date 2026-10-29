@@ -5,6 +5,7 @@ import { createApp } from '../../src/app';
 import { env } from '../../src/config/env';
 import { generateAccessToken } from '../../src/utils/tokens';
 import { initializeSocketIO } from '../../src/websocket';
+import { activeSessions } from '../../src/websocket/jamHandler';
 
 describe('Jam WebSocket Hardening (Finding S1 & S5)', () => {
   let server: http.Server;
@@ -50,7 +51,7 @@ describe('Jam WebSocket Hardening (Finding S1 & S5)', () => {
     });
   });
 
-  it('Malformed payloads to jam handlers never throw or crash the server', async () => {
+  it('Malformed payloads to jam handlers never throw or crash the server, and server serves fresh clients', async () => {
     const malformedPayloads = [
       null,
       undefined,
@@ -88,5 +89,88 @@ describe('Jam WebSocket Hardening (Finding S1 & S5)', () => {
 
     // Server is still alive and responsive
     expect(clientSocket.connected).toBe(true);
+
+    // Open a second fresh authenticated socket and verify room creation succeeds
+    const secondSocket = ioClient(`http://localhost:${port}`, {
+      auth: {
+        apiKey: VALID_KEY,
+        token: generateAccessToken({
+          userId: 'user-fresh-client-567890123456',
+          username: 'fresh_user',
+        }),
+      },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+
+    await new Promise<void>((resolve) => {
+      secondSocket.on('connect', () => resolve());
+    });
+
+    const createPayload = await new Promise<any>((resolve) => {
+      secondSocket.on('jam:created', (data) => resolve(data));
+      secondSocket.emit('jam:create', {});
+    });
+
+    expect(createPayload).toBeDefined();
+    expect(createPayload.session?.code).toBeDefined();
+    expect(createPayload.session?.hostUserId).toBe('user-fresh-client-567890123456');
+
+    secondSocket.disconnect();
+  });
+
+  it('Socket disconnect with reason "client namespace disconnect" does NOT immediately remove host (uses grace period)', async () => {
+    const hostToken = generateAccessToken({
+      userId: 'user-host-grace-111111111111',
+      username: 'host_grace',
+    });
+    const guestToken = generateAccessToken({
+      userId: 'user-guest-grace-222222222222',
+      username: 'guest_grace',
+    });
+
+    const hostSocket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: VALID_KEY, token: hostToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((resolve) => hostSocket.on('connect', () => resolve()));
+
+    const createPayload = await new Promise<any>((resolve) => {
+      hostSocket.on('jam:created', (data) => resolve(data));
+      hostSocket.emit('jam:create', {});
+    });
+    const code = createPayload.session.code;
+
+    const guestSocket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: VALID_KEY, token: guestToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((resolve) => guestSocket.on('connect', () => resolve()));
+
+    await new Promise<any>((resolve) => {
+      guestSocket.on('jam:joined', (data) => resolve(data));
+      guestSocket.emit('jam:join', { code });
+    });
+
+    let hostChangedFired = false;
+    guestSocket.on('jam:host_changed', () => {
+      hostChangedFired = true;
+    });
+
+    // Host disconnects via client namespace disconnect (e.g. Wi-Fi <-> 4G handover)
+    hostSocket.disconnect();
+
+    // Small delay to ensure server processed the disconnect event
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The session must still exist and the host must NOT have been immediately removed or transferred
+    const session = activeSessions.get(code);
+    expect(session).toBeDefined();
+    expect(session?.hostUserId).toBe('user-host-grace-111111111111');
+    expect(hostChangedFired).toBe(false);
+
+    guestSocket.disconnect();
   });
 });

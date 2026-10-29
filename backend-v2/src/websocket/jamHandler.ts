@@ -24,7 +24,7 @@ export interface JamSession {
 }
 
 // In-memory sessions store (can be backed by Redis in production)
-const activeSessions = new Map<string, JamSession>();
+export const activeSessions = new Map<string, JamSession>();
 
 // Map socketId -> Set<code string>
 export const socketToSessions = new Map<string, Set<string>>();
@@ -386,18 +386,15 @@ export function registerJamHandlers(io: Server, socket: Socket) {
   );
 
   // ─── Socket Disconnect cleanup ──────────────────────────────────────
-  socket.on('disconnect', (reason: string) => {
+  socket.on('disconnect', (_reason: string) => {
     try {
       const userCodes = socketToSessions.get(socket.id);
       if (!userCodes) return;
       const codes = Array.from(userCodes);
 
       const authUser = socket.data?.user as { userId: string; username: string } | undefined;
-      const isExplicit =
-        reason === 'client namespace disconnect' || reason === 'server namespace disconnect';
-
       for (const code of codes) {
-        if (isExplicit || !authUser?.userId) {
+        if (!authUser?.userId) {
           handleUserLeave(io, socket, code);
         } else {
           const timerKey = `${code}:${authUser.userId}`;
@@ -414,9 +411,7 @@ export function registerJamHandlers(io: Server, socket: Socket) {
         }
       }
 
-      if (isExplicit) {
-        socketToSessions.delete(socket.id);
-      }
+
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error during socket disconnect cleanup');
     }

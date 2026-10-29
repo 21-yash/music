@@ -27,6 +27,8 @@ import android.widget.Toast
 import com.synq.features.music.playback.JamPlaybackInterceptor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
+import com.synq.core.network.NetworkMonitor
+import javax.inject.Provider
 import com.synq.data.repository.AuthRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +37,7 @@ import javax.inject.Singleton
 class JamSessionManager @Inject constructor(
     private val playerManager: MusicPlayerManager,
     private val authRepository: AuthRepository,
+    private val networkMonitorProvider: Provider<NetworkMonitor>,
     @ApplicationContext private val context: Context
 ) : JamPlaybackInterceptor {
     private var socket: Socket? = null
@@ -43,6 +46,8 @@ class JamSessionManager @Inject constructor(
     private var isConnecting = false
     private var consecutiveAuthRebuilds = 0
     private var reconnectJob: Job? = null
+    private var networkRestoreJob: Job? = null
+    private var hasReportedConnectionError = false
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
 
@@ -63,13 +68,15 @@ class JamSessionManager @Inject constructor(
         try {
             val token = authRepository.getFreshAccessToken()
             initSocket(token)
-        } finally {
+        } catch (e: Exception) {
             isConnecting = false
+            throw e
         }
     }
 
     private fun initSocket(token: String?) {
         try {
+            isConnecting = true
             socket?.disconnect()
             socket?.off()
 
@@ -92,6 +99,7 @@ class JamSessionManager @Inject constructor(
             socket?.on(Socket.EVENT_CONNECT) {
                 consecutiveAuthRebuilds = 0
                 isConnecting = false
+                hasReportedConnectionError = false
                 val currentCode = _jamState.value.sessionCode
                 if (!currentCode.isNullOrBlank() && _jamState.value.isInJam) {
                     val payload = JSONObject().apply {
@@ -128,7 +136,11 @@ class JamSessionManager @Inject constructor(
                 } else if (consecutiveAuthRebuilds >= 3) {
                     _jamState.update { it.copy(error = "Authentication failed. Disconnected from Jam.") }
                 } else if (errMessage.isNotBlank()) {
-                    _jamState.update { it.copy(error = "Connection error: $errMessage") }
+                    val isOnline = try { networkMonitorProvider.get().isOnline.value } catch (_: Exception) { true }
+                    if (isOnline && !hasReportedConnectionError) {
+                        hasReportedConnectionError = true
+                        _jamState.update { it.copy(error = "Connection error: $errMessage") }
+                    }
                 }
             }
 
@@ -212,20 +224,29 @@ class JamSessionManager @Inject constructor(
 
             socket?.connect()
         } catch (e: Exception) {
+            isConnecting = false
             e.printStackTrace()
             _jamState.update { it.copy(error = e.message) }
         }
     }
 
     fun onNetworkRestored() {
-        if (_jamState.value.isInJam) {
-            scope.launch {
-                try {
-                    val freshToken = authRepository.getFreshAccessToken()
-                    initSocket(freshToken)
-                } catch (e: Exception) {
-                    _jamState.update { it.copy(error = "Network reconnect failed: ${e.message}") }
-                }
+        if (!_jamState.value.isInJam) return
+        networkRestoreJob?.cancel()
+        networkRestoreJob = scope.launch {
+            delay(1500L)
+            if (!_jamState.value.isInJam) return@launch
+            if (isConnecting) return@launch
+            if (socket?.connected() == true) return@launch
+
+            isConnecting = true
+            try {
+                val freshToken = authRepository.getFreshAccessToken()
+                initSocket(freshToken)
+            } catch (e: Exception) {
+                _jamState.update { it.copy(error = "Network reconnect failed: ${e.message}") }
+            } finally {
+                isConnecting = false
             }
         }
     }
@@ -264,6 +285,9 @@ class JamSessionManager @Inject constructor(
     }
 
     fun leaveJam() {
+        networkRestoreJob?.cancel()
+        networkRestoreJob = null
+        hasReportedConnectionError = false
         val code = _jamState.value.sessionCode
         if (!code.isNullOrBlank()) {
             val payload = JSONObject().apply { put("code", code) }
