@@ -366,6 +366,7 @@ class JamSessionManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     fun createJam(userId: String, username: String, avatarUrl: String? = null) {
+        val currentLocalSong = playerManager.playbackState.value.currentSong
         myUserId = userId
         stateStore.setMyUserId(userId)
         playerManager.jamInterceptor = this
@@ -374,6 +375,11 @@ class JamSessionManager @Inject constructor(
 
         scope.launch {
             val res = jamClient.createRoom(avatarUrl)
+            res.onSuccess {
+                if (currentLocalSong != null) {
+                    addSongToJam(currentLocalSong)
+                }
+            }
             res.onFailure { err ->
                 showToast("Failed to create Jam: ${err.message}")
                 teardownJam()

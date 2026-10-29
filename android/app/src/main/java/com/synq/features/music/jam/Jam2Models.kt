@@ -186,6 +186,7 @@ data class JamTickNowPlaying(
 
 data class Jam2Tick(
     val code: String,
+    val version: Long = 0L,
     val serverTime: Long,
     val nowPlaying: JamTickNowPlaying
 ) {
@@ -200,6 +201,7 @@ data class Jam2Tick(
             )
             return Jam2Tick(
                 code = obj.optString("code"),
+                version = obj.optLong("version", 0L),
                 serverTime = obj.optLong("serverTime", 0L),
                 nowPlaying = nowPlaying
             )
