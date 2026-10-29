@@ -23,9 +23,10 @@ export class Jam2Store {
   private rooms = new Map<string, Room>();
   private dirtyRooms = new Set<string>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
+  private inFlightRehydrations = new Map<string, Promise<Room | null>>();
 
   /**
-   * Return room from memory, or rehydrate from Redis if available.
+   * Return room from memory, or rehydrate from Redis if available (single-flight).
    */
   async getRoom(code: string, now = Date.now()): Promise<Room | null> {
     const normalizedCode = code.trim().toUpperCase();
@@ -36,43 +37,57 @@ export class Jam2Store {
       return inMemory;
     }
 
-    // 2. Rehydrate from Redis
-    try {
-      const client = getRedisClient();
-      const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
-      if (!raw) return null;
-
-      const parsed: PersistedRoom = JSON.parse(raw);
-      const membersMap = new Map<string, Member>();
-      for (const m of parsed.members) {
-        membersMap.set(m.userId, {
-          ...m,
-          online: false, // Mark all offline on rehydration until they rejoin
-        });
-      }
-
-      const rehydrated: Room = {
-        code: parsed.code,
-        version: parsed.version,
-        hostUserId: parsed.hostUserId,
-        createdAt: parsed.createdAt,
-        members: membersMap,
-        defaults: parsed.defaults,
-        queue: parsed.queue,
-        history: parsed.history,
-        nowPlaying: parsed.nowPlaying,
-      };
-
-      // Catch-up stale playback if song finished while server was offline
-      this.catchUpStalePlayback(rehydrated, now);
-
-      this.rooms.set(normalizedCode, rehydrated);
-      logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
-      return rehydrated;
-    } catch (err) {
-      logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
-      return null;
+    // 2. Single-flight in-flight check
+    const inFlight = this.inFlightRehydrations.get(normalizedCode);
+    if (inFlight) {
+      return inFlight;
     }
+
+    // 3. Rehydrate from Redis
+    const rehydratePromise = (async () => {
+      try {
+        const client = getRedisClient();
+        const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
+        if (!raw) return null;
+
+        const parsed: PersistedRoom = JSON.parse(raw);
+        const membersMap = new Map<string, Member>();
+        for (const m of parsed.members) {
+          membersMap.set(m.userId, {
+            ...m,
+            online: false, // Mark all offline on rehydration until they rejoin
+            lastSeenAt: now, // Give host fresh 20s grace period on restart
+          });
+        }
+
+        const rehydrated: Room = {
+          code: parsed.code,
+          version: parsed.version + 1000, // Version + 1000 on rehydrate
+          hostUserId: parsed.hostUserId,
+          createdAt: parsed.createdAt,
+          members: membersMap,
+          defaults: parsed.defaults,
+          queue: parsed.queue,
+          history: parsed.history,
+          nowPlaying: parsed.nowPlaying,
+        };
+
+        // Catch-up stale playback if song finished while server was offline
+        this.catchUpStalePlayback(rehydrated, now);
+
+        this.rooms.set(normalizedCode, rehydrated);
+        logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
+        return rehydrated;
+      } catch (err) {
+        logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
+        return null;
+      } finally {
+        this.inFlightRehydrations.delete(normalizedCode);
+      }
+    })();
+
+    this.inFlightRehydrations.set(normalizedCode, rehydratePromise);
+    return rehydratePromise;
   }
 
   /**

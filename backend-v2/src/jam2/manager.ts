@@ -15,6 +15,7 @@ import {
   JAM_ROOM_CODE_CHARS,
   DEFAULT_ROOM_PERMS,
   Song,
+  Jam2Tick,
 } from './types';
 
 export function runSafely(label: string, fn: () => void | Promise<void>): void {
@@ -27,6 +28,35 @@ export function runSafely(label: string, fn: () => void | Promise<void>): void {
     }
   } catch (err) {
     logger.error({ err, label }, 'Unhandled sync error in Jam2 task');
+  }
+}
+
+export class KeyedMutex {
+  private chains = new Map<string, Promise<unknown>>();
+
+  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const normalizedKey = key.trim().toUpperCase();
+    const prev = this.chains.get(normalizedKey) ?? Promise.resolve();
+
+    let release: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    this.chains.set(
+      normalizedKey,
+      prev.catch(() => {}).then(() => current),
+    );
+
+    try {
+      await prev.catch(() => {});
+      return await fn();
+    } finally {
+      release!();
+      if (this.chains.get(normalizedKey) === current) {
+        this.chains.delete(normalizedKey);
+      }
+    }
   }
 }
 
@@ -47,27 +77,25 @@ export class Jam2Manager {
   private io: Server | null = null;
   private store: Jam2Store;
   private fetchRelatedSongs: RelatedSongsFetcher;
+  private mutex = new KeyedMutex();
 
   // Socket tracking
-  // socketId -> SocketMetadata
   private socketMeta = new Map<string, SocketMetadata>();
-  // code -> (userId -> Set<socketId>)
   private roomUserSockets = new Map<string, Map<string, Set<string>>>();
 
   // Timers
-  // code -> fallback timeout
   private trackFallbackTimers = new Map<string, NodeJS.Timeout>();
-  // code -> host handover timeout
   private hostGraceTimers = new Map<string, NodeJS.Timeout>();
-  // code:trackSeq inflight recs flag
   private inflightRecs = new Set<string>();
+  private recsSeededForTrackSeq = new Set<string>();
+  private kickedUsers = new Map<string, Map<string, number>>();
+  private loggedZeroDuration = new Set<string>();
 
   // Background interval timers
   private pruneInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
   // Rate limiting timestamp windows
-  // key -> timestamps[]
   private cmdRateLimits = new Map<string, number[]>();
   private joinFailRateLimits = new Map<string, number[]>();
   private timeRateLimits = new Map<string, number[]>();
@@ -94,11 +122,11 @@ export class Jam2Manager {
     );
     if (timestamps.length >= max) {
       this.cmdRateLimits.set(key, timestamps);
-      return false; // rate limited
+      return false;
     }
     timestamps.push(now);
     this.cmdRateLimits.set(key, timestamps);
-    return true; // allowed
+    return true;
   }
 
   checkJoinFailRateLimit(userId: string, max = 5, windowMs = 60000): boolean {
@@ -108,7 +136,7 @@ export class Jam2Manager {
     );
     if (timestamps.length >= max) {
       this.joinFailRateLimits.set(userId, timestamps);
-      return false; // rate limited
+      return false;
     }
     return true;
   }
@@ -163,44 +191,46 @@ export class Jam2Manager {
     const code = this.generateRoomCode();
     const now = Date.now();
 
-    const room: Room = {
-      code,
-      version: 1,
-      hostUserId,
-      createdAt: now,
-      members: new Map([
-        [
-          hostUserId,
-          {
-            userId: hostUserId,
-            username: hostUsername,
-            avatarUrl,
-            joinedAt: now,
-            online: true,
-            lastSeenAt: now,
-            perms: {
-              queueAdd: true,
-              playback: true,
-              queueManage: true,
+    return this.mutex.runExclusive(code, async () => {
+      const room: Room = {
+        code,
+        version: 1,
+        hostUserId,
+        createdAt: now,
+        members: new Map([
+          [
+            hostUserId,
+            {
+              userId: hostUserId,
+              username: hostUsername,
+              avatarUrl,
+              joinedAt: now,
+              online: true,
+              lastSeenAt: now,
+              perms: {
+                queueAdd: true,
+                playback: true,
+                queueManage: true,
+              },
             },
-          },
-        ],
-      ]),
-      defaults: { ...DEFAULT_ROOM_PERMS },
-      queue: [],
-      history: [],
-      nowPlaying: {
-        item: null,
-        status: 'idle',
-        positionMs: 0,
-        anchorServerTs: now,
-        trackSeq: 0,
-      },
-    };
+          ],
+        ]),
+        defaults: { ...DEFAULT_ROOM_PERMS },
+        queue: [],
+        history: [],
+        nowPlaying: {
+          item: null,
+          status: 'idle',
+          positionMs: 0,
+          anchorServerTs: now,
+          trackSeq: 0,
+        },
+      };
 
-    this.store.setRoom(room);
-    logger.info({ code, hostUserId, hostUsername }, 'Jam2 room created');
-    return room;
+      this.store.setRoom(room);
+      logger.info({ code, hostUserId, hostUsername }, 'Jam2 room created');
+      return room;
+    });
   }
 
   async getRoom(code: string): Promise<Room | null> {
@@ -214,44 +244,77 @@ export class Jam2Manager {
     avatarUrl?: string,
   ): Promise<{ room: Room; events: Jam2Event[] } | { error: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
-    const room = await this.store.getRoom(normalizedCode);
-    if (!room) {
-      return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
-    }
 
-    const now = Date.now();
-    const res = applyCommand(
-      room,
-      {
-        type: 'memberOnline',
-        userId,
-        username,
-        avatarUrl,
-      },
-      'system',
-      now,
-    );
-
-    if ('error' in res) {
-      return res;
-    }
-
-    // If the host rejoined, cancel any pending host handover timer
-    if (userId === res.room.hostUserId) {
-      this.cancelHostGraceTimer(normalizedCode);
-    }
-
-    this.store.setRoom(res.room);
-
-    // Broadcast any events (e.g. member_joined) and state update
-    if (res.events.length > 0) {
-      for (const ev of res.events) {
-        this.broadcastEvent(normalizedCode, ev);
+    // Check kick ban (10 minutes)
+    const roomKicks = this.kickedUsers.get(normalizedCode);
+    if (roomKicks) {
+      const expiry = roomKicks.get(userId);
+      if (expiry && expiry > Date.now()) {
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'You were removed from this Jam by the host.',
+          },
+        };
       }
     }
-    this.broadcastState(res.room);
 
-    return res;
+    return this.mutex.runExclusive(normalizedCode, async () => {
+      const room = await this.store.getRoom(normalizedCode);
+      if (!room) {
+        return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
+      }
+
+      // Resume join for already-online member: do NOT bump version or broadcast
+      const existingMember = room.members.get(userId);
+      if (existingMember && existingMember.online) {
+        return { room, events: [] };
+      }
+
+      const now = Date.now();
+      const res = applyCommand(
+        room,
+        {
+          type: 'memberOnline',
+          userId,
+          username,
+          avatarUrl,
+        },
+        'system',
+        now,
+      );
+
+      if ('error' in res) {
+        return res;
+      }
+
+      // If host rejoined, cancel any pending host handover timer
+      if (userId === res.room.hostUserId) {
+        this.cancelHostGraceTimer(normalizedCode);
+      }
+
+      // Call ensureHost right after every successful join
+      this.ensureHostLocked(res.room, now);
+
+      this.store.setRoom(res.room);
+
+      // Arm track-fallback timer if playing and not armed
+      if (res.room.nowPlaying.status === 'playing' && res.room.nowPlaying.item) {
+        if (!this.trackFallbackTimers.has(normalizedCode)) {
+          this.updateTrackFallbackTimer(res.room);
+        }
+      }
+
+      // Broadcast events and state
+      if (res.events.length > 0) {
+        for (const ev of res.events) {
+          this.broadcastEvent(normalizedCode, ev);
+        }
+      }
+      this.broadcastState(res.room);
+
+      return res;
+    });
   }
 
   async leaveRoom(
@@ -259,72 +322,51 @@ export class Jam2Manager {
     userId: string,
   ): Promise<{ success: boolean; error?: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
-    const room = await this.store.getRoom(normalizedCode);
-    if (!room) {
-      return { success: false, error: { code: 'NOT_FOUND', message: 'Room not found' } };
-    }
 
-    if (!room.members.has(userId)) {
-      return { success: false, error: { code: 'NOT_MEMBER', message: 'Not a member of this room' } };
-    }
-
-    const isHost = room.hostUserId === userId;
-    const now = Date.now();
-
-    // If host leaves explicitly, role passes immediately to earliest-joined online member
-    if (isHost) {
-      this.cancelHostGraceTimer(normalizedCode);
-
-      // Find candidate new host (other members who are online)
-      const onlineMembers = Array.from(room.members.values()).filter(
-        (m) => m.userId !== userId && m.online,
-      );
-      onlineMembers.sort((a, b) => a.joinedAt - b.joinedAt);
-
-      if (onlineMembers.length > 0) {
-        const nextHost = onlineMembers[0];
-        const handoverRes = applyCommand(
-          room,
-          { type: 'hostHandover', newHostUserId: nextHost.userId },
-          'system',
-          now,
-        );
-        if ('room' in handoverRes) {
-          Object.assign(room, handoverRes.room);
-          for (const ev of handoverRes.events) {
-            this.broadcastEvent(normalizedCode, ev);
-          }
-        }
+    return this.mutex.runExclusive(normalizedCode, async () => {
+      const room = await this.store.getRoom(normalizedCode);
+      if (!room) {
+        return { success: false, error: { code: 'NOT_FOUND', message: 'Room not found' } };
       }
-    }
 
-    // Apply memberLeave
-    const leaveRes = applyCommand(
-      room,
-      { type: 'memberLeave', userId },
-      'system',
-      now,
-    );
+      if (!room.members.has(userId)) {
+        return { success: false, error: { code: 'NOT_MEMBER', message: 'Not a member of this room' } };
+      }
 
-    if ('error' in leaveRes) {
-      return { success: false, error: leaveRes.error };
-    }
+      const isHost = room.hostUserId === userId;
+      const now = Date.now();
 
-    const updatedRoom = leaveRes.room;
+      if (isHost) {
+        this.cancelHostGraceTimer(normalizedCode);
+      }
 
-    // Check if room is now empty
-    if (updatedRoom.members.size === 0) {
-      await this.destroyRoom(normalizedCode, 'expired');
+      // Apply memberLeave (reducer picks successor preferring online, falling back to offline)
+      const leaveRes = applyCommand(
+        room,
+        { type: 'memberLeave', userId },
+        'system',
+        now,
+      );
+
+      if ('error' in leaveRes) {
+        return { success: false, error: leaveRes.error };
+      }
+
+      const updatedRoom = leaveRes.room;
+
+      if (updatedRoom.members.size === 0) {
+        await this.destroyRoomLocked(normalizedCode, 'expired');
+        return { success: true };
+      }
+
+      this.store.setRoom(updatedRoom);
+      for (const ev of leaveRes.events) {
+        this.broadcastEvent(normalizedCode, ev);
+      }
+      this.broadcastState(updatedRoom);
+
       return { success: true };
-    }
-
-    this.store.setRoom(updatedRoom);
-    for (const ev of leaveRes.events) {
-      this.broadcastEvent(normalizedCode, ev);
-    }
-    this.broadcastState(updatedRoom);
-
-    return { success: true };
+    });
   }
 
   async endRoom(
@@ -332,55 +374,80 @@ export class Jam2Manager {
     hostUserId: string,
   ): Promise<{ success: boolean; error?: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
-    const room = await this.store.getRoom(normalizedCode);
-    if (!room) {
-      return { success: false, error: { code: 'NOT_FOUND', message: 'Room not found' } };
-    }
 
-    if (room.hostUserId !== hostUserId) {
-      return {
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Only the host can end the Jam session' },
-      };
-    }
+    return this.mutex.runExclusive(normalizedCode, async () => {
+      const room = await this.store.getRoom(normalizedCode);
+      if (!room) {
+        return { success: false, error: { code: 'NOT_FOUND', message: 'Room not found' } };
+      }
 
-    await this.destroyRoom(normalizedCode, 'ended');
-    return { success: true };
+      if (room.hostUserId !== hostUserId) {
+        return {
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Only the host can end the Jam session' },
+        };
+      }
+
+      await this.destroyRoomLocked(normalizedCode, 'ended');
+      return { success: true };
+    });
   }
 
   async executeCommand(
     code: string,
     cmd: ClientCommand,
     actorUserId: string,
-  ): Promise<{ room: Room; events: Jam2Event[] } | { error: Jam2Error }> {
+  ): Promise<{ room: Room; events: Jam2Event[]; added?: number; skipped?: number } | { error: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
-    const room = await this.store.getRoom(normalizedCode);
-    if (!room) {
-      return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
-    }
 
-    const now = Date.now();
-    const res = applyCommand(room, cmd, actorUserId, now);
-    if ('error' in res) {
+    return this.mutex.runExclusive(normalizedCode, async () => {
+      const room = await this.store.getRoom(normalizedCode);
+      if (!room) {
+        return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
+      }
+
+      const preCount = room.queue.length + (room.nowPlaying.item ? 1 : 0);
+      const now = Date.now();
+      const res = applyCommand(room, cmd, actorUserId, now);
+      if ('error' in res) {
+        return res;
+      }
+
+      const nextRoom = res.room;
+
+      // Handle kick tracking for 10 minutes
+      if (cmd.type === 'kick') {
+        let kicks = this.kickedUsers.get(normalizedCode);
+        if (!kicks) {
+          kicks = new Map<string, number>();
+          this.kickedUsers.set(normalizedCode, kicks);
+        }
+        kicks.set(cmd.userId, Date.now() + 10 * 60 * 1000);
+      }
+
+      this.store.setRoom(nextRoom);
+
+      // Update track fallback timer if playback changed
+      this.updateTrackFallbackTimer(nextRoom);
+
+      // Check recommendations
+      this.triggerRecommendationsIfNeeded(nextRoom);
+
+      // Broadcast state and events
+      this.broadcastState(nextRoom);
+      for (const ev of res.events) {
+        this.broadcastEvent(normalizedCode, ev);
+      }
+
+      if (cmd.type === 'queueAddMany') {
+        const postCount = nextRoom.queue.length + (nextRoom.nowPlaying.item ? 1 : 0);
+        const added = Math.max(0, postCount - preCount);
+        const skipped = Math.max(0, cmd.songs.length - added);
+        return { room: nextRoom, events: res.events, added, skipped };
+      }
+
       return res;
-    }
-
-    const nextRoom = res.room;
-    this.store.setRoom(nextRoom);
-
-    // Update track fallback timer if playback changed
-    this.updateTrackFallbackTimer(nextRoom);
-
-    // Check recommendations if queue is getting low
-    this.triggerRecommendationsIfNeeded(nextRoom);
-
-    // Broadcast state and events
-    this.broadcastState(nextRoom);
-    for (const ev of res.events) {
-      this.broadcastEvent(normalizedCode, ev);
-    }
-
-    return res;
+    });
   }
 
   // ─── Socket Connection & Disconnect Handling ─────────────────────────
@@ -402,7 +469,6 @@ export class Jam2Manager {
     }
     userSockets.add(socketId);
 
-    // If host reconnected, cancel any grace timer
     this.store.getRoom(normalizedCode).then((room) => {
       if (room && room.hostUserId === userId) {
         this.cancelHostGraceTimer(normalizedCode);
@@ -415,6 +481,9 @@ export class Jam2Manager {
     if (!meta) return;
 
     this.socketMeta.delete(socketId);
+    this.cmdRateLimits.delete(socketId);
+    this.timeRateLimits.delete(socketId);
+
     const { code, userId } = meta;
 
     const roomMap = this.roomUserSockets.get(code);
@@ -425,87 +494,48 @@ export class Jam2Manager {
 
     userSockets.delete(socketId);
     if (userSockets.size > 0) {
-      return; // User still has active sockets in this room
+      return;
     }
 
-    // User has 0 active sockets in this room -> mark user offline
     roomMap.delete(userId);
     if (roomMap.size === 0) {
       this.roomUserSockets.delete(code);
     }
 
     runSafely(`handleSocketDisconnect:${code}:${userId}`, async () => {
-      const room = await this.store.getRoom(code);
-      if (!room) return;
+      await this.mutex.runExclusive(code, async () => {
+        const room = await this.store.getRoom(code);
+        if (!room) return;
 
-      const now = Date.now();
-      const res = applyCommand(
-        room,
-        { type: 'memberOffline', userId },
-        'system',
-        now,
-      );
+        const now = Date.now();
+        const res = applyCommand(
+          room,
+          { type: 'memberOffline', userId },
+          'system',
+          now,
+        );
 
-      if ('room' in res) {
-        this.store.setRoom(res.room);
-        this.broadcastState(res.room);
+        if ('room' in res) {
+          this.store.setRoom(res.room);
+          this.broadcastState(res.room);
 
-        // If the disconnected user was the host, start the 20s grace period timer
-        if (res.room.hostUserId === userId) {
-          this.startHostGraceTimer(code, userId);
+          if (res.room.hostUserId === userId) {
+            this.startHostGraceTimer(code, userId);
+          }
         }
-      }
+      });
     });
   }
 
   // ─── Host Grace Period Timer (20s) ───────────────────────────────────
 
-  private startHostGraceTimer(code: string, oldHostUserId: string): void {
+  private startHostGraceTimer(code: string, _oldHostUserId: string): void {
     this.cancelHostGraceTimer(code);
 
     const timer = setTimeout(() => {
       this.hostGraceTimers.delete(code);
       runSafely(`hostGraceExpiry:${code}`, async () => {
-        const room = await this.store.getRoom(code);
-        if (!room) return;
-
-        // If host returned and is online, nothing to do
-        const currentHost = room.members.get(room.hostUserId);
-        if (currentHost && currentHost.online) return;
-
-        // Host is still offline after 20s. Find earliest-joined online member.
-        const onlineMembers = Array.from(room.members.values()).filter(
-          (m) => m.userId !== oldHostUserId && m.online,
-        );
-        onlineMembers.sort((a, b) => a.joinedAt - b.joinedAt);
-
-        if (onlineMembers.length > 0) {
-          const newHost = onlineMembers[0];
-          logger.info(
-            { code, oldHostUserId, newHostUserId: newHost.userId },
-            'Transferring host after 20s offline grace period',
-          );
-
-          const handoverRes = applyCommand(
-            room,
-            { type: 'hostHandover', newHostUserId: newHost.userId },
-            'system',
-            Date.now(),
-          );
-
-          if ('room' in handoverRes) {
-            this.store.setRoom(handoverRes.room);
-            this.broadcastState(handoverRes.room);
-            for (const ev of handoverRes.events) {
-              this.broadcastEvent(code, ev);
-            }
-          }
-        } else {
-          logger.info(
-            { code, oldHostUserId },
-            'Host offline after 20s, but no online members available for handover; room stays offline',
-          );
-        }
+        await this.ensureHost(code);
       });
     }, 20000);
 
@@ -518,6 +548,47 @@ export class Jam2Manager {
     if (existing) {
       clearTimeout(existing);
       this.hostGraceTimers.delete(code);
+    }
+  }
+
+  async ensureHost(code: string, now = Date.now()): Promise<void> {
+    const normalizedCode = code.trim().toUpperCase();
+    await this.mutex.runExclusive(normalizedCode, async () => {
+      const room = await this.store.getRoom(normalizedCode, now);
+      if (!room) return;
+      this.ensureHostLocked(room, now);
+    });
+  }
+
+  private ensureHostLocked(room: Room, now: number): void {
+    const currentHost = room.members.get(room.hostUserId);
+    if (!currentHost || (!currentHost.online && now - currentHost.lastSeenAt >= 20000)) {
+      const onlineMembers = Array.from(room.members.values()).filter((m) => m.online);
+      onlineMembers.sort((a, b) => a.joinedAt - b.joinedAt);
+
+      if (onlineMembers.length > 0) {
+        const nextHost = onlineMembers[0];
+        if (room.hostUserId !== nextHost.userId) {
+          logger.info(
+            { code: room.code, oldHostUserId: room.hostUserId, newHostUserId: nextHost.userId },
+            'Transferring host via ensureHost',
+          );
+          const handoverRes = applyCommand(
+            room,
+            { type: 'hostHandover', newHostUserId: nextHost.userId },
+            'system',
+            now,
+          );
+          if ('room' in handoverRes) {
+            Object.assign(room, handoverRes.room);
+            this.store.setRoom(room);
+            this.broadcastState(room);
+            for (const ev of handoverRes.events) {
+              this.broadcastEvent(room.code, ev);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -535,51 +606,59 @@ export class Jam2Manager {
     }
 
     const durationSec = room.nowPlaying.item.song.duration;
-    if (durationSec <= 0) return;
+    if (durationSec <= 0) {
+      if (!this.loggedZeroDuration.has(room.code)) {
+        this.loggedZeroDuration.add(room.code);
+        logger.warn({ code: room.code }, 'Cannot set fallback timer for track with unknown duration (0)');
+      }
+      return;
+    }
 
     const durationMs = durationSec * 1000;
     const now = Date.now();
     const expectedPos = getExpectedPosition(room.nowPlaying, now);
-    const delay = Math.max(500, durationMs - expectedPos + 5000); // 5s grace period
+    const delay = Math.max(500, durationMs - expectedPos + 5000);
 
     const timer = setTimeout(() => {
       this.trackFallbackTimers.delete(room.code);
       runSafely(`trackFallbackTimer:${room.code}`, async () => {
-        const freshRoom = await this.store.getRoom(room.code);
-        if (
-          !freshRoom ||
-          freshRoom.nowPlaying.status !== 'playing' ||
-          !freshRoom.nowPlaying.item ||
-          freshRoom.nowPlaying.trackSeq !== room.nowPlaying.trackSeq
-        ) {
-          return;
-        }
-
-        logger.debug(
-          { code: room.code, trackSeq: room.nowPlaying.trackSeq },
-          'Track fallback timer triggered trackEnded',
-        );
-
-        const res = applyCommand(
-          freshRoom,
-          {
-            code: room.code,
-            type: 'trackEnded',
-            trackSeq: freshRoom.nowPlaying.trackSeq,
-          },
-          'system',
-          Date.now(),
-        );
-
-        if ('room' in res) {
-          this.store.setRoom(res.room);
-          this.updateTrackFallbackTimer(res.room);
-          this.triggerRecommendationsIfNeeded(res.room);
-          this.broadcastState(res.room);
-          for (const ev of res.events) {
-            this.broadcastEvent(room.code, ev);
+        await this.mutex.runExclusive(room.code, async () => {
+          const freshRoom = await this.store.getRoom(room.code);
+          if (
+            !freshRoom ||
+            freshRoom.nowPlaying.status !== 'playing' ||
+            !freshRoom.nowPlaying.item ||
+            freshRoom.nowPlaying.trackSeq !== room.nowPlaying.trackSeq
+          ) {
+            return;
           }
-        }
+
+          logger.debug(
+            { code: room.code, trackSeq: room.nowPlaying.trackSeq },
+            'Track fallback timer triggered trackEnded',
+          );
+
+          const res = applyCommand(
+            freshRoom,
+            {
+              code: room.code,
+              type: 'trackEnded',
+              trackSeq: freshRoom.nowPlaying.trackSeq,
+            },
+            'system',
+            Date.now(),
+          );
+
+          if ('room' in res) {
+            this.store.setRoom(res.room);
+            this.updateTrackFallbackTimer(res.room);
+            this.triggerRecommendationsIfNeeded(res.room);
+            this.broadcastState(res.room);
+            for (const ev of res.events) {
+              this.broadcastEvent(room.code, ev);
+            }
+          }
+        });
       });
     }, delay);
 
@@ -592,19 +671,26 @@ export class Jam2Manager {
   triggerRecommendationsIfNeeded(room: Room): void {
     if (!room.nowPlaying.item) return;
 
-    // Count upcoming user-added songs
     const userAddedCount = room.queue.filter((q) => !q.recommended).length;
-    if (userAddedCount > 1) return;
+    const recCount = room.queue.filter((q) => q.recommended).length;
 
-    const key = `${room.code}:${room.nowPlaying.trackSeq}`;
-    if (this.inflightRecs.has(key)) return;
+    // A7: Only fetch when recommended items in queue < 3 AND user items <= 1
+    if (userAddedCount > 1 || recCount >= 3) return;
 
-    this.inflightRecs.add(key);
+    const seedKey = `${room.code}:${room.nowPlaying.trackSeq}`;
+    if (this.recsSeededForTrackSeq.has(seedKey)) return;
+    this.recsSeededForTrackSeq.add(seedKey);
 
-    runSafely(`fetchRecs:${key}`, async () => {
+    const inflightKey = `${room.code}:${room.nowPlaying.trackSeq}`;
+    if (this.inflightRecs.has(inflightKey)) return;
+    this.inflightRecs.add(inflightKey);
+
+    runSafely(`fetchRecs:${inflightKey}`, async () => {
       try {
         const song = room.nowPlaying.item!.song;
         const artist = song.artists?.[0]?.name;
+
+        // Fetch OUTSIDE mutex lock
         const candidates = await this.fetchRelatedSongs(
           song.id,
           song.providerId,
@@ -612,37 +698,39 @@ export class Jam2Manager {
           artist,
         );
 
-        const freshRoom = await this.store.getRoom(room.code);
-        if (
-          !freshRoom ||
-          freshRoom.nowPlaying.trackSeq !== room.nowPlaying.trackSeq
-        ) {
-          return;
-        }
+        // Apply INSIDE mutex lock
+        await this.mutex.runExclusive(room.code, async () => {
+          const freshRoom = await this.store.getRoom(room.code);
+          if (
+            !freshRoom ||
+            freshRoom.nowPlaying.trackSeq !== room.nowPlaying.trackSeq
+          ) {
+            return;
+          }
 
-        const res = applyCommand(
-          freshRoom,
-          {
-            type: 'recsAdded',
-            forTrackSeq: room.nowPlaying.trackSeq,
-            songs: candidates,
-          },
-          'system',
-          Date.now(),
-        );
+          const res = applyCommand(
+            freshRoom,
+            {
+              type: 'recsAdded',
+              forTrackSeq: room.nowPlaying.trackSeq,
+              songs: candidates,
+            },
+            'system',
+            Date.now(),
+          );
 
-        if ('room' in res && res.room.version !== freshRoom.version) {
-          this.store.setRoom(res.room);
-          this.broadcastState(res.room);
-        }
+          if ('room' in res && res.room.version !== freshRoom.version) {
+            this.store.setRoom(res.room);
+            this.broadcastState(res.room);
+          }
+        });
       } catch (err) {
-        // Recommendations fetch failures must never break room playback
         logger.warn(
           { err, code: room.code },
           'Failed to fetch recommendations for jam2 room (swallowed)',
         );
       } finally {
-        this.inflightRecs.delete(key);
+        this.inflightRecs.delete(inflightKey);
       }
     });
   }
@@ -650,62 +738,84 @@ export class Jam2Manager {
   // ─── Pruning & Expiry Background Task ────────────────────────────────
 
   private startBackgroundJobs(): void {
-    // Check every 30s for offline pruning and room expiry
+    // 30s prune interval
     this.pruneInterval = setInterval(() => {
       runSafely('jam2:pruneInterval', async () => {
         const rooms = this.store.getAllActiveRooms();
         const now = Date.now();
 
         for (const room of rooms) {
-          // 1. Prune non-host members offline >10 minutes (600,000 ms)
-          const membersToPrune = Array.from(room.members.values()).filter(
-            (m) =>
-              m.userId !== room.hostUserId &&
-              !m.online &&
-              now - m.lastSeenAt > 10 * 60 * 1000,
-          );
-
-          for (const m of membersToPrune) {
-            const res = applyCommand(
-              room,
-              { type: 'memberLeave', userId: m.userId },
-              'system',
-              now,
+          await this.mutex.runExclusive(room.code, async () => {
+            // Prune non-host members offline >10 minutes
+            const membersToPrune = Array.from(room.members.values()).filter(
+              (m) =>
+                m.userId !== room.hostUserId &&
+                !m.online &&
+                now - m.lastSeenAt > 10 * 60 * 1000,
             );
-            if ('room' in res) {
-              Object.assign(room, res.room);
-              this.store.setRoom(room);
-              this.broadcastState(room);
-              for (const ev of res.events) {
-                this.broadcastEvent(room.code, ev);
+
+            for (const m of membersToPrune) {
+              const res = applyCommand(
+                room,
+                { type: 'memberLeave', userId: m.userId },
+                'system',
+                now,
+              );
+              if ('room' in res) {
+                Object.assign(room, res.room);
+                this.store.setRoom(room);
+                this.broadcastState(room);
+                for (const ev of res.events) {
+                  this.broadcastEvent(room.code, ev);
+                }
               }
             }
-          }
 
-          // 2. Room expiry check
-          const allOffline = Array.from(room.members.values()).every(
-            (m) => !m.online,
-          );
-          if (allOffline) {
-            const longestInactive = Math.max(
-              ...Array.from(room.members.values()).map((m) => m.lastSeenAt),
-              room.createdAt,
+            // Ensure host handover if host is offline > 20s
+            this.ensureHostLocked(room, now);
+
+            // Check room expiry (>30 minutes all offline or 0 members)
+            const allOffline = Array.from(room.members.values()).every(
+              (m) => !m.online,
             );
-            // Expire if all members have been offline >30 minutes (1,800,000 ms) or if 0 members
-            if (
-              room.members.size === 0 ||
-              now - longestInactive > 30 * 60 * 1000
-            ) {
-              logger.info({ code: room.code }, 'Jam2 room expired due to inactivity');
-              await this.destroyRoom(room.code, 'expired');
+            if (allOffline) {
+              const longestInactive = Math.max(
+                ...Array.from(room.members.values()).map((m) => m.lastSeenAt),
+                room.createdAt,
+              );
+              if (
+                room.members.size === 0 ||
+                now - longestInactive > 30 * 60 * 1000
+              ) {
+                logger.info({ code: room.code }, 'Jam2 room expired due to inactivity');
+                await this.destroyRoomLocked(room.code, 'expired');
+              }
             }
+          });
+        }
+
+        // Periodic sweep of rate-limits and kicks
+        for (const [key, timestamps] of this.cmdRateLimits.entries()) {
+          const fresh = timestamps.filter((ts) => now - ts < 10000);
+          if (fresh.length === 0) this.cmdRateLimits.delete(key);
+          else this.cmdRateLimits.set(key, fresh);
+        }
+        for (const [key, timestamps] of this.timeRateLimits.entries()) {
+          const fresh = timestamps.filter((ts) => now - ts < 60000);
+          if (fresh.length === 0) this.timeRateLimits.delete(key);
+          else this.timeRateLimits.set(key, fresh);
+        }
+        for (const [code, kicks] of this.kickedUsers.entries()) {
+          for (const [userId, expiry] of kicks.entries()) {
+            if (now >= expiry) kicks.delete(userId);
           }
+          if (kicks.size === 0) this.kickedUsers.delete(code);
         }
       });
     }, 30000);
     this.pruneInterval.unref();
 
-    // Heartbeat every 10s: broadcast full state to rooms with online members
+    // Heartbeat every 10s: broadcast lighter jam2:tick to rooms with online members
     this.heartbeatInterval = setInterval(() => {
       runSafely('jam2:heartbeatInterval', () => {
         const rooms = this.store.getAllActiveRooms();
@@ -714,7 +824,7 @@ export class Jam2Manager {
             (m) => m.online,
           );
           if (hasOnline) {
-            this.broadcastState(room);
+            this.broadcastTick(room);
           }
         }
       });
@@ -724,6 +834,12 @@ export class Jam2Manager {
 
   async destroyRoom(code: string, reason: 'ended' | 'expired'): Promise<void> {
     const normalizedCode = code.toUpperCase();
+    await this.mutex.runExclusive(normalizedCode, async () => {
+      await this.destroyRoomLocked(normalizedCode, reason);
+    });
+  }
+
+  private async destroyRoomLocked(normalizedCode: string, reason: 'ended' | 'expired'): Promise<void> {
     this.cancelHostGraceTimer(normalizedCode);
 
     const fallbackTimer = this.trackFallbackTimers.get(normalizedCode);
@@ -737,6 +853,9 @@ export class Jam2Manager {
     }
 
     this.roomUserSockets.delete(normalizedCode);
+    this.recsSeededForTrackSeq.delete(normalizedCode);
+    this.kickedUsers.delete(normalizedCode);
+    this.loggedZeroDuration.delete(normalizedCode);
     await this.store.deleteRoom(normalizedCode);
   }
 
@@ -746,6 +865,23 @@ export class Jam2Manager {
     if (!this.io) return;
     const snapshot: RoomSnapshot = serializeRoom(room, Date.now());
     this.io.to(`jam2:${room.code}`).emit('jam2:state', snapshot);
+  }
+
+  broadcastTick(room: Room): void {
+    if (!this.io) return;
+    const tick: Jam2Tick = {
+      code: room.code,
+      version: room.version,
+      serverNow: Date.now(),
+      nowPlaying: {
+        status: room.nowPlaying.status,
+        positionMs: room.nowPlaying.positionMs,
+        anchorServerTs: room.nowPlaying.anchorServerTs,
+        trackSeq: room.nowPlaying.trackSeq,
+        qid: room.nowPlaying.item?.qid ?? null,
+      },
+    };
+    this.io.to(`jam2:${room.code}`).emit('jam2:tick', tick);
   }
 
   broadcastEvent(code: string, event: Jam2Event): void {

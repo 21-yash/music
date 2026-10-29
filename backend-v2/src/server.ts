@@ -68,6 +68,12 @@ async function start(): Promise<void> {
     const shutdown = async (signal: string) => {
       logger.info({ signal }, 'Shutdown signal received');
 
+      // Force exit if graceful shutdown takes too long (armed before any async flushes)
+      setTimeout(() => {
+        logger.error('Graceful shutdown timed out. Forcing exit.');
+        process.exit(1);
+      }, 10_000);
+
       jam2Manager.notifyServerRestart();
       jam2Manager.stop();
       await jam2Store.flushAllDirty();
@@ -82,12 +88,6 @@ async function start(): Promise<void> {
         logger.info('All connections closed. Exiting.');
         process.exit(0);
       });
-
-      // Force exit if graceful shutdown takes too long
-      setTimeout(() => {
-        logger.error('Graceful shutdown timed out. Forcing exit.');
-        process.exit(1);
-      }, 10_000);
     };
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));

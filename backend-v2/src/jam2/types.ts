@@ -136,7 +136,6 @@ export type Jam2ErrorCode =
   | 'NOT_MEMBER'
   | 'FORBIDDEN'
   | 'INVALID'
-  | 'ALREADY_QUEUED'
   | 'QUEUE_FULL'
   | 'RATE_LIMITED'
   | 'PROTOCOL';
@@ -149,6 +148,19 @@ export interface Jam2Error {
 export type Jam2Ack<T = Record<string, unknown>> =
   | ({ ok: true } & T)
   | { ok: false; code: Jam2ErrorCode; message: string };
+
+export interface Jam2Tick {
+  code: string;
+  version: number;
+  serverNow: number;
+  nowPlaying: {
+    status: PlaybackStatus;
+    positionMs: number;
+    anchorServerTs: number;
+    trackSeq: number;
+    qid: string | null;
+  };
+}
 
 export type Jam2EventKind =
   | 'member_joined'

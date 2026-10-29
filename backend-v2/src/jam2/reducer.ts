@@ -45,6 +45,27 @@ function cloneRoom(room: Room): Room {
   };
 }
 
+export function normalizeQueue(room: Room): void {
+  const seenQids = new Set<string>();
+  const userItems: QueueItem[] = [];
+  const recItems: QueueItem[] = [];
+
+  for (const item of room.queue) {
+    if (seenQids.has(item.qid)) continue;
+    seenQids.add(item.qid);
+    if (item.recommended) {
+      recItems.push(item);
+    } else {
+      userItems.push(item);
+    }
+  }
+
+  room.queue = [...userItems, ...recItems];
+  if (room.queue.length > MAX_QUEUE_SIZE) {
+    room.queue.splice(MAX_QUEUE_SIZE);
+  }
+}
+
 export function applyCommand(
   room: Room,
   cmd: Jam2Command,
@@ -92,7 +113,7 @@ export function applyCommand(
       }
 
       // Already playing: no-op
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     case 'pause': {
@@ -102,8 +123,9 @@ export function applyCommand(
         nextRoom.nowPlaying.positionMs = currentPos;
         nextRoom.nowPlaying.anchorServerTs = now;
         nextRoom.version++;
+        return { room: nextRoom, events };
       }
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     case 'seek': {
@@ -158,13 +180,23 @@ export function applyCommand(
         nextRoom.nowPlaying.positionMs = 0;
         nextRoom.nowPlaying.anchorServerTs = now;
         nextRoom.version++;
+        normalizeQueue(nextRoom);
         return { room: nextRoom, events };
       }
 
       // Pop from history
       const popped = nextRoom.history.pop()!;
       if (nextRoom.nowPlaying.item) {
-        nextRoom.queue.unshift(nextRoom.nowPlaying.item);
+        if (nextRoom.nowPlaying.item.recommended) {
+          const firstRecIdx = nextRoom.queue.findIndex((q) => q.recommended);
+          if (firstRecIdx === -1) {
+            nextRoom.queue.push(nextRoom.nowPlaying.item);
+          } else {
+            nextRoom.queue.splice(firstRecIdx, 0, nextRoom.nowPlaying.item);
+          }
+        } else {
+          nextRoom.queue.unshift(nextRoom.nowPlaying.item);
+        }
       }
 
       nextRoom.nowPlaying = {
@@ -175,6 +207,7 @@ export function applyCommand(
         trackSeq: nextRoom.nowPlaying.trackSeq + 1,
       };
       nextRoom.version++;
+      normalizeQueue(nextRoom);
       return { room: nextRoom, events };
     }
 
@@ -185,19 +218,29 @@ export function applyCommand(
       }
 
       const targetItem = nextRoom.queue[idx];
-      const skippedItems = nextRoom.queue.slice(0, idx);
 
       if (nextRoom.nowPlaying.item) {
         nextRoom.history.push(nextRoom.nowPlaying.item);
-      }
-      for (const skipped of skippedItems) {
-        nextRoom.history.push(skipped);
-      }
-      if (nextRoom.history.length > MAX_HISTORY_SIZE) {
-        nextRoom.history.splice(0, nextRoom.history.length - MAX_HISTORY_SIZE);
+        if (nextRoom.history.length > MAX_HISTORY_SIZE) {
+          nextRoom.history.splice(0, nextRoom.history.length - MAX_HISTORY_SIZE);
+        }
       }
 
-      nextRoom.queue = nextRoom.queue.slice(idx + 1);
+      if (targetItem.recommended) {
+        // If target is recommended, remove JUST that item and play it; do NOT push other items to history!
+        nextRoom.queue.splice(idx, 1);
+      } else {
+        // If target is user item: items before target go to history
+        const skippedItems = nextRoom.queue.slice(0, idx);
+        for (const skipped of skippedItems) {
+          nextRoom.history.push(skipped);
+        }
+        if (nextRoom.history.length > MAX_HISTORY_SIZE) {
+          nextRoom.history.splice(0, nextRoom.history.length - MAX_HISTORY_SIZE);
+        }
+        nextRoom.queue = nextRoom.queue.slice(idx + 1);
+      }
+
       nextRoom.nowPlaying = {
         item: targetItem,
         status: 'playing',
@@ -206,6 +249,7 @@ export function applyCommand(
         trackSeq: nextRoom.nowPlaying.trackSeq + 1,
       };
       nextRoom.version++;
+      normalizeQueue(nextRoom);
       return { room: nextRoom, events };
     }
 
@@ -215,7 +259,25 @@ export function applyCommand(
         cmd.trackSeq !== nextRoom.nowPlaying.trackSeq ||
         nextRoom.nowPlaying.status !== 'playing'
       ) {
-        return { room: nextRoom, events: [] };
+        return { room, events: [] };
+      }
+
+      // If actor is not 'system', validate that song is actually near the end
+      if (actorUserId !== 'system' && nextRoom.nowPlaying.item) {
+        const durationSec = nextRoom.nowPlaying.item.song.duration;
+        if (durationSec > 0) {
+          const durationMs = durationSec * 1000;
+          const expectedPos = getExpectedPosition(nextRoom.nowPlaying, now);
+          if (expectedPos < durationMs - 6000) {
+            return { room, events: [] };
+          }
+        } else {
+          // Unknown duration (0) -> require at least 15s elapsed
+          const elapsed = (now - nextRoom.nowPlaying.anchorServerTs) + nextRoom.nowPlaying.positionMs;
+          if (elapsed < 15000) {
+            return { room, events: [] };
+          }
+        }
       }
 
       // Advances exactly like next
@@ -245,6 +307,7 @@ export function applyCommand(
         };
       }
       nextRoom.version++;
+      normalizeQueue(nextRoom);
       return { room: nextRoom, events };
     }
 
@@ -496,7 +559,12 @@ export function applyCommand(
     case 'recsAdded': {
       // Stale track recommendations are ignored
       if (cmd.forTrackSeq !== nextRoom.nowPlaying.trackSeq) {
-        return { room: nextRoom, events: [] };
+        return { room, events: [] };
+      }
+
+      const currentRecCount = nextRoom.queue.filter((q) => q.recommended).length;
+      if (currentRecCount >= 10 || nextRoom.queue.length >= MAX_QUEUE_SIZE) {
+        return { room, events: [] };
       }
 
       const existingIds = new Set<string>();
@@ -526,9 +594,10 @@ export function applyCommand(
         seenFp.add(getSongFingerprint(h.song.title, h.song.artists?.[0]?.name));
       }
 
+      let recsInQueue = currentRecCount;
       let added = 0;
       for (const song of cmd.songs) {
-        if (added >= 10 || nextRoom.queue.length >= MAX_QUEUE_SIZE) break;
+        if (recsInQueue >= 10 || nextRoom.queue.length >= MAX_QUEUE_SIZE) break;
         if (existingIds.has(song.id)) continue;
 
         const fp = getSongFingerprint(song.title, song.artists?.[0]?.name);
@@ -544,18 +613,21 @@ export function applyCommand(
           addedAt: now,
           recommended: true,
         });
+        recsInQueue++;
         added++;
       }
 
       if (added > 0) {
         nextRoom.version++;
+        normalizeQueue(nextRoom);
+        return { room: nextRoom, events };
       }
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     case 'hostHandover': {
       const newHost = nextRoom.members.get(cmd.newHostUserId);
-      if (newHost) {
+      if (newHost && nextRoom.hostUserId !== cmd.newHostUserId) {
         nextRoom.hostUserId = cmd.newHostUserId;
         nextRoom.version++;
         events.push({
@@ -563,8 +635,10 @@ export function applyCommand(
           userId: cmd.newHostUserId,
           username: newHost.username,
         });
+        normalizeQueue(nextRoom);
+        return { room: nextRoom, events };
       }
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     case 'memberOnline': {
@@ -587,17 +661,20 @@ export function applyCommand(
         nextRoom.version++;
         events.push({ kind: 'member_joined', userId: cmd.userId, username: cmd.username });
       }
+      normalizeQueue(nextRoom);
       return { room: nextRoom, events };
     }
 
     case 'memberOffline': {
       const member = nextRoom.members.get(cmd.userId);
-      if (member) {
+      if (member && member.online) {
         member.online = false;
         member.lastSeenAt = now;
         nextRoom.version++;
+        normalizeQueue(nextRoom);
+        return { room: nextRoom, events };
       }
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     case 'memberLeave': {
@@ -606,8 +683,27 @@ export function applyCommand(
         nextRoom.members.delete(cmd.userId);
         nextRoom.version++;
         events.push({ kind: 'member_left', userId: cmd.userId, username: member.username });
+
+        // If the leaving member was the host, successor = earliest-joined remaining member,
+        // PREFERRING online ones, but falling back to offline members
+        if (nextRoom.hostUserId === cmd.userId && nextRoom.members.size > 0) {
+          const remaining = Array.from(nextRoom.members.values());
+          remaining.sort((a, b) => {
+            if (a.online !== b.online) return a.online ? -1 : 1;
+            return a.joinedAt - b.joinedAt;
+          });
+          const newHost = remaining[0];
+          nextRoom.hostUserId = newHost.userId;
+          events.push({
+            kind: 'host_changed',
+            userId: newHost.userId,
+            username: newHost.username,
+          });
+        }
+        normalizeQueue(nextRoom);
+        return { room: nextRoom, events };
       }
-      return { room: nextRoom, events };
+      return { room, events: [] };
     }
 
     default:

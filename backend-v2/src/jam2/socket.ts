@@ -237,6 +237,52 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
     }
   });
 
+  // ─── 5b. jam2:sync ───────────────────────────────────────────────────
+  socket.on('jam2:sync', async (rawPayload: unknown, ack?: unknown) => {
+    try {
+      if (!user) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'FORBIDDEN',
+          message: 'Unauthorized: missing user context',
+        });
+      }
+
+      const parsed = roomCodeSchema.safeParse(rawPayload);
+      if (!parsed.success) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'INVALID',
+          message: 'Invalid sync payload',
+        });
+      }
+
+      const code = parsed.data.code.trim().toUpperCase();
+      const room = await jam2Manager.getRoom(code);
+      if (!room) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'NOT_FOUND',
+          message: 'Room not found',
+        });
+      }
+
+      if (!room.members.has(user.userId)) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'NOT_MEMBER',
+          message: 'You are not a member of this Jam session',
+        });
+      }
+
+      const snapshot = serializeRoom(room, Date.now());
+      safeAck(ack, { ok: true, room: snapshot });
+    } catch (err) {
+      logger.error({ err, socketId: socket.id }, 'Error in jam2:sync');
+      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error syncing room' });
+    }
+  });
+
   // ─── 6. jam2:cmd ─────────────────────────────────────────────────────
   socket.on('jam2:cmd', async (rawPayload: unknown, ack?: unknown) => {
     try {
@@ -295,7 +341,16 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         }
       }
 
-      safeAck(ack, { ok: true, version: res.room.version });
+      if (cmd.type === 'queueAddMany') {
+        safeAck(ack, {
+          ok: true,
+          added: res.added ?? cmd.songs.length,
+          skipped: res.skipped ?? 0,
+          version: res.room.version,
+        });
+      } else {
+        safeAck(ack, { ok: true, version: res.room.version });
+      }
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:cmd');
       safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error processing command' });

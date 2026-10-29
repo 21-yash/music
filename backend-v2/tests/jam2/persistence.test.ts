@@ -158,7 +158,7 @@ describe('Jam2 Persistence & Rehydration', () => {
     const rehydrated = await freshStore.getRoom('REHY');
     expect(rehydrated).not.toBeNull();
     expect(rehydrated?.code).toBe('REHY');
-    expect(rehydrated?.version).toBe(5);
+    expect(rehydrated?.version).toBe(1005); // A5: version bumped by += 1000 on rehydrate
     expect(rehydrated?.members.get('u_host')?.online).toBe(false); // Offline until reconnect
     expect(freshStore.hasRoom('REHY')).toBe(true);
   });
