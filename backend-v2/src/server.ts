@@ -10,6 +10,8 @@ import { JioSaavnProvider } from './providers/music';
 import { YouTubeProvider } from './providers/music/youtube/youtubeProvider';
 import { initSportsService } from './services/sportsService';
 import { CricbuzzProvider } from './providers/sports/cricket/cricbuzzProvider';
+import { jam2Store } from './jam2/store';
+import { jam2Manager } from './jam2/manager';
 
 /**
  * Application entry point.
@@ -34,6 +36,9 @@ async function start(): Promise<void> {
         'Redis unavailable at startup — continuing without Redis (rate limiting will fail open)',
       );
     }
+
+    const persistedRoomsCount = await jam2Store.countPersistedRooms();
+    logger.info({ count: persistedRoomsCount }, 'Persisted jam2 rooms detected in Redis');
 
     // ─── Initialize Services ───────────────────────────────────
     registerMusicProvider(new JioSaavnProvider(), true);
@@ -62,6 +67,10 @@ async function start(): Promise<void> {
     // ─── Graceful shutdown ─────────────────────────────────────
     const shutdown = async (signal: string) => {
       logger.info({ signal }, 'Shutdown signal received');
+
+      jam2Manager.notifyServerRestart();
+      jam2Manager.stop();
+      await jam2Store.flushAllDirty();
 
       // Stop accepting new connections
       server.close(async () => {
