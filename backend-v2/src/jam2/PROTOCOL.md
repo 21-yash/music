@@ -49,9 +49,9 @@ Ack signatures return a union of success or failure:
 - `PROTOCOL`: Incompatible client protocol version (must be 2).
 - `NOT_FOUND`: Room not found or invalid room code.
 - `NOT_MEMBER`: Socket or user is not a member of the room.
-- `FORBIDDEN`: Action denied due to insufficient permissions, or kicked from room within 10 minutes.
+- `FORBIDDEN`: Action denied due to insufficient permissions, or kicked from room within 10 minutes ("You were removed from this Jam by the host.").
 - `INVALID`: Malformed payload or validation error.
-- `QUEUE_FULL`: Queue reached capacity (50 songs).
+- `QUEUE_FULL`: Queue reached user capacity (50 user-added songs).
 - `RATE_LIMITED`: Too many commands, failed joins, or time requests.
 
 ---
@@ -211,12 +211,23 @@ Dispatches a state-mutating command to the room.
 }
 ```
 
-**Acknowledgement response for `queueAddMany`:**
+**Acknowledgement response for `trackEnded`:**
+```json
+{
+  "ok": true,
+  "applied": true,
+  "version": 42
+}
+```
+
+**Acknowledgement response for `queueAdd` and `queueAddMany`:**
 ```json
 {
   "ok": true,
   "added": 5,
-  "skipped": 0,
+  "skipped": 1,
+  "skippedDuplicate": 1,
+  "skippedFull": 0,
   "version": 42
 }
 ```
@@ -232,14 +243,14 @@ Dispatches a state-mutating command to the room.
 | `prev` | none | `playback` | If position > 3s, restarts track; otherwise pops previous from history |
 | `playItem` | `qid: string` | `playback` | Jumps directly to a specific queued track |
 | `trackEnded` | `trackSeq: number` | Any member | Reports that track finished playing. Strictly validated (see below) |
-| `queueAdd` | `song: Song`, `playNext?: boolean` | `queueAdd` | Appends song or inserts immediately after nowPlaying |
-| `queueAddMany` | `songs: Song[]` (1-20) | `queueAdd` | Batch adds multiple songs to the user queue |
+| `queueAdd` | `song: Song`, `playNext?: boolean` | `queueAdd` | Appends song or inserts immediately after nowPlaying. Moves existing to front if `playNext` is true. |
+| `queueAddMany` | `songs: Song[]` (1-20) | `queueAdd` | Batch adds multiple songs to the user queue, skipping duplicates |
 | `promote` | `qid: string` | `queueAdd` | Moves a recommended item into user section and marks as added by user |
 | `queueRemove` | `qid: string` | Own item: none. Recs: `queueAdd`. Others: `queueManage`. | Removes item from queue |
 | `queueMove` | `qid: string`, `toIndex: number` | `queueManage` | Reorders user songs within queue |
 | `setMemberPerms` | `userId: string`, `perms: Record<string, boolean>` | Host only | Updates permissions for a specific member |
-| `setDefaults` | `perms: Record<string, boolean>` | Host only | Updates default permissions for future joiners |
-| `kick` | `userId: string` | Host only | Kicks a member (kicked member receives `jam2:closed { reason: 'kicked' }`) |
+| `setDefaults` | `perms: Record<string, boolean>`, `applyToExisting?: boolean` | Host only | Updates default permissions for future joiners, and optionally updates all current members when `applyToExisting: true` |
+| `kick` | `userId: string` | Host only | Kicks a member (banned for 10m; kicked socket receives `jam2:closed { reason: 'kicked' }`) |
 | `transferHost` | `userId: string` | Host only | Transfers host role to another member |
 
 #### `trackEnded` Eligibility Rules

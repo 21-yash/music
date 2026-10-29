@@ -435,7 +435,13 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         jam2Manager.deregisterUserSockets(normalizedCode, kickedUserId);
       }
 
-      if (cmd.type === 'queueAddMany' || cmd.type === 'queueAdd') {
+      if (cmd.type === 'trackEnded') {
+        safeAck(ack, {
+          ok: true,
+          applied: res.applied ?? false,
+          version: res.room.version,
+        });
+      } else if (cmd.type === 'queueAddMany' || cmd.type === 'queueAdd') {
         safeAck(ack, {
           ok: true,
           added: res.added ?? 1,

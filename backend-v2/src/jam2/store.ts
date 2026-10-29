@@ -43,51 +43,81 @@ export class Jam2Store {
       return inFlight;
     }
 
-    // 3. Rehydrate from Redis
-    const rehydratePromise = (async () => {
-      try {
-        const client = getRedisClient();
-        const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
-        if (!raw) return null;
+    // 3. Rehydrate from Redis via separate async method
+    const promise = this.rehydrateFromRedis(normalizedCode, now).finally(() => {
+      this.inFlightRehydrations.delete(normalizedCode);
+    });
 
-        const parsed: PersistedRoom = JSON.parse(raw);
-        const membersMap = new Map<string, Member>();
-        for (const m of parsed.members) {
-          membersMap.set(m.userId, {
-            ...m,
-            online: false, // Mark all offline on rehydration until they rejoin
-            lastSeenAt: now, // Give host fresh 20s grace period on restart
-          });
-        }
+    this.inFlightRehydrations.set(normalizedCode, promise);
+    return promise;
+  }
 
-        const rehydrated: Room = {
-          code: parsed.code,
-          version: parsed.version + 1000, // Version + 1000 on rehydrate
-          hostUserId: parsed.hostUserId,
-          createdAt: parsed.createdAt,
-          members: membersMap,
-          defaults: parsed.defaults,
-          queue: parsed.queue,
-          history: parsed.history,
-          nowPlaying: parsed.nowPlaying,
-        };
+  private async rehydrateFromRedis(normalizedCode: string, now: number): Promise<Room | null> {
+    try {
+      const client = getRedisClient();
+      const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
+      if (!raw) return null;
 
-        // Catch-up stale playback if song finished while server was offline
-        this.catchUpStalePlayback(rehydrated, now);
-
-        this.rooms.set(normalizedCode, rehydrated);
-        logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
-        return rehydrated;
-      } catch (err) {
-        logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
-        return null;
-      } finally {
-        this.inFlightRehydrations.delete(normalizedCode);
+      const parsed: PersistedRoom = JSON.parse(raw);
+      const membersMap = new Map<string, Member>();
+      for (const m of parsed.members) {
+        membersMap.set(m.userId, {
+          ...m,
+          online: false, // Mark all offline on rehydration until they rejoin
+          lastSeenAt: now, // Give host fresh 20s grace period on restart
+        });
       }
-    })();
 
-    this.inFlightRehydrations.set(normalizedCode, rehydratePromise);
-    return rehydratePromise;
+      const rehydrated: Room = {
+        code: parsed.code,
+        version: parsed.version + 1000, // Version + 1000 on rehydrate
+        hostUserId: parsed.hostUserId,
+        createdAt: parsed.createdAt,
+        members: membersMap,
+        defaults: parsed.defaults,
+        queue: parsed.queue,
+        history: parsed.history,
+        nowPlaying: parsed.nowPlaying,
+      };
+
+      // Catch-up stale playback if song finished while server was offline
+      this.catchUpStalePlayback(rehydrated, now);
+
+      this.rooms.set(normalizedCode, rehydrated);
+      logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
+      return rehydrated;
+    } catch (err) {
+      logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
+      return null;
+    }
+  }
+
+  /**
+   * Check if a room exists in memory or in Redis.
+   */
+  async checkRoomExists(code: string): Promise<boolean> {
+    const normalizedCode = code.toUpperCase();
+    if (this.rooms.has(normalizedCode)) return true;
+    try {
+      const client = getRedisClient();
+      const exists = await client.exists(`${REDIS_KEY_PREFIX}${normalizedCode}`);
+      return exists > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Refresh Redis TTL for an active room.
+   */
+  async refreshRoomTTL(code: string): Promise<void> {
+    const normalizedCode = code.toUpperCase();
+    try {
+      const client = getRedisClient();
+      await client.expire(`${REDIS_KEY_PREFIX}${normalizedCode}`, ROOM_TTL_SECONDS);
+    } catch (err) {
+      logger.warn({ err, code: normalizedCode }, 'Failed to refresh jam2 room TTL in Redis');
+    }
   }
 
   /**

@@ -65,7 +65,10 @@ async function start(): Promise<void> {
     });
 
     // ─── Graceful shutdown ─────────────────────────────────────
+    let isShuttingDown = false;
     const shutdown = async (signal: string) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
       logger.info({ signal }, 'Shutdown signal received');
 
       // Force exit if graceful shutdown takes too long (armed before any async flushes)

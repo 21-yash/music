@@ -197,102 +197,105 @@ export const roomCodeSchema = z.object({
   code: z.string().min(1).max(20),
 }).strip();
 
+const roomCodeField = z.string().min(1).max(20);
+
 export const cmdBaseSchema = z.object({
-  code: z.string().min(1).max(20),
+  code: roomCodeField,
   type: z.string(),
 });
 
 export const playCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('play'),
 });
 
 export const pauseCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('pause'),
 });
 
 export const seekCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('seek'),
   positionMs: z.number().int().min(0),
 });
 
 export const nextCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('next'),
 });
 
 export const prevCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('prev'),
 });
 
 export const playItemCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('playItem'),
   qid: z.string().min(1).max(100),
 });
 
 export const trackEndedCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('trackEnded'),
   trackSeq: z.number().int().min(0),
 });
 
 export const queueAddCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('queueAdd'),
   song: songSchema,
   playNext: z.boolean().optional(),
 });
 
 export const queueAddManyCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('queueAddMany'),
   songs: z.array(songSchema).min(1).max(20),
 });
 
 export const promoteCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('promote'),
   qid: z.string().min(1).max(100),
 });
 
 export const queueRemoveCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('queueRemove'),
   qid: z.string().min(1).max(100),
 });
 
 export const queueMoveCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('queueMove'),
   qid: z.string().min(1).max(100),
   toIndex: z.number().int().min(0),
 });
 
 export const setMemberPermsCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('setMemberPerms'),
   userId: z.string().min(1).max(100),
   perms: permsSchema,
 });
 
 export const setDefaultsCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('setDefaults'),
   perms: permsSchema,
+  applyToExisting: z.boolean().optional(),
 });
 
 export const kickCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('kick'),
   userId: z.string().min(1).max(100),
 });
 
 export const transferHostCmdSchema = z.object({
-  code: z.string(),
+  code: roomCodeField,
   type: z.literal('transferHost'),
   userId: z.string().min(1).max(100),
 });

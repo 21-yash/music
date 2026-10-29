@@ -77,6 +77,7 @@ export type ReducerResult =
   | {
       room: Room;
       events: Jam2Event[];
+      applied?: boolean;
       added?: number;
       skippedDuplicate?: number;
       skippedFull?: number;
@@ -154,6 +155,10 @@ export function applyCommand(
           ? nextRoom.nowPlaying.item.song.duration * 1000
           : Number.MAX_SAFE_INTEGER;
       const clampedPos = Math.max(0, Math.min(cmd.positionMs, durationMs));
+      const currentPos = getExpectedPosition(nextRoom.nowPlaying, now);
+      if (Math.abs(currentPos - clampedPos) < 200) {
+        return { room, events: [] };
+      }
       nextRoom.nowPlaying.positionMs = clampedPos;
       nextRoom.nowPlaying.anchorServerTs = now;
       nextRoom.version++;
@@ -276,7 +281,7 @@ export function applyCommand(
         cmd.trackSeq !== nextRoom.nowPlaying.trackSeq ||
         nextRoom.nowPlaying.status !== 'playing'
       ) {
-        return { room, events: [] };
+        return { room, events: [], applied: false };
       }
 
       // If actor is not 'system', validate that song is actually near the end
@@ -286,13 +291,13 @@ export function applyCommand(
           const durationMs = durationSec * 1000;
           const expectedPos = getExpectedPosition(nextRoom.nowPlaying, now);
           if (expectedPos < durationMs - 6000) {
-            return { room, events: [] };
+            return { room, events: [], applied: false };
           }
         } else {
           // Unknown duration (0) -> require at least 15s elapsed
           const elapsed = (now - nextRoom.nowPlaying.anchorServerTs) + nextRoom.nowPlaying.positionMs;
           if (elapsed < 15000) {
-            return { room, events: [] };
+            return { room, events: [], applied: false };
           }
         }
       }
@@ -325,7 +330,7 @@ export function applyCommand(
       }
       nextRoom.version++;
       normalizeQueue(nextRoom);
-      return { room: nextRoom, events };
+      return { room: nextRoom, events, applied: true };
     }
 
     case 'queueAdd': {
@@ -582,6 +587,13 @@ export function applyCommand(
     case 'setDefaults': {
       nextRoom.defaults = { ...nextRoom.defaults, ...cmd.perms };
       nextRoom.version++;
+      if (cmd.applyToExisting) {
+        for (const [userId, member] of nextRoom.members.entries()) {
+          if (userId === nextRoom.hostUserId) continue;
+          member.perms = { ...member.perms, ...cmd.perms };
+          events.push({ kind: 'perm_changed', userId, perms: { ...member.perms } });
+        }
+      }
       return { room: nextRoom, events };
     }
 

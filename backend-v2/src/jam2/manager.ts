@@ -1,6 +1,8 @@
+import { randomInt } from 'crypto';
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
 import { getRelatedSongs } from '../services/musicService';
+import { getRedisClient } from '../config/redis';
 import { jam2Store, Jam2Store } from './store';
 import { applyCommand } from './reducer';
 import {
@@ -84,9 +86,10 @@ export class Jam2Manager {
   private trackFallbackTimers = new Map<string, NodeJS.Timeout>();
   private hostGraceTimers = new Map<string, NodeJS.Timeout>();
   private inflightRecs = new Set<string>();
-  private recsSeededForTrackSeq = new Set<string>();
+  private recsSeededForTrackSeq = new Map<string, number>();
   private kickedUsers = new Map<string, Map<string, number>>();
   private loggedZeroDuration = new Set<string>();
+  private lastTTLRefresh = new Map<string, number>();
 
   // Background interval timers
   private pruneInterval: NodeJS.Timeout | null = null;
@@ -201,15 +204,39 @@ export class Jam2Manager {
     for (let attempt = 0; attempt < 100; attempt++) {
       let code = '';
       for (let i = 0; i < 4; i++) {
-        code += JAM_ROOM_CODE_CHARS[
-          Math.floor(Math.random() * JAM_ROOM_CODE_CHARS.length)
-        ];
+        code += JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
       }
       if (!this.store.hasRoom(code)) {
         return code;
       }
     }
-    return `J${Date.now().toString(36).slice(-3).toUpperCase()}`;
+    const ts = Date.now().toString(36).slice(-3).toUpperCase();
+    const letter = JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
+    return `${letter}${ts}`.slice(0, 4);
+  }
+
+  async generateUniqueRoomCode(): Promise<string> {
+    for (let attempt = 0; attempt < 150; attempt++) {
+      let code = '';
+      for (let i = 0; i < 4; i++) {
+        code += JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
+      }
+      const exists = await this.store.checkRoomExists(code);
+      if (!exists) {
+        return code;
+      }
+    }
+    // Fallback: guaranteed unique 4-character code check loop
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const ts = Date.now().toString(36).slice(-3).toUpperCase();
+      const letter = JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
+      const fallbackCode = `${letter}${ts}`.slice(0, 4);
+      const exists = await this.store.checkRoomExists(fallbackCode);
+      if (!exists) {
+        return fallbackCode;
+      }
+    }
+    throw new Error('Unable to allocate a unique 4-character room code');
   }
 
   // ─── Room Lifecycle ──────────────────────────────────────────────────
@@ -219,7 +246,7 @@ export class Jam2Manager {
     hostUsername: string,
     avatarUrl?: string,
   ): Promise<Room> {
-    const code = this.generateRoomCode();
+    const code = await this.generateUniqueRoomCode();
     const now = Date.now();
 
     return this.mutex.runExclusive(code, async () => {
@@ -276,18 +303,33 @@ export class Jam2Manager {
   ): Promise<{ room: Room; events: Jam2Event[] } | { error: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
 
-    // Check kick ban (10 minutes)
+    // Check kick ban (10 minutes) in-memory or Redis
+    let isBanned = false;
     const roomKicks = this.kickedUsers.get(normalizedCode);
     if (roomKicks) {
       const expiry = roomKicks.get(userId);
       if (expiry && expiry > Date.now()) {
-        return {
-          error: {
-            code: 'FORBIDDEN',
-            message: 'You were removed from this Jam by the host.',
-          },
-        };
+        isBanned = true;
       }
+    }
+
+    if (!isBanned) {
+      try {
+        const client = getRedisClient();
+        const ban = await client.get(`jam2:ban:${normalizedCode}:${userId}`);
+        if (ban === '1') isBanned = true;
+      } catch {
+        // Fallback open if Redis is unavailable
+      }
+    }
+
+    if (isBanned) {
+      return {
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You were removed from this Jam by the host.',
+        },
+      };
     }
 
     return this.mutex.runExclusive(normalizedCode, async () => {
@@ -431,6 +473,7 @@ export class Jam2Manager {
   ): Promise<{
     room: Room;
     events: Jam2Event[];
+    applied?: boolean;
     added?: number;
     skipped?: number;
     skippedDuplicate?: number;
@@ -457,6 +500,7 @@ export class Jam2Manager {
         return {
           room: nextRoom,
           events: res.events,
+          applied: res.applied,
           added: res.added,
           skipped: (res.skippedDuplicate ?? 0) + (res.skippedFull ?? 0),
           skippedDuplicate: res.skippedDuplicate,
@@ -464,7 +508,7 @@ export class Jam2Manager {
         };
       }
 
-      // Handle kick tracking for 10 minutes
+      // Handle kick tracking for 10 minutes (in-memory + Redis)
       if (cmd.type === 'kick') {
         let kicks = this.kickedUsers.get(normalizedCode);
         if (!kicks) {
@@ -472,6 +516,13 @@ export class Jam2Manager {
           this.kickedUsers.set(normalizedCode, kicks);
         }
         kicks.set(cmd.userId, Date.now() + 10 * 60 * 1000);
+
+        try {
+          const client = getRedisClient();
+          await client.set(`jam2:ban:${normalizedCode}:${cmd.userId}`, '1', 'EX', 600);
+        } catch (err) {
+          logger.warn({ err, code: normalizedCode, userId: cmd.userId }, 'Failed to persist kick ban to Redis');
+        }
       }
 
       this.store.setRoom(nextRoom);
@@ -491,6 +542,7 @@ export class Jam2Manager {
       return {
         room: nextRoom,
         events: res.events,
+        applied: res.applied,
         added: res.added,
         skipped: (res.skippedDuplicate ?? 0) + (res.skippedFull ?? 0),
         skippedDuplicate: res.skippedDuplicate,
@@ -584,7 +636,7 @@ export class Jam2Manager {
           now,
         );
 
-        if ('room' in res) {
+        if ('room' in res && res.room.version !== room.version) {
           this.store.setRoom(res.room);
           this.broadcastState(res.room);
 
@@ -648,7 +700,7 @@ export class Jam2Manager {
             'system',
             now,
           );
-          if ('room' in handoverRes) {
+          if ('room' in handoverRes && handoverRes.room.version !== room.version) {
             Object.assign(room, handoverRes.room);
             this.store.setRoom(room);
             this.broadcastState(room);
@@ -743,18 +795,16 @@ export class Jam2Manager {
     const userAddedCount = room.queue.filter((q) => !q.recommended).length;
     const recCount = room.queue.filter((q) => q.recommended).length;
 
-    // A7: Only fetch when recommended items in queue < 3 AND user items <= 1
+    // Only fetch when recommended items in queue < 3 AND user items <= 1
     if (userAddedCount > 1 || recCount >= 3) return;
 
-    const seedKey = `${room.code}:${room.nowPlaying.trackSeq}`;
-    if (this.recsSeededForTrackSeq.has(seedKey)) return;
-    this.recsSeededForTrackSeq.add(seedKey);
+    const lastSeeded = this.recsSeededForTrackSeq.get(room.code);
+    if (lastSeeded === room.nowPlaying.trackSeq) return;
 
-    const inflightKey = `${room.code}:${room.nowPlaying.trackSeq}`;
-    if (this.inflightRecs.has(inflightKey)) return;
-    this.inflightRecs.add(inflightKey);
+    if (this.inflightRecs.has(room.code)) return;
+    this.inflightRecs.add(room.code);
 
-    runSafely(`fetchRecs:${inflightKey}`, async () => {
+    runSafely(`fetchRecs:${room.code}:${room.nowPlaying.trackSeq}`, async () => {
       try {
         const song = room.nowPlaying.item!.song;
         const artist = song.artists?.[0]?.name;
@@ -766,6 +816,8 @@ export class Jam2Manager {
           song.title,
           artist,
         );
+
+        this.recsSeededForTrackSeq.set(room.code, room.nowPlaying.trackSeq);
 
         // Apply INSIDE mutex lock
         await this.mutex.runExclusive(room.code, async () => {
@@ -799,7 +851,7 @@ export class Jam2Manager {
           'Failed to fetch recommendations for jam2 room (swallowed)',
         );
       } finally {
-        this.inflightRecs.delete(inflightKey);
+        this.inflightRecs.delete(room.code);
       }
     });
   }
@@ -869,6 +921,16 @@ export class Jam2Manager {
       if (fresh.length === 0) this.cmdRateLimits.delete(key);
       else this.cmdRateLimits.set(key, fresh);
     }
+    for (const [key, timestamps] of this.createRateLimits.entries()) {
+      const fresh = timestamps.filter((ts) => now - ts < 60000);
+      if (fresh.length === 0) this.createRateLimits.delete(key);
+      else this.createRateLimits.set(key, fresh);
+    }
+    for (const [key, timestamps] of this.joinFailRateLimits.entries()) {
+      const fresh = timestamps.filter((ts) => now - ts < 60000);
+      if (fresh.length === 0) this.joinFailRateLimits.delete(key);
+      else this.joinFailRateLimits.set(key, fresh);
+    }
     for (const [key, timestamps] of this.timeRateLimits.entries()) {
       const fresh = timestamps.filter((ts) => now - ts < 60000);
       if (fresh.length === 0) this.timeRateLimits.delete(key);
@@ -879,6 +941,26 @@ export class Jam2Manager {
         if (now >= expiry) kicks.delete(userId);
       }
       if (kicks.size === 0) this.kickedUsers.delete(code);
+    }
+    for (const code of this.loggedZeroDuration) {
+      if (!this.store.hasRoom(code)) {
+        this.loggedZeroDuration.delete(code);
+      }
+    }
+    for (const code of this.recsSeededForTrackSeq.keys()) {
+      if (!this.store.hasRoom(code)) {
+        this.recsSeededForTrackSeq.delete(code);
+      }
+    }
+    for (const code of this.inflightRecs) {
+      if (!this.store.hasRoom(code)) {
+        this.inflightRecs.delete(code);
+      }
+    }
+    for (const code of this.lastTTLRefresh.keys()) {
+      if (!this.store.hasRoom(code)) {
+        this.lastTTLRefresh.delete(code);
+      }
     }
   }
 
@@ -893,12 +975,19 @@ export class Jam2Manager {
     this.heartbeatInterval = setInterval(() => {
       runSafely('jam2:heartbeatInterval', () => {
         const rooms = this.store.getAllActiveRooms();
+        const now = Date.now();
         for (const room of rooms) {
           const hasOnline = Array.from(room.members.values()).some(
             (m) => m.online,
           );
           if (hasOnline) {
             this.broadcastTick(room);
+
+            // Periodic Redis TTL refresh every 5 minutes for rooms with active members
+            if (now - (this.lastTTLRefresh.get(room.code) ?? 0) > 5 * 60 * 1000) {
+              this.lastTTLRefresh.set(room.code, now);
+              this.store.refreshRoomTTL(room.code).catch(() => {});
+            }
           }
         }
       });
@@ -924,12 +1013,33 @@ export class Jam2Manager {
 
     if (this.io) {
       this.io.to(`jam2:${normalizedCode}`).emit('jam2:closed', { reason });
+      if (typeof (this.io as any).in === 'function') {
+        const roomScope = (this.io as any).in(`jam2:${normalizedCode}`);
+        if (roomScope && typeof roomScope.socketsLeave === 'function') {
+          roomScope.socketsLeave(`jam2:${normalizedCode}`);
+        }
+      }
+    }
+
+    // Clean up socketMeta for all sockets belonging to this room
+    const roomMap = this.roomUserSockets.get(normalizedCode);
+    if (roomMap) {
+      for (const userSockets of roomMap.values()) {
+        for (const sId of userSockets) {
+          const meta = this.socketMeta.get(sId);
+          if (meta && meta.code === normalizedCode) {
+            this.socketMeta.delete(sId);
+          }
+        }
+      }
     }
 
     this.roomUserSockets.delete(normalizedCode);
     this.recsSeededForTrackSeq.delete(normalizedCode);
+    this.inflightRecs.delete(normalizedCode);
     this.kickedUsers.delete(normalizedCode);
     this.loggedZeroDuration.delete(normalizedCode);
+    this.lastTTLRefresh.delete(normalizedCode);
     await this.store.deleteRoom(normalizedCode);
   }
 

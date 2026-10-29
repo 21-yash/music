@@ -234,7 +234,8 @@ describe('Phase 1 Review Fixes (Part A)', () => {
         Array.from({ length: 20 }, () => store.getRoom('COLD')),
       );
 
-      expect(getSpy).toHaveBeenCalledTimes(1);
+      const roomGetCalls = getSpy.mock.calls.filter(([key]) => key.startsWith('jam2:room:'));
+      expect(roomGetCalls).toHaveLength(1);
       expect(results[0]).not.toBeNull();
       // All callers get exact same Room instance reference
       for (let i = 1; i < 20; i++) {
@@ -554,7 +555,8 @@ describe('Phase 1 Review Fixes (Part A)', () => {
         expect('room' in res).toBe(true);
       }
 
-      expect(getSpy).toHaveBeenCalledTimes(1);
+      const roomGetCalls = getSpy.mock.calls.filter(([key]) => key.startsWith('jam2:room:'));
+      expect(roomGetCalls).toHaveLength(1);
 
       const finalRoom = await store.getRoom('COLD2');
       for (let i = 0; i < 20; i++) {

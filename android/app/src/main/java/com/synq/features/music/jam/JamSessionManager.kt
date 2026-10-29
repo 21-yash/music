@@ -98,6 +98,7 @@ class JamSessionManager(
     private var trackRetryCount: Int = 0
     private var retryTrackSeq: Long = 0L
     private var lastReportedEndedTrackSeq: Long = 0L
+    private var lastReportedEndedAttemptTs: Long = 0L
     private var isReportingEndedTrackSeq: Long? = null
     private var hasShownAudioFocusToastInThisJam: Boolean = false
     private var lastLoadingAbortedToastTrackSeq: Long? = null
@@ -509,6 +510,7 @@ class JamSessionManager(
         trackRetryCount = 0
         retryTrackSeq = 0L
         lastReportedEndedTrackSeq = 0L
+        lastReportedEndedAttemptTs = 0L
         isReportingEndedTrackSeq = null
         _localPlaybackState.value = LocalPlaybackState.Synchronized
         lastAppliedSnapshotVersion = null
@@ -789,7 +791,7 @@ class JamSessionManager(
         }
     }
 
-    fun setDefaults(perms: JamPermissions) {
+    fun setDefaults(perms: JamPermissions, applyToExisting: Boolean = false) {
         scope.launch {
             val payload = JSONObject().apply {
                 put("perms", JSONObject().apply {
@@ -797,6 +799,9 @@ class JamSessionManager(
                     put("queueAdd", perms.queueAdd)
                     put("queueManage", perms.queueManage)
                 })
+                if (applyToExisting) {
+                    put("applyToExisting", true)
+                }
             }
             val res = jamClient.sendCommand("setDefaults", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
@@ -809,6 +814,7 @@ class JamSessionManager(
                 put("perms", JSONObject().apply {
                     put("queueManage", allow)
                 })
+                put("applyToExisting", true)
             }
             val res = jamClient.sendCommand("setDefaults", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
@@ -975,8 +981,8 @@ class JamSessionManager(
         val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
         val remainingMs = durationMs - expectedPos
 
-        if (durationMs > 0 && remainingMs > 6000L) {
-            // Premature track ended (>6s remaining on server)
+        if (durationMs > 0 && remainingMs > 5000L) {
+            // Premature track ended (>5s remaining on server)
             if (retryTrackSeq != nowPlaying.trackSeq) {
                 retryTrackSeq = nowPlaying.trackSeq
                 trackRetryCount = 0
@@ -1010,7 +1016,7 @@ class JamSessionManager(
         val durationMs = (nowPlaying.item.song.durationSeconds ?: 0) * 1000L
         val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
         val isNearEnd = if (durationMs > 0L) {
-            expectedPos >= durationMs - 6000L
+            expectedPos >= durationMs - 5000L
         } else {
             (clockSync.serverNow() - nowPlaying.anchorServerTs + nowPlaying.positionMs) >= 15000L
         }
@@ -1028,14 +1034,20 @@ class JamSessionManager(
         if (lastReportedEndedTrackSeq == targetSeq) return
         if (isReportingEndedTrackSeq == targetSeq) return
 
+        val now = currentTimeProvider()
+        if (now - lastReportedEndedAttemptTs < 2000L) return
+        lastReportedEndedAttemptTs = now
+
         isReportingEndedTrackSeq = targetSeq
         scope.launch {
             try {
                 val payload = JSONObject().apply {
                     put("trackSeq", targetSeq)
                 }
-                val res = jamClient.sendCommand("trackEnded", payload)
-                if (res.isSuccess) {
+                val res = jamClient.sendCommandRaw("trackEnded", payload)
+                val isApplied = res.getOrNull()?.optBoolean("applied", false) ?: false
+                val currentSeq = stateStore.room.value?.nowPlaying?.trackSeq ?: 0L
+                if (isApplied || currentSeq > targetSeq) {
                     lastReportedEndedTrackSeq = targetSeq
                 }
             } finally {
