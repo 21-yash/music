@@ -75,6 +75,8 @@ class JamSessionManager @Inject constructor(
     val isLocalStepOut: Boolean get() = _localPlaybackState.value is LocalPlaybackState.LocalStepOut
     private var reconcilerJob: Job? = null
     private var isReconciling = false
+    private var lastAppliedSnapshotVersion: Long? = null
+    private var lastAppliedNowPlayingQid: String? = null
 
     companion object {
         const val MAX_JAM_QUEUE_SIZE = 50
@@ -209,7 +211,8 @@ class JamSessionManager @Inject constructor(
                 isHost = m.userId == snapshot.hostUserId
             )
         }
-        val queueSongs = snapshot.queue.map { it.song }
+        val fullQueue = listOfNotNull(snapshot.nowPlaying.item) + snapshot.queue
+        val queueSongs = fullQueue.map { it.song }
 
         _jamState.value = JamState(
             isInJam = true,
@@ -276,12 +279,7 @@ class JamSessionManager @Inject constructor(
                 is ReconcilerAction.ChangeTrack -> {
                     reconcilerTrackState = ReconcilerTrackState.LOADING
                     loadingTrackSeq = action.trackSeq
-                    val recIds = currentRoom.queue.filter { it.recommended }.map { it.song.id }.toSet()
-                    playerManager.setJamQueue(
-                        jamQueue = currentRoom.queue.map { it.song },
-                        targetSong = action.song,
-                        recommendedIds = recIds
-                    )
+                    syncJamQueue(currentRoom)
 
                     if (action.song != null) {
                         playerManager.playJamSyncSong(
@@ -319,16 +317,38 @@ class JamSessionManager @Inject constructor(
                 }
 
                 is ReconcilerAction.Nothing -> {
-                    val recIds = currentRoom.queue.filter { it.recommended }.map { it.song.id }.toSet()
-                    playerManager.setJamQueue(
-                        jamQueue = currentRoom.queue.map { it.song },
-                        targetSong = playback.currentSong,
-                        recommendedIds = recIds
-                    )
+                    syncJamQueue(currentRoom)
                 }
             }
         } finally {
             isReconciling = false
+        }
+    }
+
+    fun getFullQueue(): List<JamQueueItem> {
+        val room = stateStore.room.value ?: return emptyList()
+        return listOfNotNull(room.nowPlaying.item) + room.queue
+    }
+
+    internal fun syncJamQueue(room: RoomSnapshot, force: Boolean = false) {
+        val currentNowPlayingQid = room.nowPlaying.item?.qid
+        val versionChanged = room.version != lastAppliedSnapshotVersion
+        val nowPlayingChanged = currentNowPlayingQid != lastAppliedNowPlayingQid
+
+        if (force || versionChanged || nowPlayingChanged) {
+            lastAppliedSnapshotVersion = room.version
+            lastAppliedNowPlayingQid = currentNowPlayingQid
+
+            val fullQueue = listOfNotNull(room.nowPlaying.item) + room.queue
+            val fullQueueSongs = fullQueue.map { it.song }
+            val recIds = room.queue.filter { it.recommended }.map { it.song.id }.toSet()
+            val targetSong = room.nowPlaying.item?.song
+
+            playerManager.setJamQueue(
+                jamQueue = fullQueueSongs,
+                targetSong = targetSong,
+                recommendedIds = recIds
+            )
         }
     }
 
@@ -406,6 +426,8 @@ class JamSessionManager @Inject constructor(
         retryTrackSeq = 0L
         lastReportedEndedTrackSeq = 0L
         _localPlaybackState.value = LocalPlaybackState.Synchronized
+        lastAppliedSnapshotVersion = null
+        lastAppliedNowPlayingQid = null
     }
 
     fun onNetworkRestored() {
@@ -437,6 +459,8 @@ class JamSessionManager @Inject constructor(
 
     fun resumeFromLocalStepOut() {
         _localPlaybackState.value = LocalPlaybackState.Synchronized
+        lastAppliedSnapshotVersion = null
+        lastAppliedNowPlayingQid = null
         _jamState.update { it.copy(isLocalStepOut = false) }
         val room = stateStore.room.value
         if (room != null && room.nowPlaying.item != null) {
@@ -524,9 +548,18 @@ class JamSessionManager @Inject constructor(
 
     fun playQueueIndex(index: Int) {
         val room = stateStore.room.value ?: return
-        val item = room.queue.getOrNull(index) ?: return
+        val fullQueue = getFullQueue()
+        val item = fullQueue.getOrNull(index) ?: return
+        if (item.qid == room.nowPlaying.item?.qid) {
+            seekTo(0)
+            return
+        }
+        playItemByQid(item.qid)
+    }
+
+    fun playItemByQid(qid: String) {
         scope.launch {
-            val payload = JSONObject().apply { put("qid", item.qid) }
+            val payload = JSONObject().apply { put("qid", qid) }
             val res = jamClient.sendCommand("playItem", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
         }
@@ -573,9 +606,17 @@ class JamSessionManager @Inject constructor(
 
     fun removeSongFromJam(index: Int) {
         val room = stateStore.room.value ?: return
-        val item = room.queue.getOrNull(index) ?: return
+        val fullQueue = getFullQueue()
+        val item = fullQueue.getOrNull(index) ?: return
+        if (item.qid == room.nowPlaying.item?.qid) {
+            return
+        }
+        removeByQid(item.qid)
+    }
+
+    fun removeByQid(qid: String) {
         scope.launch {
-            val payload = JSONObject().apply { put("qid", item.qid) }
+            val payload = JSONObject().apply { put("qid", qid) }
             val res = jamClient.sendCommand("queueRemove", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
         }
@@ -583,11 +624,22 @@ class JamSessionManager @Inject constructor(
 
     fun reorderJamQueue(fromIndex: Int, toIndex: Int) {
         val room = stateStore.room.value ?: return
-        val item = room.queue.getOrNull(fromIndex) ?: return
+        val fullQueue = getFullQueue()
+        val item = fullQueue.getOrNull(fromIndex) ?: return
+        if (item.qid == room.nowPlaying.item?.qid) {
+            return
+        }
+        val hasNowPlaying = room.nowPlaying.item != null
+        val offset = if (hasNowPlaying) 1 else 0
+        val targetQueueIndex = (toIndex - offset).coerceAtLeast(0)
+        moveByQid(item.qid, targetQueueIndex)
+    }
+
+    fun moveByQid(qid: String, toQueueIndex: Int) {
         scope.launch {
             val payload = JSONObject().apply {
-                put("qid", item.qid)
-                put("toIndex", toIndex)
+                put("qid", qid)
+                put("toIndex", toQueueIndex)
             }
             val res = jamClient.sendCommand("queueMove", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
