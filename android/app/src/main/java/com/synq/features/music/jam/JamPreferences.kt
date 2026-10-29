@@ -47,6 +47,8 @@ class JamPreferences @Inject constructor(
         return code
     }
 
+    fun rejoinCandidate(): String? = getLastJamCodeIfRecent(2 * 60 * 60 * 1000L)
+
     fun clearLastJam() {
         prefs.edit()
             .remove(KEY_LAST_JAM_CODE)

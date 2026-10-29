@@ -28,6 +28,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +41,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -120,6 +122,8 @@ fun FullPlayerSheet(
     sleepSelected: String = "Off",
     sleepRemainingSeconds: Long? = null,
     jamState: JamState = JamState(),
+    jamUiState: com.synq.features.music.jam.JamUiState = com.synq.features.music.jam.JamUiState(),
+    localPlaybackState: com.synq.features.music.jam.LocalPlaybackState = com.synq.features.music.jam.LocalPlaybackState.Synchronized,
     isLiked: Boolean = false,
     onLikeClick: () -> Unit = {},
     onPlayPauseClick: () -> Unit,
@@ -139,6 +143,12 @@ fun FullPlayerSheet(
     onRemoveJamSong: (Int) -> Unit = {},
     onReorderJamQueue: (Int, Int) -> Unit = { _, _ -> },
     onToggleGuestReorder: (Boolean) -> Unit = {},
+    onStepOutLocally: () -> Unit = {},
+    onResumeFromLocalStepOut: () -> Unit = {},
+    onPlayItemByQid: (String) -> Unit = {},
+    onPromoteRecommended: (String) -> Unit = {},
+    onRemoveByQid: (String) -> Unit = {},
+    onMoveByQid: (String, Int) -> Unit = { _, _ -> },
     onPlayNext: (Song) -> Unit = {},
     onAddToQueue: (Song) -> Unit = {},
     recommendedSongIds: Set<String> = emptySet(),
@@ -163,6 +173,8 @@ fun FullPlayerSheet(
     var showSleepTimer by remember { mutableStateOf(false) }
     var showMoreOptions by remember { mutableStateOf(false) }
     var selectedQueueSongForOptions by remember { mutableStateOf<Song?>(null) }
+    val hostName = jamUiState.hostName.ifBlank { jamState.hostName.ifBlank { "Host" } }
+    val canControlPlayback = !jamState.isInJam || jamUiState.canControlPlayback
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -275,7 +287,7 @@ fun FullPlayerSheet(
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = if (jamState.isInJam) "JAM SESSION • ${jamState.sessionCode}" else "NOW PLAYING",
+                            text = if (jamState.isInJam) "JAM • ${jamState.sessionCode ?: "SESSION"}" else "NOW PLAYING",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (jamState.isInJam) Accent else textSecondary,
@@ -419,11 +431,25 @@ fun FullPlayerSheet(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
+                    val canShuffle = !jamState.isInJam
+                    val canRepeat = !jamState.isInJam
+                    val isStepOut = localPlaybackState is com.synq.features.music.jam.LocalPlaybackState.LocalStepOut
+
                     // Progress bar
                     PlayerProgressBar(
                         progress = playbackState.progress,
-                        onSeek = onSeek,
-                        isDark = isDark
+                        onSeek = { ratio ->
+                            if (!canControlPlayback) {
+                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                            } else {
+                                onSeek(ratio)
+                            }
+                        },
+                        isDark = isDark,
+                        enabled = canControlPlayback,
+                        onDisabledClick = {
+                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                        }
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(
@@ -454,19 +480,37 @@ fun FullPlayerSheet(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = {
-                            val willBeShuffle = !isShuffle
-                            onToggleShuffle()
-                            Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
-                        }) {
+                        IconButton(
+                            onClick = {
+                                if (!canShuffle) {
+                                    Toast.makeText(context, "Shuffle is managed by the Jam session", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val willBeShuffle = !isShuffle
+                                    onToggleShuffle()
+                                    Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.alpha(if (canShuffle) 1f else 0.38f)
+                        ) {
                             Icon(
                                 Icons.Default.Shuffle,
                                 contentDescription = "Shuffle",
-                                tint = if (isShuffle) Accent else textSecondary,
+                                tint = if (isShuffle && canShuffle) Accent else textSecondary,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
-                        IconButton(onClick = onPreviousClick, modifier = Modifier.size(48.dp)) {
+                        IconButton(
+                            onClick = {
+                                if (!canControlPlayback) {
+                                    Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    onPreviousClick()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .alpha(if (canControlPlayback) 1f else 0.38f)
+                        ) {
                             Icon(
                                 Icons.Default.SkipPrevious,
                                 contentDescription = "Previous",
@@ -485,19 +529,41 @@ fun FullPlayerSheet(
                                 )
                                 .clip(CircleShape)
                                 .background(PinkBrush)
-                                .clickable(onClick = onPlayPauseClick),
+                                .clickable {
+                                    if (canControlPlayback) {
+                                        onPlayPauseClick()
+                                    } else {
+                                        if (isStepOut) {
+                                            onResumeFromLocalStepOut()
+                                        } else {
+                                            onStepOutLocally()
+                                        }
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
+                            val displayPlaying = if (isStepOut) false else playbackState.isPlaying
                             Icon(
-                                imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                                imageVector = if (displayPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (displayPlaying) "Pause" else "Play",
                                 tint = Color.White,
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .offset(x = if (playbackState.isPlaying) 0.dp else 2.dp)
+                                    .offset(x = if (displayPlaying) 0.dp else 2.dp)
                             )
                         }
-                        IconButton(onClick = onNextClick, modifier = Modifier.size(48.dp)) {
+                        IconButton(
+                            onClick = {
+                                if (!canControlPlayback) {
+                                    Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    onNextClick()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .alpha(if (canControlPlayback) 1f else 0.38f)
+                        ) {
                             Icon(
                                 Icons.Default.SkipNext,
                                 contentDescription = "Next",
@@ -506,15 +572,22 @@ fun FullPlayerSheet(
                             )
                         }
                         // Repeat toggle: binary OFF vs ON (loops current song)
-                        IconButton(onClick = {
-                            val willBeRepeat = !isRepeatOne
-                            onToggleRepeat()
-                            Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
-                        }) {
+                        IconButton(
+                            onClick = {
+                                if (!canRepeat) {
+                                    Toast.makeText(context, "Repeat is disabled during a Jam session", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val willBeRepeat = !isRepeatOne
+                                    onToggleRepeat()
+                                    Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.alpha(if (canRepeat) 1f else 0.38f)
+                        ) {
                             Icon(
                                 Icons.Default.RepeatOne,
                                 contentDescription = "Repeat",
-                                tint = if (isRepeatOne) Accent else textSecondary,
+                                tint = if (isRepeatOne && canRepeat) Accent else textSecondary,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -549,11 +622,106 @@ fun FullPlayerSheet(
             // ── Queue panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
             BottomPanel(
                 visible = openPanel == PlayerPanel.Queue,
-                title = "Queue (${queue.size} songs)",
+                title = if (jamState.isInJam) "Jam Queue (${jamUiState.queue.size} songs)" else "Queue (${queue.size} songs)",
                 isDark = isDark,
                 onClose = { openPanel = null }
             ) {
-                if (queue.isEmpty()) {
+                if (jamState.isInJam) {
+                    if (jamUiState.queue.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Jam queue is empty", color = textSecondary, fontSize = 15.sp)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // User queue items
+                            itemsIndexed(jamUiState.userQueue, key = { _, item -> item.qid }) { index, item ->
+                                val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
+                                val canReorder = jamUiState.canManageQueue
+                                val canRemove = item.addedByUserId == jamUiState.myUserId || jamUiState.canManageQueue
+
+                                QueueItemRow(
+                                    song = item.song,
+                                    active = isPlayingThis,
+                                    isDark = isDark,
+                                    isPlaying = isPlayingThis && playbackState.isPlaying,
+                                    isRecommended = false,
+                                    canMoveUp = canReorder && index > 0,
+                                    canMoveDown = canReorder && index < jamUiState.userQueue.size - 1,
+                                    onClick = {
+                                        if (canControlPlayback) {
+                                            onPlayItemByQid(item.qid)
+                                        } else {
+                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onMoveUp = { onMoveByQid(item.qid, index - 1) },
+                                    onMoveDown = { onMoveByQid(item.qid, index + 1) },
+                                    onRemove = {
+                                        if (canRemove) {
+                                            onRemoveByQid(item.qid)
+                                        } else {
+                                            Toast.makeText(context, "Ask $hostName for queue manage permission", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onOptionsClick = { selectedQueueSongForOptions = item.song }
+                                )
+                            }
+
+                            // Recommended section
+                            if (jamUiState.recommendedQueue.isNotEmpty()) {
+                                item(key = "rec_jam_separator") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "RECOMMENDED FOR THIS JAM",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Accent,
+                                            letterSpacing = 1.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        HorizontalDivider(
+                                            modifier = Modifier.weight(1f),
+                                            color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+                                        )
+                                    }
+                                }
+
+                                items(jamUiState.recommendedQueue, key = { it.qid }) { item ->
+                                    val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
+                                    QueueItemRow(
+                                        song = item.song,
+                                        active = isPlayingThis,
+                                        isDark = isDark,
+                                        isPlaying = isPlayingThis && playbackState.isPlaying,
+                                        isRecommended = true,
+                                        canMoveUp = false,
+                                        canMoveDown = false,
+                                        onClick = {
+                                            if (canControlPlayback) {
+                                                onPlayItemByQid(item.qid)
+                                            } else {
+                                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        onMoveUp = {},
+                                        onMoveDown = {},
+                                        onRemove = { onRemoveByQid(item.qid) },
+                                        onOptionsClick = { selectedQueueSongForOptions = item.song }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (queue.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Queue is empty", color = textSecondary, fontSize = 15.sp)
                     }
@@ -632,13 +800,16 @@ fun FullPlayerSheet(
             if (showJamIntro) {
                 com.synq.features.music.jam.JamIntroDialog(
                     onDismiss = { showJamIntro = false },
-                    onStartJam = {
+                    onStartJam = { onComplete ->
                         onStartJam()
-                        onDismiss()
-                        onNavigateToJam()
+                        onComplete(Result.success(Unit))
                     },
-                    onJoinJam = { code ->
+                    onJoinJam = { code, onComplete ->
                         onJoinJam(code)
+                        onComplete(Result.success(Unit))
+                    },
+                    onSuccessNav = {
+                        showJamIntro = false
                         onDismiss()
                         onNavigateToJam()
                     }
@@ -1692,7 +1863,9 @@ private fun TopBarButton(
 private fun PlayerProgressBar(
     progress: Float,
     isDark: Boolean,
-    onSeek: (Float) -> Unit
+    onSeek: (Float) -> Unit,
+    enabled: Boolean = true,
+    onDisabledClick: (() -> Unit)? = null
 ) {
     val p = progress.coerceIn(0f, 1f)
     val trackBg = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
@@ -1701,14 +1874,21 @@ private fun PlayerProgressBar(
         modifier = Modifier
             .fillMaxWidth()
             .height(24.dp)
-            .pointerInput(Unit) {
+            .alpha(if (enabled) 1f else 0.45f)
+            .pointerInput(enabled) {
                 detectTapGestures { offset ->
-                    onSeek((offset.x / size.width).coerceIn(0f, 1f))
+                    if (enabled) {
+                        onSeek((offset.x / size.width).coerceIn(0f, 1f))
+                    } else {
+                        onDisabledClick?.invoke()
+                    }
                 }
             }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ ->
-                    onSeek((change.position.x / size.width).coerceIn(0f, 1f))
+            .pointerInput(enabled) {
+                if (enabled) {
+                    detectHorizontalDragGestures { change, _ ->
+                        onSeek((change.position.x / size.width).coerceIn(0f, 1f))
+                    }
                 }
             },
         contentAlignment = Alignment.CenterStart

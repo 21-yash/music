@@ -1,5 +1,6 @@
 package com.synq.features.music.sleeptimer
 
+import com.synq.features.music.jam.JamSessionManager
 import com.synq.features.music.playback.MusicPlayerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,11 +13,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
 class SleepTimerManager @Inject constructor(
-    private val playerManager: MusicPlayerManager
+    private val playerManager: MusicPlayerManager,
+    private val jamSessionManagerProvider: Provider<JamSessionManager>
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var countdownJob: Job? = null
@@ -26,6 +29,15 @@ class SleepTimerManager @Inject constructor(
 
     private val _remainingSeconds = MutableStateFlow<Long?>(null)
     val remainingSeconds: StateFlow<Long?> = _remainingSeconds.asStateFlow()
+
+    private fun handleTimerFinished() {
+        val jamManager = jamSessionManagerProvider.get()
+        if (jamManager.jamState.value.isInJam) {
+            jamManager.stepOutLocally()
+        } else {
+            playerManager.pause()
+        }
+    }
 
     fun setTimer(option: String) {
         countdownJob?.cancel()
@@ -41,7 +53,7 @@ class SleepTimerManager @Inject constructor(
             "End of track" -> {
                 _remainingSeconds.value = null
                 playerManager.onTrackEndedListener = {
-                    playerManager.pause()
+                    handleTimerFinished()
                     cancel()
                 }
             }
@@ -63,7 +75,7 @@ class SleepTimerManager @Inject constructor(
                             _remainingSeconds.value = remaining
                         }
                         if (remaining <= 0) {
-                            playerManager.pause()
+                            handleTimerFinished()
                             _selectedOption.value = "Off"
                             _remainingSeconds.value = null
                         }

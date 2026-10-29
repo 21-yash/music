@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.synq.features.music.domain.model.Song
+import com.synq.features.music.jam.LocalCanAddSongsToJam
 import com.synq.features.music.jam.LocalIsInJam
 import com.synq.ui.isAppDark
 
@@ -242,13 +244,19 @@ fun SongOptionsSheet(
             Spacer(modifier = Modifier.height(8.dp))
             
             if (isInJam) {
+                val canAdd = LocalCanAddSongsToJam.current
                 SongOptionItem(
                     icon = Icons.Default.Groups,
                     text = "Add to Jam Queue",
                     isDark = isDark,
+                    enabled = canAdd,
                     onClick = {
-                        (onAddToQueue ?: onPlayNext)?.invoke()
-                        onDismiss()
+                        if (!canAdd) {
+                            Toast.makeText(context, "You don't have permission to add songs to Jam", Toast.LENGTH_SHORT).show()
+                        } else {
+                            (onAddToQueue ?: onPlayNext)?.invoke()
+                            onDismiss()
+                        }
                     }
                 )
             } else {
@@ -364,6 +372,7 @@ private fun SongOptionItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String,
     isDark: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit = {}
 ) {
     Row(
@@ -371,13 +380,14 @@ private fun SongOptionItem(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 8.dp),
+            .padding(vertical = 12.dp, horizontal = 8.dp)
+            .alpha(if (enabled) 1f else 0.38f),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = text,
-            tint = if (isDark) Color(0xFFFF2A5F) else Color(0xFFFF2A5F),
+            tint = Color(0xFFFF2A5F),
             modifier = Modifier.size(22.dp)
         )
         Spacer(modifier = Modifier.width(18.dp))

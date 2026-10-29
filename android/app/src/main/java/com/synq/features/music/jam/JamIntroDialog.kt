@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -29,19 +30,28 @@ private val PinkBrush = Brush.linearGradient(
     listOf(Color(0xFFFF2D7A), Color(0xFFFF6584))
 )
 private val Accent = Color(0xFFFF2D7A)
+private val Danger = Color(0xFFEF4444)
 
 /**
  * Modern glassmorphic pop-up dialog to Start or Join a Jam session.
- * Used identically from HomeScreen and FullPlayerSheet.
+ * Features 4-character uppercase paste-friendly code entry, loading states,
+ * double-submit protection, and inline error display from server acks.
  */
 @Composable
 fun JamIntroDialog(
     onDismiss: () -> Unit,
-    onStartJam: () -> Unit,
-    onJoinJam: (String) -> Unit
+    onStartJam: (onComplete: (Result<Unit>) -> Unit) -> Unit,
+    onJoinJam: (code: String, onComplete: (Result<Unit>) -> Unit) -> Unit,
+    onSuccessNav: () -> Unit = {}
 ) {
     val isDark = isAppDark()
     var enterCode by remember { mutableStateOf("") }
+    var isStarting by remember { mutableStateOf(false) }
+    var isJoining by remember { mutableStateOf(false) }
+    var inlineError by remember { mutableStateOf<String?>(null) }
+
+    val isLoading = isStarting || isJoining
+
     val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
 
@@ -50,7 +60,9 @@ fun JamIntroDialog(
     val dialogBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!isLoading) onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(
@@ -64,7 +76,10 @@ fun JamIntroDialog(
         ) {
             // Dismiss close button
             IconButton(
-                onClick = onDismiss,
+                onClick = {
+                    if (!isLoading) onDismiss()
+                },
+                enabled = !isLoading,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .size(32.dp)
@@ -72,7 +87,7 @@ fun JamIntroDialog(
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Close",
-                    tint = textSecondary,
+                    tint = if (isLoading) textSecondary.copy(alpha = 0.3f) else textSecondary,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -93,7 +108,7 @@ fun JamIntroDialog(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Groups,
-                        contentDescription = null,
+                        contentDescription = "Jam Group",
                         tint = Color.White,
                         modifier = Modifier.size(34.dp)
                     )
@@ -128,20 +143,39 @@ fun JamIntroDialog(
                         .fillMaxWidth()
                         .shadow(12.dp, pill, ambientColor = Accent, spotColor = Accent)
                         .clip(pill)
+                        .alpha(if (isLoading) 0.6f else 1f)
                         .background(PinkBrush)
-                        .clickable {
-                            onStartJam()
-                            onDismiss()
+                        .clickable(enabled = !isLoading) {
+                            inlineError = null
+                            isStarting = true
+                            onStartJam { res ->
+                                isStarting = false
+                                res.onSuccess {
+                                    onDismiss()
+                                    onSuccessNav()
+                                }
+                                res.onFailure { err ->
+                                    inlineError = err.message ?: "Failed to start Jam"
+                                }
+                            }
                         }
                         .padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Start a Jam",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    if (isStarting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = "Start a Jam",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -163,12 +197,17 @@ fun JamIntroDialog(
                 ) {
                     OutlinedTextField(
                         value = enterCode,
-                        onValueChange = { enterCode = it.take(4).uppercase() },
+                        onValueChange = { input ->
+                            inlineError = null
+                            enterCode = input.filter { it.isLetterOrDigit() }.take(4).uppercase()
+                        },
+                        enabled = !isLoading,
                         placeholder = {
                             Text(
-                                "Enter code",
+                                "ABCD",
                                 color = textSecondary.copy(alpha = 0.5f),
-                                fontSize = 13.sp
+                                fontSize = 14.sp,
+                                letterSpacing = 2.sp
                             )
                         },
                         singleLine = true,
@@ -186,18 +225,55 @@ fun JamIntroDialog(
 
                     Button(
                         onClick = {
-                            if (enterCode.isNotBlank()) {
-                                onJoinJam(enterCode)
-                                onDismiss()
+                            if (enterCode.length == 4) {
+                                inlineError = null
+                                isJoining = true
+                                onJoinJam(enterCode) { res ->
+                                    isJoining = false
+                                    res.onSuccess {
+                                        onDismiss()
+                                        onSuccessNav()
+                                    }
+                                    res.onFailure { err ->
+                                        inlineError = when (err.message) {
+                                            "NOT_FOUND" -> "Jam session not found. Check the code."
+                                            "INVALID_PROTOCOL" -> "Please update Synq to join."
+                                            "REMOVED" -> "You were removed from this Jam."
+                                            else -> err.message ?: "Failed to join Jam"
+                                        }
+                                    }
+                                }
                             }
                         },
-                        enabled = enterCode.isNotBlank(),
+                        enabled = enterCode.length == 4 && !isLoading,
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                        modifier = Modifier.height(50.dp)
+                        modifier = Modifier
+                            .height(50.dp)
+                            .defaultMinSize(minWidth = 72.dp)
                     ) {
-                        Text("Join", fontWeight = FontWeight.Bold, color = Color.White)
+                        if (isJoining) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Join", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
+                }
+
+                if (inlineError != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = inlineError ?: "",
+                        color = Danger,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))

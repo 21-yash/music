@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -64,6 +65,7 @@ fun MiniPlayer(
     modifier: Modifier = Modifier,
     onPreviousClick: () -> Unit = {},
     onNextClick: () -> Unit = {},
+    canControlPlayback: Boolean = true,
     onDismiss: () -> Unit = {}
 ) {
     AnimatedVisibility(
@@ -159,7 +161,10 @@ fun MiniPlayer(
                 }
 
                 // previous · play/pause · next
-                IconButton(onClick = onPreviousClick, modifier = Modifier.size(36.dp)) {
+                IconButton(
+                    onClick = onPreviousClick,
+                    modifier = Modifier.size(36.dp).alpha(if (canControlPlayback) 1f else 0.38f)
+                ) {
                     Icon(
                         imageVector = Icons.Default.SkipPrevious,
                         contentDescription = "Previous",
@@ -175,7 +180,10 @@ fun MiniPlayer(
                         modifier = Modifier.size(26.dp)
                     )
                 }
-                IconButton(onClick = onNextClick, modifier = Modifier.size(36.dp)) {
+                IconButton(
+                    onClick = onNextClick,
+                    modifier = Modifier.size(36.dp).alpha(if (canControlPlayback) 1f else 0.38f)
+                ) {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Next",

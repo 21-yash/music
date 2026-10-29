@@ -24,4 +24,4 @@ data class JamState(
 )
 
 val LocalIsInJam = androidx.compose.runtime.compositionLocalOf { false }
-
+val LocalCanAddSongsToJam = androidx.compose.runtime.compositionLocalOf { true }

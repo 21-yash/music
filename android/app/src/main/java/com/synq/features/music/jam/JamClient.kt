@@ -243,7 +243,7 @@ class JamClient(
 
         transport.disconnect()
         stateStore.clear()
-        _clientState.value = JamClientState.Closed("ended", "The Jam was ended.")
+        _clientState.value = JamClientState.Closed("ended", "The host ended this Jam")
         return Result.success(Unit)
     }
 
@@ -254,9 +254,9 @@ class JamClient(
         stateStore.clear()
 
         val userMessage = when (reason) {
-            "kicked" -> "You were removed from the Jam session."
-            "ended" -> "This Jam has ended."
-            "expired" -> "The Jam session expired due to inactivity."
+            "kicked" -> "You were removed from this Jam"
+            "ended" -> "The host ended this Jam"
+            "expired" -> "This Jam expired"
             else -> "The Jam session was closed ($reason)."
         }
 

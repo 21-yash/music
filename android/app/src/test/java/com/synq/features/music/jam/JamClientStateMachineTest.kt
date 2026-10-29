@@ -175,7 +175,7 @@ class JamClientStateMachineTest {
         val state = client.clientState.value
         assertTrue(state is JamClientState.Closed)
         assertEquals("ended", (state as JamClientState.Closed).reason)
-        assertEquals("This Jam has ended.", state.message)
+        assertEquals("The host ended this Jam", state.message)
     }
 
     @Test

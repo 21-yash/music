@@ -30,6 +30,7 @@ import javax.inject.Singleton
 
 sealed class LocalPlaybackState {
     object Synchronized : LocalPlaybackState()
+    object CatchingUp : LocalPlaybackState()
     object LocalStepOut : LocalPlaybackState()
 }
 
@@ -67,9 +68,11 @@ class JamSessionManager @Inject constructor(
     private var currentTrackSeq: Long = 0L
     private var reconcilerTrackState: ReconcilerTrackState = ReconcilerTrackState.READY
     private var loadingTrackSeq: Long? = null
+    private var loadingStartedAt: Long = 0L
     private var trackRetryCount: Int = 0
     private var retryTrackSeq: Long = 0L
     private var lastReportedEndedTrackSeq: Long = 0L
+    private var isReportingEndedTrackSeq: Long? = null
     private val _localPlaybackState = MutableStateFlow<LocalPlaybackState>(LocalPlaybackState.Synchronized)
     val localPlaybackState: StateFlow<LocalPlaybackState> = _localPlaybackState.asStateFlow()
     val isLocalStepOut: Boolean get() = _localPlaybackState.value is LocalPlaybackState.LocalStepOut
@@ -83,6 +86,14 @@ class JamSessionManager @Inject constructor(
     }
 
     init {
+        // Observe local playback state and keep JamState.isLocalStepOut in sync
+        scope.launch {
+            _localPlaybackState.collect { state ->
+                val steppedOut = state is LocalPlaybackState.LocalStepOut
+                _jamState.update { it.copy(isLocalStepOut = steppedOut) }
+            }
+        }
+
         // Observe transport events (server notifications)
         scope.launch {
             transport.events.collect { event ->
@@ -194,7 +205,8 @@ class JamSessionManager @Inject constructor(
                     isInJam = isInJam,
                     sessionCode = code ?: prev.sessionCode,
                     participants = if (isInJam) prev.participants else emptyList(),
-                    queue = if (isInJam) prev.queue else emptyList()
+                    queue = if (isInJam) prev.queue else emptyList(),
+                    isLocalStepOut = isLocalStepOut
                 )
             }
             return
@@ -223,6 +235,7 @@ class JamSessionManager @Inject constructor(
             allowAttendeeReorder = snapshot.defaults.queueManage,
             participants = participants,
             queue = queueSongs,
+            isLocalStepOut = isLocalStepOut,
             error = null
         )
     }
@@ -238,6 +251,7 @@ class JamSessionManager @Inject constructor(
                 delay(1000L)
                 reconcilePlayback()
                 checkNearEndTick()
+                checkLoadingTimeout()
             }
         }
 
@@ -279,6 +293,7 @@ class JamSessionManager @Inject constructor(
                 is ReconcilerAction.ChangeTrack -> {
                     reconcilerTrackState = ReconcilerTrackState.LOADING
                     loadingTrackSeq = action.trackSeq
+                    loadingStartedAt = System.currentTimeMillis()
                     syncJamQueue(currentRoom)
 
                     if (action.song != null) {
@@ -314,10 +329,16 @@ class JamSessionManager @Inject constructor(
 
                 is ReconcilerAction.SpeedRamp -> {
                     playerManager.applyJamSpeed(action.factor)
+                    if (_localPlaybackState.value != LocalPlaybackState.LocalStepOut) {
+                        _localPlaybackState.value = LocalPlaybackState.CatchingUp
+                    }
                 }
 
                 is ReconcilerAction.Nothing -> {
                     syncJamQueue(currentRoom)
+                    if (_localPlaybackState.value == LocalPlaybackState.CatchingUp) {
+                        _localPlaybackState.value = LocalPlaybackState.Synchronized
+                    }
                 }
             }
         } finally {
@@ -341,7 +362,7 @@ class JamSessionManager @Inject constructor(
 
             val fullQueue = listOfNotNull(room.nowPlaying.item) + room.queue
             val fullQueueSongs = fullQueue.map { it.song }
-            val recIds = room.queue.filter { it.recommended }.map { it.song.id }.toSet()
+            val recIds = room.queue.filter { it.recommended }.map { it.qid }.toSet()
             val targetSong = room.nowPlaying.item?.song
 
             playerManager.setJamQueue(
@@ -352,21 +373,19 @@ class JamSessionManager @Inject constructor(
         }
     }
 
-    private fun reportTrackEnded() {
-        scope.launch {
-            val payload = JSONObject().apply {
-                put("trackSeq", currentTrackSeq)
-            }
-            jamClient.sendCommand("trackEnded", payload)
-        }
-    }
-
     // ─────────────────────────────────────────────────────────────
     // Public Session Controls
     // ─────────────────────────────────────────────────────────────
 
-    fun createJam(userId: String, username: String, avatarUrl: String? = null) {
-        val currentLocalSong = playerManager.playbackState.value.currentSong
+    fun createJam(
+        userId: String,
+        username: String,
+        avatarUrl: String? = null,
+        onComplete: ((Result<RoomSnapshot>) -> Unit)? = null
+    ) {
+        val playback = playerManager.playbackState.value
+        val isCurrentlyPlaying = playback.isPlaying
+        val currentLocalSong = playback.currentSong
         myUserId = userId
         stateStore.setMyUserId(userId)
         playerManager.jamInterceptor = this
@@ -375,19 +394,27 @@ class JamSessionManager @Inject constructor(
 
         scope.launch {
             val res = jamClient.createRoom(avatarUrl)
-            res.onSuccess {
-                if (currentLocalSong != null) {
+            res.onSuccess { snapshot ->
+                if (isCurrentlyPlaying && currentLocalSong != null) {
                     addSongToJam(currentLocalSong)
                 }
+                onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
                 showToast("Failed to create Jam: ${err.message}")
                 teardownJam()
+                onComplete?.invoke(Result.failure(err))
             }
         }
     }
 
-    fun joinJam(code: String, userId: String, username: String, avatarUrl: String? = null) {
+    fun joinJam(
+        code: String,
+        userId: String,
+        username: String,
+        avatarUrl: String? = null,
+        onComplete: ((Result<RoomSnapshot>) -> Unit)? = null
+    ) {
         myUserId = userId
         stateStore.setMyUserId(userId)
         val cleanCode = code.trim().uppercase()
@@ -397,9 +424,13 @@ class JamSessionManager @Inject constructor(
 
         scope.launch {
             val res = jamClient.joinRoom(cleanCode, avatarUrl)
+            res.onSuccess { snapshot ->
+                onComplete?.invoke(Result.success(snapshot))
+            }
             res.onFailure { err ->
                 showToast("Failed to join Jam: ${err.message}")
                 teardownJam()
+                onComplete?.invoke(Result.failure(err))
             }
         }
     }
@@ -421,6 +452,7 @@ class JamSessionManager @Inject constructor(
     }
 
     private fun teardownJam() {
+        jamPreferences.clearLastJam()
         playerManager.jamInterceptor = null
         playerManager.restorePersonalQueue()
         playerManager.setPlaybackSpeed(1.0f)
@@ -428,9 +460,11 @@ class JamSessionManager @Inject constructor(
         currentTrackSeq = 0L
         reconcilerTrackState = ReconcilerTrackState.READY
         loadingTrackSeq = null
+        loadingStartedAt = 0L
         trackRetryCount = 0
         retryTrackSeq = 0L
         lastReportedEndedTrackSeq = 0L
+        isReportingEndedTrackSeq = null
         _localPlaybackState.value = LocalPlaybackState.Synchronized
         lastAppliedSnapshotVersion = null
         lastAppliedNowPlayingQid = null
@@ -476,10 +510,15 @@ class JamSessionManager @Inject constructor(
         val room = stateStore.room.value
         if (room != null && room.nowPlaying.item != null) {
             val serverNowPlaying = room.nowPlaying
-            val expectedPos = clockSync.expectedPosition(serverNowPlaying, clockSync.serverNow())
-            playerManager.applyJamSeek(expectedPos)
-            if (serverNowPlaying.status == JamPlaybackStatus.PLAYING) {
-                playerManager.applyJamPlay()
+            if (currentTrackSeq == serverNowPlaying.trackSeq) {
+                val expectedPos = clockSync.expectedPosition(serverNowPlaying, clockSync.serverNow())
+                playerManager.applyJamSeek(expectedPos)
+                if (serverNowPlaying.status == JamPlaybackStatus.PLAYING) {
+                    playerManager.applyJamPlay()
+                }
+            } else {
+                reconcilerTrackState = ReconcilerTrackState.READY
+                loadingTrackSeq = null
             }
         }
         reconcilePlayback()
@@ -588,6 +627,9 @@ class JamSessionManager @Inject constructor(
                 if (playNext) put("playNext", true)
             }
             val res = jamClient.sendCommand("queueAdd", payload)
+            res.onSuccess {
+                showToast("Added to Jam: ${song.title}")
+            }
             res.onFailure { err ->
                 showToast(err.message ?: "Failed to add song")
             }
@@ -665,6 +707,20 @@ class JamSessionManager @Inject constructor(
         }
     }
 
+    fun setDefaults(perms: JamPermissions) {
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("perms", JSONObject().apply {
+                    put("playback", perms.playback)
+                    put("queueAdd", perms.queueAdd)
+                    put("queueManage", perms.queueManage)
+                })
+            }
+            val res = jamClient.sendCommand("setDefaults", payload)
+            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        }
+    }
+
     fun setAttendeeReorderPermission(allow: Boolean) {
         scope.launch {
             val payload = JSONObject().apply {
@@ -720,28 +776,19 @@ class JamSessionManager @Inject constructor(
 
     override fun onPlaySong(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song, playNext = true)
-        if (added) {
-            showToast("Added to Jam queue: ${song.title}")
-        }
+        addSongToJam(song, playNext = true)
         return true
     }
 
     override fun onPlayNext(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song, playNext = true)
-        if (added) {
-            showToast("Added to Jam queue: ${song.title}")
-        }
+        addSongToJam(song, playNext = true)
         return true
     }
 
     override fun onAddToQueue(song: Song): Boolean {
         if (!_jamState.value.isInJam) return false
-        val added = addSongToJam(song, playNext = false)
-        if (added) {
-            showToast("Added to Jam queue: ${song.title}")
-        }
+        addSongToJam(song, playNext = false)
         return true
     }
 
@@ -897,13 +944,59 @@ class JamSessionManager @Inject constructor(
         val targetSeq = trackSeq ?: room.nowPlaying.trackSeq
         if (targetSeq <= 0L) return
         if (lastReportedEndedTrackSeq == targetSeq) return
+        if (isReportingEndedTrackSeq == targetSeq) return
 
-        lastReportedEndedTrackSeq = targetSeq
+        isReportingEndedTrackSeq = targetSeq
         scope.launch {
-            val payload = JSONObject().apply {
-                put("trackSeq", targetSeq)
+            try {
+                val payload = JSONObject().apply {
+                    put("trackSeq", targetSeq)
+                }
+                val res = jamClient.sendCommand("trackEnded", payload)
+                if (res.isSuccess) {
+                    lastReportedEndedTrackSeq = targetSeq
+                }
+            } finally {
+                if (isReportingEndedTrackSeq == targetSeq) {
+                    isReportingEndedTrackSeq = null
+                }
             }
-            jamClient.sendCommand("trackEnded", payload)
+        }
+    }
+
+    internal fun checkLoadingTimeout(currentTimeMs: Long = System.currentTimeMillis()) {
+        if (reconcilerTrackState != ReconcilerTrackState.LOADING) return
+        val startedAt = loadingStartedAt
+        if (startedAt <= 0L) return
+        if (currentTimeMs - startedAt < 15_000L) return
+
+        val room = stateStore.room.value ?: return
+        val nowPlaying = room.nowPlaying
+        if (nowPlaying.item == null) return
+        val targetSeq = loadingTrackSeq ?: nowPlaying.trackSeq
+        if (targetSeq != nowPlaying.trackSeq) return
+
+        if (retryTrackSeq != targetSeq) {
+            retryTrackSeq = targetSeq
+            trackRetryCount = 0
+        }
+
+        if (trackRetryCount < 2) {
+            trackRetryCount++
+            loadingStartedAt = currentTimeMs
+            android.util.Log.d("JamSessionManager", "LOADING timeout (~15s) reached. Retry $trackRetryCount/2 for trackSeq $targetSeq")
+            val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+            playerManager.playJamSyncSong(
+                song = nowPlaying.item.song,
+                initialPositionMs = expectedPos,
+                playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING)
+            )
+        } else {
+            android.util.Log.w("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
+            reconcilerTrackState = ReconcilerTrackState.READY
+            loadingTrackSeq = null
+            loadingStartedAt = 0L
+            playerManager.applyJamPause()
         }
     }
 
@@ -914,6 +1007,8 @@ class JamSessionManager @Inject constructor(
                 reconcilerTrackState = ReconcilerTrackState.READY
                 currentTrackSeq = loadingTrackSeq ?: currentTrackSeq
                 loadingTrackSeq = null
+                loadingStartedAt = 0L
+                trackRetryCount = 0
 
                 val room = stateStore.room.value
                 if (room != null && room.nowPlaying.trackSeq == currentTrackSeq) {
@@ -929,6 +1024,16 @@ class JamSessionManager @Inject constructor(
                     android.util.Log.d("JamSessionManager", "New track READY: trackSeq=$currentTrackSeq metadataDur=$metadataDurationMs actualDur=$actualDurationMs")
                 }
             }
+        }
+    }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (!_jamState.value.isInJam) return
+        if (!playWhenReady && (
+            reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+            reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
+        )) {
+            stepOutLocally()
         }
     }
 }

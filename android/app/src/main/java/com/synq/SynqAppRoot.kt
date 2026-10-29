@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -39,6 +40,10 @@ import com.synq.navigation.AppBottomNavBar
 import com.synq.navigation.AppNavHost
 import com.synq.navigation.Screen
 import com.synq.features.music.components.MiniPlayer
+import com.synq.features.music.jam.JamClientState
+import com.synq.features.music.jam.JamUiEvent
+import com.synq.features.music.jam.LocalCanAddSongsToJam
+import com.synq.features.music.jam.LocalIsInJam
 
 /**
  * Root composable for the app — the main shell.
@@ -87,13 +92,133 @@ private fun MainAppContent(
     
     val playbackState by rootViewModel.playbackState.collectAsState()
     val jamState by rootViewModel.jamState.collectAsState()
+    val jamUiState by rootViewModel.jamUiState.collectAsState()
+    val jamClientState by rootViewModel.jamClientState.collectAsState()
+    val jamLocalPlaybackState by rootViewModel.jamLocalPlaybackState.collectAsState()
     val recommendedSongIds by rootViewModel.recommendedSongIds.collectAsState()
     val playlists by rootViewModel.playlists.collectAsState()
     val songForPlaylistAdd by rootViewModel.songForPlaylistAdd.collectAsState()
     val likedSongIds by rootViewModel.likedSongIds.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     
-    var showFullPlayer by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showFullPlayer by remember { mutableStateOf(false) }
+
+    // D6: Rejoin candidate dialog on app start
+    var rejoinCandidateCode by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val candidate = rootViewModel.jamPreferences.rejoinCandidate()
+        if (candidate != null && !jamState.isInJam) {
+            rejoinCandidateCode = candidate
+        }
+    }
+
+    if (rejoinCandidateCode != null && !jamState.isInJam) {
+        val codeToRejoin = rejoinCandidateCode!!
+        AlertDialog(
+            onDismissRequest = {
+                rootViewModel.jamPreferences.clearLastJam()
+                rejoinCandidateCode = null
+            },
+            title = {
+                Text(
+                    text = "Rejoin Jam $codeToRejoin?",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    text = "You were previously connected to this Jam session. Would you like to rejoin?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        rejoinCandidateCode = null
+                        rootViewModel.joinJam(codeToRejoin)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2D7A))
+                ) {
+                    Text("Rejoin", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        rootViewModel.jamPreferences.clearLastJam()
+                        rejoinCandidateCode = null
+                    }
+                ) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
+    // D4: Jam UI Event toasts
+    var lastPlaybackPerm by remember { mutableStateOf<Boolean?>(null) }
+    var lastQueueAddPerm by remember { mutableStateOf<Boolean?>(null) }
+    var lastQueueManagePerm by remember { mutableStateOf<Boolean?>(null) }
+
+    LaunchedEffect(Unit) {
+        rootViewModel.jamUiEvents.collect { event ->
+            when (event) {
+                is JamUiEvent.MemberJoined -> {
+                    android.widget.Toast.makeText(context, "${event.username} joined the Jam", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                is JamUiEvent.MemberLeft -> {
+                    android.widget.Toast.makeText(context, "${event.username} left the Jam", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                is JamUiEvent.HostChanged -> {
+                    android.widget.Toast.makeText(context, "${event.newHostUsername} is now the host", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                is JamUiEvent.Kicked -> {
+                    android.widget.Toast.makeText(context, event.reason, android.widget.Toast.LENGTH_LONG).show()
+                }
+                is JamUiEvent.Toast -> {
+                    android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                is JamUiEvent.PermChanged -> {
+                    val p = event.permissions
+                    val prevPb = lastPlaybackPerm
+                    val prevAdd = lastQueueAddPerm
+                    val prevManage = lastQueueManagePerm
+
+                    if (prevPb != null && prevPb != p.playback) {
+                        val msg = if (p.playback) "You can now control playback" else "You can no longer control playback"
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    if (prevAdd != null && prevAdd != p.queueAdd) {
+                        val msg = if (p.queueAdd) "You can now add songs" else "You can no longer add songs"
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    if (prevManage != null && prevManage != p.queueManage) {
+                        val msg = if (p.queueManage) "You can now manage the queue" else "You can no longer manage the queue"
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+
+                    lastPlaybackPerm = p.playback
+                    lastQueueAddPerm = p.queueAdd
+                    lastQueueManagePerm = p.queueManage
+                }
+            }
+        }
+    }
+
+    // D4: Quiet reconnecting & reconnected toasts
+    var prevClientState by remember { mutableStateOf<JamClientState?>(null) }
+    LaunchedEffect(jamClientState) {
+        val prev = prevClientState
+        val curr = jamClientState
+        if (prev is JamClientState.Active && curr is JamClientState.Reconnecting && curr.attempt == 1) {
+            android.widget.Toast.makeText(context, "Reconnecting to Jam…", android.widget.Toast.LENGTH_SHORT).show()
+        } else if (prev is JamClientState.Reconnecting && curr is JamClientState.Active) {
+            android.widget.Toast.makeText(context, "Reconnected to Jam ✓", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        prevClientState = curr
+    }
 
     LaunchedEffect(jamState.error) {
         jamState.error?.let { err ->
@@ -183,7 +308,8 @@ private fun MainAppContent(
     }
 
     androidx.compose.runtime.CompositionLocalProvider(
-        com.synq.features.music.jam.LocalIsInJam provides jamState.isInJam,
+        LocalIsInJam provides jamState.isInJam,
+        LocalCanAddSongsToJam provides (!jamState.isInJam || jamUiState.canAddSongs),
         com.synq.features.music.components.LocalAddToPlaylist provides { song ->
             rootViewModel.showAddToPlaylist(song)
         },
@@ -228,9 +354,41 @@ private fun MainAppContent(
                         enter = slideInVertically(initialOffsetY = { it }) + expandVertically(),
                         exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(),
                     ) {
+                        val canControlPlayback = !jamState.isInJam || jamUiState.canControlPlayback
+                        val jamHostName = jamUiState.hostName.ifBlank { "host" }
+
                         MiniPlayer(
                             playbackState = playbackState,
-                            onPlayPauseClick = { rootViewModel.togglePlayPause() },
+                            canControlPlayback = canControlPlayback,
+                            onPlayPauseClick = {
+                                if (jamState.isInJam) {
+                                    rootViewModel.toggleJamPlayPause()
+                                } else {
+                                    rootViewModel.togglePlayPause()
+                                }
+                            },
+                            onPreviousClick = {
+                                if (jamState.isInJam) {
+                                    if (jamUiState.canControlPlayback) {
+                                        rootViewModel.jamPreviousTrack()
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Ask $jamHostName for playback control", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    rootViewModel.skipToPrevious()
+                                }
+                            },
+                            onNextClick = {
+                                if (jamState.isInJam) {
+                                    if (jamUiState.canControlPlayback) {
+                                        rootViewModel.jamNextTrack()
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Ask $jamHostName for playback control", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    rootViewModel.skipToNext()
+                                }
+                            },
                             onNavigateToNowPlaying = { showFullPlayer = true },
                             onDismiss = { rootViewModel.stopPlayback() }
                         )
@@ -260,7 +418,6 @@ private fun MainAppContent(
                 val isLyricsLoading by rootViewModel.isLyricsLoading.collectAsState()
                 val sleepSelected by rootViewModel.sleepSelected.collectAsState()
                 val sleepRemainingSeconds by rootViewModel.sleepRemainingSeconds.collectAsState()
-                val jamState by rootViewModel.jamState.collectAsState()
 
                 com.synq.features.music.FullPlayerSheet(
                     playbackState = playbackState,
@@ -273,13 +430,39 @@ private fun MainAppContent(
                     sleepSelected = sleepSelected,
                     sleepRemainingSeconds = sleepRemainingSeconds,
                     jamState = jamState,
+                    jamUiState = jamUiState,
+                    localPlaybackState = jamLocalPlaybackState,
                     isLiked = isLiked,
                     onLikeClick = { rootViewModel.toggleLike(currentSong) },
-                    onPlayPauseClick = { rootViewModel.togglePlayPause() },
-                    onNextClick = { rootViewModel.skipToNext() },
-                    onPreviousClick = { rootViewModel.skipToPrevious() },
+                    onPlayPauseClick = {
+                        if (jamState.isInJam) {
+                            rootViewModel.toggleJamPlayPause()
+                        } else {
+                            rootViewModel.togglePlayPause()
+                        }
+                    },
+                    onNextClick = {
+                        if (jamState.isInJam) {
+                            rootViewModel.jamNextTrack()
+                        } else {
+                            rootViewModel.skipToNext()
+                        }
+                    },
+                    onPreviousClick = {
+                        if (jamState.isInJam) {
+                            rootViewModel.jamPreviousTrack()
+                        } else {
+                            rootViewModel.skipToPrevious()
+                        }
+                    },
                     onSeek = { ratio -> rootViewModel.seekToRatio(ratio) },
-                    onSeekToMs = { ms -> rootViewModel.seekTo(ms) },
+                    onSeekToMs = { ms ->
+                        if (jamState.isInJam) {
+                            rootViewModel.jamSeekTo(ms)
+                        } else {
+                            rootViewModel.seekTo(ms)
+                        }
+                    },
                     onPlayQueueIndex = { idx -> rootViewModel.playQueueIndex(idx) },
                     onRemoveQueueItem = { idx -> rootViewModel.removeQueueItem(idx) },
                     onReorderQueue = { from, to -> rootViewModel.reorderQueue(from, to) },
@@ -292,6 +475,12 @@ private fun MainAppContent(
                     onRemoveJamSong = { idx -> rootViewModel.removeSongFromJam(idx) },
                     onReorderJamQueue = { from, to -> rootViewModel.reorderJamQueue(from, to) },
                     onToggleGuestReorder = { allow -> rootViewModel.setAttendeeReorderPermission(allow) },
+                    onStepOutLocally = { rootViewModel.stepOutLocally() },
+                    onResumeFromLocalStepOut = { rootViewModel.resumeFromLocalStepOut() },
+                    onPlayItemByQid = { qid -> rootViewModel.playItemByQid(qid) },
+                    onPromoteRecommended = { qid -> rootViewModel.promoteRecommended(qid) },
+                    onRemoveByQid = { qid -> rootViewModel.removeByQid(qid) },
+                    onMoveByQid = { qid, toIdx -> rootViewModel.moveByQid(qid, toIdx) },
                     onPlayNext = { song -> rootViewModel.playNext(song) },
                     onAddToQueue = { song -> rootViewModel.addToQueue(song) },
                     recommendedSongIds = recommendedSongIds,
@@ -305,5 +494,3 @@ private fun MainAppContent(
         }
     }
 }
-
-

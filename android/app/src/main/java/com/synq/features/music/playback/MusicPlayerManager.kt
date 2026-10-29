@@ -55,6 +55,7 @@ interface JamPlaybackInterceptor {
     fun onToggleRepeat(): Boolean = false
     fun onTrackEnded(): Boolean = false
     fun onPlaybackStateChanged(state: Int) {}
+    fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {}
     fun onPlayerError(error: androidx.media3.common.PlaybackException): Boolean = false
 }
 
@@ -991,27 +992,49 @@ class MusicPlayerManager @Inject constructor(
         return controller?.duration?.takeIf { it > 0 } ?: 0L
     }
 
+    private var isApplyingJamCommand: Boolean = false
+
     fun applyJamPlay() {
-        controller?.let {
-            if (!it.isPlaying) {
-                it.play()
-                startPositionTracking()
+        isApplyingJamCommand = true
+        try {
+            controller?.let {
+                if (!it.isPlaying) {
+                    it.play()
+                    startPositionTracking()
+                }
             }
+        } finally {
+            isApplyingJamCommand = false
         }
     }
 
     fun applyJamPause() {
-        controller?.pause()
-        stopPositionTracking()
+        isApplyingJamCommand = true
+        try {
+            controller?.pause()
+            stopPositionTracking()
+        } finally {
+            isApplyingJamCommand = false
+        }
     }
 
     fun applyJamSeek(positionMs: Long) {
-        controller?.seekTo(positionMs)
-        _playbackState.update { it.copy(playbackPositionMs = positionMs) }
+        isApplyingJamCommand = true
+        try {
+            controller?.seekTo(positionMs)
+            _playbackState.update { it.copy(playbackPositionMs = positionMs) }
+        } finally {
+            isApplyingJamCommand = false
+        }
     }
 
     fun applyJamSpeed(factor: Float) {
-        controller?.setPlaybackSpeed(factor)
+        isApplyingJamCommand = true
+        try {
+            controller?.setPlaybackSpeed(factor)
+        } finally {
+            isApplyingJamCommand = false
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1054,6 +1077,12 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private val playerListener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!isApplyingJamCommand) {
+                jamInterceptor?.onPlayWhenReadyChanged(playWhenReady, reason)
+            }
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playbackState.update { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
