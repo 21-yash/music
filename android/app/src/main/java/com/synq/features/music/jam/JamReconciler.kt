@@ -4,13 +4,21 @@ import androidx.media3.common.Player
 import com.synq.features.music.domain.model.Song
 import kotlin.math.abs
 
+enum class ReconcilerTrackState {
+    IDLE,
+    LOADING,
+    READY
+}
+
 data class LocalPlayerState(
     val currentSongId: String?,
     val currentTrackSeq: Long,
     val currentPositionMs: Long,
     val playWhenReady: Boolean,
     val playbackState: Int = Player.STATE_READY,
-    val playbackSpeed: Float = 1.0f
+    val playbackSpeed: Float = 1.0f,
+    val trackState: ReconcilerTrackState = ReconcilerTrackState.READY,
+    val loadingTrackSeq: Long? = null
 )
 
 sealed class ReconcilerAction {
@@ -60,14 +68,19 @@ object JamReconciler {
         val serverNowPlaying = room.nowPlaying
         val serverSong = serverNowPlaying.item.song
 
+        // Guard: Don't re-trigger ChangeTrack while loading the target trackSeq
+        if (local.trackState == ReconcilerTrackState.LOADING) {
+            if (local.loadingTrackSeq == serverNowPlaying.trackSeq) {
+                return ReconcilerAction.Nothing
+            }
+        }
+
         // 1. Track identity & track sequence check
         if (local.currentTrackSeq != serverNowPlaying.trackSeq || local.currentSongId != serverSong.id) {
-            val expectedPos = clockSync.expectedPosition(serverNowPlaying, now)
-            val playWhenReady = serverNowPlaying.status == JamPlaybackStatus.PLAYING
             return ReconcilerAction.ChangeTrack(
                 song = serverSong,
-                positionMs = expectedPos,
-                playWhenReady = playWhenReady,
+                positionMs = 0L,
+                playWhenReady = false,
                 trackSeq = serverNowPlaying.trackSeq
             )
         }

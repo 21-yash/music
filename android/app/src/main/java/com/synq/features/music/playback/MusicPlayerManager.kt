@@ -54,6 +54,7 @@ interface JamPlaybackInterceptor {
     fun onToggleShuffle(): Boolean = false
     fun onToggleRepeat(): Boolean = false
     fun onTrackEnded(): Boolean = false
+    fun onPlaybackStateChanged(state: Int) {}
 }
 
 @Singleton
@@ -985,6 +986,10 @@ class MusicPlayerManager @Inject constructor(
         return controller?.playbackState ?: androidx.media3.common.Player.STATE_IDLE
     }
 
+    fun getPlayerDuration(): Long {
+        return controller?.duration?.takeIf { it > 0 } ?: 0L
+    }
+
     fun applyJamPlay() {
         controller?.let {
             if (!it.isPlaying) {
@@ -1058,6 +1063,7 @@ class MusicPlayerManager @Inject constructor(
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            jamInterceptor?.onPlaybackStateChanged(state)
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener
                 if (listener != null) {

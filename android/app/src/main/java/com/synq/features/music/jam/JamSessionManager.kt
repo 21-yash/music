@@ -60,6 +60,8 @@ class JamSessionManager @Inject constructor(
     val jamState: StateFlow<JamState> = _jamState.asStateFlow()
 
     private var currentTrackSeq: Long = 0L
+    private var reconcilerTrackState: ReconcilerTrackState = ReconcilerTrackState.READY
+    private var loadingTrackSeq: Long? = null
     private var reconcilerJob: Job? = null
     private var isReconciling = false
 
@@ -251,13 +253,16 @@ class JamSessionManager @Inject constructor(
                 currentPositionMs = currentPos,
                 playWhenReady = playWhenReady,
                 playbackState = playbackState,
-                playbackSpeed = localSpeed
+                playbackSpeed = localSpeed,
+                trackState = reconcilerTrackState,
+                loadingTrackSeq = loadingTrackSeq
             )
 
             val action = JamReconciler.decide(localState, currentRoom, clockSync)
             when (action) {
                 is ReconcilerAction.ChangeTrack -> {
-                    currentTrackSeq = action.trackSeq
+                    reconcilerTrackState = ReconcilerTrackState.LOADING
+                    loadingTrackSeq = action.trackSeq
                     val recIds = currentRoom.queue.filter { it.recommended }.map { it.song.id }.toSet()
                     playerManager.setJamQueue(
                         jamQueue = currentRoom.queue.map { it.song },
@@ -268,8 +273,8 @@ class JamSessionManager @Inject constructor(
                     if (action.song != null) {
                         playerManager.playJamSyncSong(
                             song = action.song,
-                            initialPositionMs = action.positionMs,
-                            playWhenReady = action.playWhenReady
+                            initialPositionMs = 0L,
+                            playWhenReady = false
                         )
                         // Pre-cache upcoming track
                         val nextSong = currentRoom.queue.firstOrNull()?.song
@@ -277,6 +282,9 @@ class JamSessionManager @Inject constructor(
                             playerManager.prefetchTrack(nextSong)
                         }
                     } else {
+                        reconcilerTrackState = ReconcilerTrackState.READY
+                        loadingTrackSeq = null
+                        currentTrackSeq = 0L
                         playerManager.stop()
                     }
                 }
@@ -379,6 +387,8 @@ class JamSessionManager @Inject constructor(
         playerManager.setPlaybackSpeed(1.0f)
         _jamState.value = JamState()
         currentTrackSeq = 0L
+        reconcilerTrackState = ReconcilerTrackState.READY
+        loadingTrackSeq = null
     }
 
     fun onNetworkRestored() {
@@ -688,5 +698,30 @@ class JamSessionManager @Inject constructor(
         if (!_jamState.value.isInJam) return false
         reportTrackEnded()
         return true
+    }
+
+    override fun onPlaybackStateChanged(state: Int) {
+        if (!_jamState.value.isInJam) return
+        if (state == androidx.media3.common.Player.STATE_READY) {
+            if (reconcilerTrackState == ReconcilerTrackState.LOADING) {
+                reconcilerTrackState = ReconcilerTrackState.READY
+                currentTrackSeq = loadingTrackSeq ?: currentTrackSeq
+                loadingTrackSeq = null
+
+                val room = stateStore.room.value
+                if (room != null && room.nowPlaying.trackSeq == currentTrackSeq) {
+                    val serverNowPlaying = room.nowPlaying
+                    val expectedPos = clockSync.expectedPosition(serverNowPlaying, clockSync.serverNow())
+                    playerManager.applyJamSeek(expectedPos)
+                    if (serverNowPlaying.status == JamPlaybackStatus.PLAYING) {
+                        playerManager.applyJamPlay()
+                    }
+
+                    val actualDurationMs = playerManager.getPlayerDuration()
+                    val metadataDurationMs = (serverNowPlaying.item?.song?.durationSeconds ?: 0) * 1000L
+                    android.util.Log.d("JamSessionManager", "New track READY: trackSeq=$currentTrackSeq metadataDur=$metadataDurationMs actualDur=$actualDurationMs")
+                }
+            }
+        }
     }
 }

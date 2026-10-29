@@ -73,7 +73,7 @@ class JamReconcilerTest {
         val ct = action as ReconcilerAction.ChangeTrack
         assertEquals("song_2", ct.song?.id)
         assertEquals(2L, ct.trackSeq)
-        assertTrue(ct.playWhenReady)
+        assertFalse("New track must load paused (playWhenReady=false)", ct.playWhenReady)
         assertEquals(0L, ct.positionMs)
     }
 
@@ -210,5 +210,41 @@ class JamReconcilerTest {
         )
         val action3 = JamReconciler.decide(localIdle, roomPlaying, fixedClockSync, now = 50_000L)
         assertEquals(ReconcilerAction.Nothing, action3)
+    }
+
+    @Test
+    fun `does not re-trigger ChangeTrack while in LOADING state for same trackSeq`() {
+        val local = LocalPlayerState(
+            currentSongId = "song_1",
+            currentTrackSeq = 1L,
+            currentPositionMs = 0L,
+            playWhenReady = false,
+            trackState = ReconcilerTrackState.LOADING,
+            loadingTrackSeq = 2L
+        )
+        val room = makeRoom(songId = "song_2", trackSeq = 2L, status = JamPlaybackStatus.PLAYING, positionMs = 0L, anchorTs = 50_000L)
+
+        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
+        assertEquals(ReconcilerAction.Nothing, action)
+    }
+
+    @Test
+    fun `re-triggers ChangeTrack while LOADING if server advanced to a newer trackSeq`() {
+        val local = LocalPlayerState(
+            currentSongId = "song_1",
+            currentTrackSeq = 1L,
+            currentPositionMs = 0L,
+            playWhenReady = false,
+            trackState = ReconcilerTrackState.LOADING,
+            loadingTrackSeq = 2L
+        )
+        // Server advanced to track 3
+        val room = makeRoom(songId = "song_3", trackSeq = 3L, status = JamPlaybackStatus.PLAYING, positionMs = 0L, anchorTs = 50_000L)
+
+        val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
+        assertTrue(action is ReconcilerAction.ChangeTrack)
+        val ct = action as ReconcilerAction.ChangeTrack
+        assertEquals(3L, ct.trackSeq)
+        assertFalse(ct.playWhenReady)
     }
 }
