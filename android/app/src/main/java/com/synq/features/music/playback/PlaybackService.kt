@@ -66,8 +66,11 @@ class PlaybackService : MediaSessionService() {
                 controller: MediaSession.ControllerInfo,
                 playerCommand: Int
             ): Int {
+                val isExternal = session.isMediaNotificationController(controller) ||
+                        controller.packageName != packageName
+
                 val jamManager = jamSessionManagerProvider.get()
-                if (jamManager.jamState.value.isInJam) {
+                if (PlaybackCommandRouter.shouldIntercept(isExternal, jamManager.jamState.value.isInJam, playerCommand)) {
                     when (playerCommand) {
                         androidx.media3.common.Player.COMMAND_PLAY_PAUSE -> {
                             jamManager.togglePlayPause()
