@@ -1,5 +1,6 @@
 package com.synq.features.music.jam
 
+import androidx.media3.common.Player
 import com.synq.features.music.domain.model.Song
 import org.junit.Assert.*
 import org.junit.Test
@@ -63,7 +64,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 5000L,
-            isPlaying = true
+            playWhenReady = true
         )
         val room = makeRoom(songId = "song_2", trackSeq = 2L, status = JamPlaybackStatus.PLAYING, positionMs = 0L, anchorTs = 50_000L)
 
@@ -82,7 +83,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 5000L,
-            isPlaying = false // Local paused
+            playWhenReady = false // Local paused
         )
         // Server playing
         val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
@@ -98,7 +99,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 10_000L,
-            isPlaying = true
+            playWhenReady = true
         )
         // Expected pos = 5000 + 1000 = 6000ms. Local = 10_000ms -> Delta = 4000ms (> 2000ms)
         val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 49_000L)
@@ -114,7 +115,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 5800L, // 800ms ahead
-            isPlaying = true,
+            playWhenReady = true,
             playbackSpeed = 1.0f
         )
         // Expected pos = 5000ms
@@ -131,7 +132,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 4300L, // 700ms behind
-            isPlaying = true,
+            playWhenReady = true,
             playbackSpeed = 1.0f
         )
         // Expected pos = 5000ms
@@ -148,7 +149,7 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 5100L, // 100ms ahead (within 300ms)
-            isPlaying = true,
+            playWhenReady = true,
             playbackSpeed = 0.98f // Was previously slowed down
         )
         // Expected pos = 5000ms
@@ -165,12 +166,49 @@ class JamReconcilerTest {
             currentSongId = "song_1",
             currentTrackSeq = 1L,
             currentPositionMs = 5050L, // 50ms ahead
-            isPlaying = true,
+            playWhenReady = true,
             playbackSpeed = 1.0f
         )
         val room = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
 
         val action = JamReconciler.decide(local, room, fixedClockSync, now = 50_000L)
         assertEquals(ReconcilerAction.Nothing, action)
+    }
+
+    @Test
+    fun `does not send SetPlayWhenReady or Seek while BUFFERING or not READY`() {
+        // Local is BUFFERING with playWhenReady = false, but server is PLAYING
+        val localBuffering = LocalPlayerState(
+            currentSongId = "song_1",
+            currentTrackSeq = 1L,
+            currentPositionMs = 5000L,
+            playWhenReady = false,
+            playbackState = Player.STATE_BUFFERING
+        )
+        val roomPlaying = makeRoom(songId = "song_1", trackSeq = 1L, status = JamPlaybackStatus.PLAYING, positionMs = 5000L, anchorTs = 50_000L)
+        val action1 = JamReconciler.decide(localBuffering, roomPlaying, fixedClockSync, now = 50_000L)
+        assertEquals(ReconcilerAction.Nothing, action1)
+
+        // Local is BUFFERING with position drift > 2000ms
+        val localBufferingDrift = LocalPlayerState(
+            currentSongId = "song_1",
+            currentTrackSeq = 1L,
+            currentPositionMs = 10_000L,
+            playWhenReady = true,
+            playbackState = Player.STATE_BUFFERING
+        )
+        val action2 = JamReconciler.decide(localBufferingDrift, roomPlaying, fixedClockSync, now = 50_000L)
+        assertEquals(ReconcilerAction.Nothing, action2)
+
+        // Local is IDLE (not READY)
+        val localIdle = LocalPlayerState(
+            currentSongId = "song_1",
+            currentTrackSeq = 1L,
+            currentPositionMs = 5000L,
+            playWhenReady = false,
+            playbackState = Player.STATE_IDLE
+        )
+        val action3 = JamReconciler.decide(localIdle, roomPlaying, fixedClockSync, now = 50_000L)
+        assertEquals(ReconcilerAction.Nothing, action3)
     }
 }

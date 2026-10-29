@@ -1,5 +1,6 @@
 package com.synq.features.music.jam
 
+import androidx.media3.common.Player
 import com.synq.features.music.domain.model.Song
 import kotlin.math.abs
 
@@ -7,7 +8,8 @@ data class LocalPlayerState(
     val currentSongId: String?,
     val currentTrackSeq: Long,
     val currentPositionMs: Long,
-    val isPlaying: Boolean,
+    val playWhenReady: Boolean,
+    val playbackState: Int = Player.STATE_READY,
     val playbackSpeed: Float = 1.0f
 )
 
@@ -48,7 +50,7 @@ object JamReconciler {
                     playWhenReady = false,
                     trackSeq = 0L
                 )
-            } else if (local.isPlaying) {
+            } else if (local.playWhenReady) {
                 ReconcilerAction.SetPlayWhenReady(false)
             } else {
                 ReconcilerAction.Nothing
@@ -70,9 +72,14 @@ object JamReconciler {
             )
         }
 
-        // 2. Play / Pause status check
+        // 2. Play / Pause & position synchronization checks
+        // Guard: Don't send SetPlayWhenReady, Seek, or SpeedRamp while BUFFERING or not READY
+        if (local.playbackState != Player.STATE_READY) {
+            return ReconcilerAction.Nothing
+        }
+
         val serverIsPlaying = serverNowPlaying.status == JamPlaybackStatus.PLAYING
-        if (serverIsPlaying != local.isPlaying) {
+        if (serverIsPlaying != local.playWhenReady) {
             return ReconcilerAction.SetPlayWhenReady(serverIsPlaying)
         }
 

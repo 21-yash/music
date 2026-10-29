@@ -973,6 +973,18 @@ class MusicPlayerManager @Inject constructor(
         return controller?.playbackParameters?.speed ?: 1.0f
     }
 
+    fun getPlayerCurrentPosition(): Long {
+        return controller?.currentPosition ?: _playbackState.value.playbackPositionMs
+    }
+
+    fun getPlayerPlayWhenReady(): Boolean {
+        return controller?.playWhenReady ?: false
+    }
+
+    fun getPlayerPlaybackState(): Int {
+        return controller?.playbackState ?: androidx.media3.common.Player.STATE_IDLE
+    }
+
     fun applyJamPlay() {
         controller?.let {
             if (!it.isPlaying) {

@@ -240,13 +240,17 @@ class JamSessionManager @Inject constructor(
         try {
             isReconciling = true
             val playback = playerManager.playbackState.value
+            val currentPos = playerManager.getPlayerCurrentPosition()
+            val playWhenReady = playerManager.getPlayerPlayWhenReady()
+            val playbackState = playerManager.getPlayerPlaybackState()
             val localSpeed = playerManager.getPlaybackSpeed()
 
             val localState = LocalPlayerState(
                 currentSongId = playback.currentSong?.id,
                 currentTrackSeq = currentTrackSeq,
-                currentPositionMs = playback.playbackPositionMs,
-                isPlaying = playback.isPlaying,
+                currentPositionMs = currentPos,
+                playWhenReady = playWhenReady,
+                playbackState = playbackState,
                 playbackSpeed = localSpeed
             )
 
