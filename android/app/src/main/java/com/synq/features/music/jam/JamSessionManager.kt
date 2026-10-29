@@ -435,6 +435,11 @@ class JamSessionManager @Inject constructor(
         jamClient.onNetworkRestored()
     }
 
+    fun setError(message: String) {
+        _jamState.update { it.copy(error = message) }
+        showToast(message)
+    }
+
     fun clearError() {
         _jamState.update { it.copy(error = null) }
     }

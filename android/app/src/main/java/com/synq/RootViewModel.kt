@@ -220,15 +220,23 @@ class RootViewModel @Inject constructor(
     // Jam session
     fun startJam() {
         val currUser = _user.value
-        val userId = currUser?.id ?: "guest_${System.currentTimeMillis() % 10000}"
-        val username = currUser?.username ?: "You"
+        val userId = currUser?.id
+        if (userId.isNullOrBlank()) {
+            jamSessionManager.setError("Sign in required to start a Jam")
+            return
+        }
+        val username = currUser.username
         jamSessionManager.createJam(userId, username, null)
     }
 
     fun joinJam(code: String) {
         val currUser = _user.value
-        val userId = currUser?.id ?: "guest_${System.currentTimeMillis() % 10000}"
-        val username = currUser?.username ?: "Guest"
+        val userId = currUser?.id
+        if (userId.isNullOrBlank()) {
+            jamSessionManager.setError("Sign in required to join a Jam")
+            return
+        }
+        val username = currUser.username
         jamSessionManager.joinJam(code, userId, username, null)
     }
 
