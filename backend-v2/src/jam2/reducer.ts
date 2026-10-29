@@ -12,6 +12,8 @@ import { checkCommandPermission } from './permissions';
 import { getSongFingerprint } from '../utils/musicFingerprint';
 
 const MAX_QUEUE_SIZE = 50;
+const MAX_USER_QUEUE_SIZE = 50;
+const MAX_REC_QUEUE_SIZE = 10;
 const MAX_HISTORY_SIZE = 20;
 
 function isSameSong(a: Song, b: Song): boolean {
@@ -60,18 +62,33 @@ export function normalizeQueue(room: Room): void {
     }
   }
 
-  room.queue = [...userItems, ...recItems];
-  if (room.queue.length > MAX_QUEUE_SIZE) {
-    room.queue.splice(MAX_QUEUE_SIZE);
+  if (userItems.length > MAX_USER_QUEUE_SIZE) {
+    userItems.splice(MAX_USER_QUEUE_SIZE);
   }
+
+  if (recItems.length > MAX_REC_QUEUE_SIZE) {
+    recItems.splice(MAX_REC_QUEUE_SIZE);
+  }
+
+  room.queue = [...userItems, ...recItems];
 }
+
+export type ReducerResult =
+  | {
+      room: Room;
+      events: Jam2Event[];
+      added?: number;
+      skippedDuplicate?: number;
+      skippedFull?: number;
+    }
+  | { error: Jam2Error };
 
 export function applyCommand(
   room: Room,
   cmd: Jam2Command,
   actorUserId: string,
   now: number,
-): { room: Room; events: Jam2Event[] } | { error: Jam2Error } {
+): ReducerResult {
   // Check membership unless it's a join/online event
   if (cmd.type !== 'memberOnline') {
     if (!room.members.has(actorUserId) && actorUserId !== 'system') {
@@ -322,6 +339,43 @@ export function applyCommand(
         nextRoom.queue.splice(recIdx, 1);
       }
 
+      // Authoritative duplicate check:
+      // 1. Check if song is currently playing
+      if (nextRoom.nowPlaying.item && isSameSong(nextRoom.nowPlaying.item.song, song)) {
+        return {
+          room,
+          events: [],
+          added: 0,
+          skippedDuplicate: 1,
+          skippedFull: 0,
+        };
+      }
+
+      // 2. Check if song is already in user queue
+      const existingUserIdx = nextRoom.queue.findIndex(
+        (q) => !q.recommended && isSameSong(q.song, song),
+      );
+
+      if (existingUserIdx !== -1) {
+        if (cmd.playNext) {
+          // Move existing item to the front of the user queue
+          const [moved] = nextRoom.queue.splice(existingUserIdx, 1);
+          nextRoom.queue.unshift(moved);
+          nextRoom.version++;
+          normalizeQueue(nextRoom);
+          return { room: nextRoom, events, added: 1, skippedDuplicate: 0, skippedFull: 0 };
+        } else {
+          // Skip duplicate
+          return {
+            room,
+            events: [],
+            added: 0,
+            skippedDuplicate: 1,
+            skippedFull: 0,
+          };
+        }
+      }
+
       const newItem: QueueItem = {
         qid: randomUUID(),
         song,
@@ -340,25 +394,14 @@ export function applyCommand(
           trackSeq: nextRoom.nowPlaying.trackSeq + 1,
         };
         nextRoom.version++;
-        return { room: nextRoom, events };
+        normalizeQueue(nextRoom);
+        return { room: nextRoom, events, added: 1, skippedDuplicate: 0, skippedFull: 0 };
       }
 
-      // Cap at 50 including recommended
-      if (nextRoom.queue.length >= MAX_QUEUE_SIZE) {
-        // Evict last recommended item if present
-        let lastRecIdx = -1;
-        for (let i = nextRoom.queue.length - 1; i >= 0; i--) {
-          if (nextRoom.queue[i].recommended) {
-            lastRecIdx = i;
-            break;
-          }
-        }
-
-        if (lastRecIdx !== -1) {
-          nextRoom.queue.splice(lastRecIdx, 1);
-        } else {
-          return { error: { code: 'QUEUE_FULL', message: 'Queue is full (max 50 songs).' } };
-        }
+      // Cap at 50 user-added songs only (recommended songs do not count against this)
+      const userCount = nextRoom.queue.filter((q) => !q.recommended).length;
+      if (userCount >= MAX_USER_QUEUE_SIZE) {
+        return { error: { code: 'QUEUE_FULL', message: 'Queue is full (max 50 user songs).' } };
       }
 
       // Insert: playNext goes to front of user section; else end of user section (before recommended)
@@ -374,11 +417,14 @@ export function applyCommand(
       }
 
       nextRoom.version++;
-      return { room: nextRoom, events };
+      normalizeQueue(nextRoom);
+      return { room: nextRoom, events, added: 1, skippedDuplicate: 0, skippedFull: 0 };
     }
 
     case 'queueAddMany': {
-      let addedCount = 0;
+      let added = 0;
+      let skippedDuplicate = 0;
+      let skippedFull = 0;
 
       for (const song of cmd.songs) {
         // If the song was queued as a recommendation, remove that recommendation item
@@ -387,6 +433,21 @@ export function applyCommand(
         );
         if (recIdx !== -1) {
           nextRoom.queue.splice(recIdx, 1);
+        }
+
+        // Duplicate check against nowPlaying
+        if (nextRoom.nowPlaying.item && isSameSong(nextRoom.nowPlaying.item.song, song)) {
+          skippedDuplicate++;
+          continue;
+        }
+
+        // Duplicate check against user queue
+        const isQueued = nextRoom.queue.some(
+          (q) => !q.recommended && isSameSong(q.song, song),
+        );
+        if (isQueued) {
+          skippedDuplicate++;
+          continue;
         }
 
         const newItem: QueueItem = {
@@ -406,25 +467,15 @@ export function applyCommand(
             anchorServerTs: now,
             trackSeq: nextRoom.nowPlaying.trackSeq + 1,
           };
-          addedCount++;
+          added++;
           continue;
         }
 
-        // Cap at 50
-        if (nextRoom.queue.length >= MAX_QUEUE_SIZE) {
-          let lastRecIdx = -1;
-          for (let i = nextRoom.queue.length - 1; i >= 0; i--) {
-            if (nextRoom.queue[i].recommended) {
-              lastRecIdx = i;
-              break;
-            }
-          }
-          if (lastRecIdx !== -1) {
-            nextRoom.queue.splice(lastRecIdx, 1);
-          } else {
-            // Cannot add further songs
-            break;
-          }
+        // Cap at 50 user-added songs
+        const userCount = nextRoom.queue.filter((q) => !q.recommended).length;
+        if (userCount >= MAX_USER_QUEUE_SIZE) {
+          skippedFull++;
+          continue;
         }
 
         const firstRecIdx = nextRoom.queue.findIndex((q) => q.recommended);
@@ -433,15 +484,25 @@ export function applyCommand(
         } else {
           nextRoom.queue.splice(firstRecIdx, 0, newItem);
         }
-        addedCount++;
+        added++;
       }
 
-      if (addedCount === 0) {
-        return { error: { code: 'QUEUE_FULL', message: 'Queue is full (max 50 songs).' } };
+      if (added === 0) {
+        if (skippedDuplicate > 0 && skippedFull === 0) {
+          return {
+            room,
+            events: [],
+            added: 0,
+            skippedDuplicate,
+            skippedFull: 0,
+          };
+        }
+        return { error: { code: 'QUEUE_FULL', message: 'Queue is full (max 50 user songs).' } };
       }
 
       nextRoom.version++;
-      return { room: nextRoom, events };
+      normalizeQueue(nextRoom);
+      return { room: nextRoom, events, added, skippedDuplicate, skippedFull };
     }
 
     case 'promote': {

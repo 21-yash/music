@@ -1,19 +1,26 @@
 package com.synq.features.music.jam
 
+import com.synq.data.remote.TokenRefreshResult
 import com.synq.data.repository.AuthRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random
+
+data class JamClosedEvent(val reason: String, val message: String)
 
 class JamClient(
     private val transport: JamTransport,
@@ -23,21 +30,41 @@ class JamClient(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val authRepository: AuthRepository? = null,
     private val tokenProvider: (suspend () -> String?)? = null,
+    private val tokenResultProvider: (suspend () -> TokenRefreshResult)? = null,
     private val autoClockSync: Boolean = true,
     private val monotonicNowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val wallClockNowMs: () -> Long = { System.currentTimeMillis() }
 ) {
-    private suspend fun fetchFreshToken(): String? {
-        return tokenProvider?.invoke() ?: authRepository?.getFreshAccessToken()
+    private suspend fun fetchFreshTokenResult(): TokenRefreshResult {
+        if (tokenResultProvider != null) {
+            return tokenResultProvider.invoke()
+        }
+        if (authRepository != null) {
+            return authRepository.getFreshAccessTokenResult()
+        }
+        val legacy = tokenProvider?.invoke()
+        return if (!legacy.isNullOrBlank()) {
+            TokenRefreshResult.Success(legacy)
+        } else {
+            TokenRefreshResult.Unauthorized
+        }
     }
+
     private val _clientState = MutableStateFlow<JamClientState>(JamClientState.Disconnected)
     val clientState: StateFlow<JamClientState> = _clientState.asStateFlow()
 
+    private val _closedEvents = MutableSharedFlow<JamClosedEvent>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val closedEvents: SharedFlow<JamClosedEvent> = _closedEvents.asSharedFlow()
+
     private var activeRoomCode: String? = null
     private var reconnectJob: Job? = null
+    private var reconnectAttempt = 1
+    private var reconnectStartedAt = 0L
     private var clockSyncJob: Job? = null
     private var eventListenerJob: Job? = null
-    private var notFoundRetryJob: Job? = null
     private var notFoundRetryCount = 0
 
     init {
@@ -56,22 +83,11 @@ class JamClient(
     private fun handleTransportEvent(event: JamTransport.Event) {
         when (event) {
             is JamTransport.Event.Connected -> {
-                reconnectJob?.cancel()
-                reconnectJob = null
-
+                // Connection handled directly inside awaitConnected or join
                 if (autoClockSync) {
-                    // Trigger clock sync immediately
                     scope.launch(ioDispatcher) {
                         performClockSync()
                         startClockSyncLoop()
-                    }
-                }
-
-                // If reconnecting, re-join the active room code
-                val code = activeRoomCode
-                if (code != null && _clientState.value is JamClientState.Reconnecting) {
-                    scope.launch(ioDispatcher) {
-                        rejoinAfterReconnect(code)
                     }
                 }
             }
@@ -115,7 +131,13 @@ class JamClient(
      */
     suspend fun createRoom(avatarUrl: String? = null): Result<RoomSnapshot> {
         _clientState.value = JamClientState.Connecting
-        val token = fetchFreshToken()
+        val tokenRes = fetchFreshTokenResult()
+        val token = when (tokenRes) {
+            is TokenRefreshResult.Success -> tokenRes.token
+            is TokenRefreshResult.Transient -> tokenRes.fallbackToken
+            is TokenRefreshResult.Unauthorized -> null
+        }
+
         if (token.isNullOrBlank()) {
             val err = JamProtocolException("AUTH", "Authentication required")
             _clientState.value = JamClientState.Closed("auth_failed", "Please log in to start a Jam.")
@@ -125,6 +147,7 @@ class JamClient(
         transport.connect(token)
         val connectRes = transport.awaitConnected(10000L)
         if (connectRes.isFailure) {
+            transport.disconnect()
             _clientState.value = JamClientState.Disconnected
             val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
             return Result.failure(IllegalStateException(msg))
@@ -144,6 +167,7 @@ class JamClient(
             _clientState.value = JamClientState.Active(snapshot.code, JamRole.HOST)
             snapshot
         }.onFailure {
+            transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
     }
@@ -155,7 +179,13 @@ class JamClient(
         val cleanCode = code.trim().uppercase()
         _clientState.value = JamClientState.Joining(cleanCode)
 
-        val token = fetchFreshToken()
+        val tokenRes = fetchFreshTokenResult()
+        val token = when (tokenRes) {
+            is TokenRefreshResult.Success -> tokenRes.token
+            is TokenRefreshResult.Transient -> tokenRes.fallbackToken
+            is TokenRefreshResult.Unauthorized -> null
+        }
+
         if (token.isNullOrBlank()) {
             val err = JamProtocolException("AUTH", "Authentication required")
             _clientState.value = JamClientState.Closed("auth_failed", "Please log in to join a Jam.")
@@ -165,6 +195,7 @@ class JamClient(
         transport.connect(token)
         val connectRes = transport.awaitConnected(10000L)
         if (connectRes.isFailure) {
+            transport.disconnect()
             _clientState.value = JamClientState.Disconnected
             val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
             return Result.failure(IllegalStateException(msg))
@@ -186,12 +217,14 @@ class JamClient(
             _clientState.value = JamClientState.Active(snapshot.code, role)
             snapshot
         }.onFailure {
+            transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
     }
 
     /**
      * Pulls the latest room snapshot without state mutation.
+     * Uses isEpoch = false so stale responses cannot roll back newer state (Task A8).
      */
     suspend fun sync(): Result<RoomSnapshot> {
         val code = activeRoomCode ?: return Result.failure(IllegalStateException("Not in a room"))
@@ -201,15 +234,15 @@ class JamClient(
         return res.mapCatching { json ->
             val roomObj = json.getJSONObject("room")
             val snapshot = RoomSnapshot.fromJson(roomObj)
-            stateStore.applySnapshot(snapshot, isEpoch = true)
+            stateStore.applySnapshot(snapshot, isEpoch = false)
             snapshot
         }
     }
 
     /**
-     * Sends a command to the room. If currently reconnecting, buffers the command with a 15s TTL.
+     * Sends a command to the room. Fails fast if not in Active state.
      */
-    suspend fun sendCommand(type: String, params: JSONObject = JSONObject()): Result<Long> {
+    suspend fun sendCommandRaw(type: String, params: JSONObject = JSONObject()): Result<JSONObject> {
         val currentState = _clientState.value
         if (currentState !is JamClientState.Active) {
             return Result.failure(IllegalStateException("Reconnecting… try again"))
@@ -221,8 +254,11 @@ class JamClient(
             put("type", type)
         }
 
-        val res = transport.emit("jam2:cmd", cmdPayload)
-        return res.mapCatching { json ->
+        return transport.emit("jam2:cmd", cmdPayload)
+    }
+
+    suspend fun sendCommand(type: String, params: JSONObject = JSONObject()): Result<Long> {
+        return sendCommandRaw(type, params).mapCatching { json ->
             json.optLong("version", 0L)
         }
     }
@@ -234,7 +270,9 @@ class JamClient(
 
         if (code != null) {
             val payload = JSONObject().apply { put("code", code) }
-            transport.emit("jam2:leave", payload)
+            try {
+                transport.emit("jam2:leave", payload, ackTimeoutMs = 2000L)
+            } catch (_: Exception) {}
         }
 
         transport.disconnect()
@@ -244,18 +282,19 @@ class JamClient(
     }
 
     suspend fun endRoom(): Result<Unit> {
-        val code = activeRoomCode
-        activeRoomCode = null
-        stopAll()
-
-        if (code != null) {
-            val payload = JSONObject().apply { put("code", code) }
-            transport.emit("jam2:end", payload)
+        val code = activeRoomCode ?: return Result.failure(IllegalStateException("Not in a room"))
+        val payload = JSONObject().apply { put("code", code) }
+        val res = transport.emit("jam2:end", payload, ackTimeoutMs = 5000L)
+        if (res.isFailure) {
+            return Result.failure(res.exceptionOrNull() ?: Exception("Failed to end Jam"))
         }
 
+        activeRoomCode = null
+        stopAll()
         transport.disconnect()
         stateStore.clear()
-        _clientState.value = JamClientState.Closed("ended", "The host ended this Jam")
+        _closedEvents.tryEmit(JamClosedEvent("ended", "The host ended this Jam"))
+        _clientState.value = JamClientState.Disconnected
         return Result.success(Unit)
     }
 
@@ -269,90 +308,165 @@ class JamClient(
             "kicked" -> "You were removed from this Jam"
             "ended" -> "The host ended this Jam"
             "expired" -> "This Jam expired"
+            "connection_lost" -> "Connection lost. Please rejoin the Jam."
             else -> "The Jam session was closed ($reason)."
         }
 
+        _closedEvents.tryEmit(JamClosedEvent(reason, userMessage))
         _clientState.value = JamClientState.Closed(reason, userMessage)
+    }
+
+    fun resetToDisconnected() {
+        if (_clientState.value is JamClientState.Closed) {
+            _clientState.value = JamClientState.Disconnected
+        }
     }
 
     fun onNetworkRestored() {
         val code = activeRoomCode ?: return
-        if (_clientState.value !is JamClientState.Active && _clientState.value !is JamClientState.Reconnecting) return
-        scheduleReconnect(code, attempt = 1)
+        val current = _clientState.value
+        if (current !is JamClientState.Active && current !is JamClientState.Reconnecting) return
+
+        if (current is JamClientState.Active && transport.isConnected) {
+            scope.launch(ioDispatcher) {
+                val ping = transport.emit("jam2:time", null, ackTimeoutMs = 1500L)
+                if (ping.isFailure) {
+                    transport.disconnect()
+                    startReconnectLoop(code, resetBackoff = true)
+                }
+            }
+            return
+        }
+
+        startReconnectLoop(code, resetBackoff = true)
     }
 
     private fun handleConnectionLoss() {
         val code = activeRoomCode ?: return
         if (_clientState.value is JamClientState.Closed) return
-        if (_clientState.value is JamClientState.Reconnecting) return
-
-        _clientState.value = JamClientState.Reconnecting(code, attempt = 1)
-        scheduleReconnect(code, attempt = 1)
+        startReconnectLoop(code, resetBackoff = false)
     }
 
-    private fun scheduleReconnect(code: String, attempt: Int) {
+    private fun startReconnectLoop(code: String, resetBackoff: Boolean) {
+        if (resetBackoff) {
+            reconnectAttempt = 1
+            reconnectStartedAt = monotonicNowMs()
+        } else if (reconnectStartedAt == 0L) {
+            reconnectStartedAt = monotonicNowMs()
+        }
+
+        _clientState.value = JamClientState.Reconnecting(code, reconnectAttempt)
+
+        if (reconnectJob?.isActive == true && !resetBackoff) {
+            return
+        }
+
         reconnectJob?.cancel()
         reconnectJob = scope.launch(ioDispatcher) {
-            // Reconnect backoff: 1–5 s with jitter
-            val baseDelay = minOf(5000L, 1000L * (1L shl minOf(attempt - 1, 2)))
-            val jitter = Random.nextLong(0, 500)
-            delay(baseDelay + jitter)
-
-            if (!isActive) return@launch
-
-            _clientState.value = JamClientState.Reconnecting(code, attempt)
-
-            // Step 1: Refresh token before reconnecting
-            val token = fetchFreshToken()
-            if (token == null) {
-                // Refresh failed with 401 or invalid token
-                handleServerClosed("auth_failed")
-                return@launch
-            }
-
-            // Step 2: Connect socket with fresh token
-            transport.connect(token)
+            runReconnectLoop(code, immediateFirst = resetBackoff)
         }
     }
 
-    private suspend fun rejoinAfterReconnect(code: String) {
+    private suspend fun runReconnectLoop(code: String, immediateFirst: Boolean) {
+        val maxDurationMs = 10 * 60 * 1000L // 10 minutes
+        var isImmediate = immediateFirst
+
+        while (currentCoroutineContext().isActive) {
+            val elapsed = monotonicNowMs() - reconnectStartedAt
+            if (elapsed >= maxDurationMs) {
+                handleServerClosed("connection_lost")
+                return
+            }
+
+            _clientState.value = JamClientState.Reconnecting(code, reconnectAttempt)
+
+            if (!isImmediate) {
+                // Exponential backoff with jitter: 1s, 2s, 4s, 8s... cap ~15s
+                val baseDelay = minOf(15000L, 1000L * (1L shl minOf(reconnectAttempt - 1, 4)))
+                val jitter = Random.nextLong(0, 500)
+                delay(baseDelay + jitter)
+            }
+            isImmediate = false
+
+            if (!currentCoroutineContext().isActive) return
+
+            // Step 1: Token resolution
+            val tokenRes = fetchFreshTokenResult()
+            val tokenToUse = when (tokenRes) {
+                is TokenRefreshResult.Unauthorized -> {
+                    handleServerClosed("auth_failed")
+                    return
+                }
+                is TokenRefreshResult.Transient -> {
+                    tokenRes.fallbackToken
+                }
+                is TokenRefreshResult.Success -> {
+                    tokenRes.token
+                }
+            }
+
+            // Step 2: Connect socket if not connected
+            if (!transport.isConnected) {
+                transport.connect(tokenToUse)
+                val connectRes = transport.awaitConnected(10000L)
+                if (connectRes.isFailure) {
+                    reconnectAttempt++
+                    continue
+                }
+            }
+
+            // Step 3: Clock sync if enabled
+            if (autoClockSync) {
+                performClockSync()
+                startClockSyncLoop()
+            }
+
+            // Step 4: Rejoin the room
+            val rejoinRes = performRejoin(code)
+            if (rejoinRes.isSuccess) {
+                reconnectAttempt = 1
+                reconnectStartedAt = 0L
+                reconnectJob = null
+                return
+            } else {
+                val err = rejoinRes.exceptionOrNull()
+                if (err is JamProtocolException && err.code == "FORBIDDEN") {
+                    handleServerClosed("kicked")
+                    return
+                } else if (err is JamProtocolException && err.code == "NOT_FOUND") {
+                    if (notFoundRetryCount < 4) {
+                        notFoundRetryCount++
+                        delay(2000L)
+                        isImmediate = true
+                        continue
+                    } else {
+                        notFoundRetryCount = 0
+                        handleServerClosed("ended")
+                        return
+                    }
+                } else {
+                    reconnectAttempt++
+                    continue
+                }
+            }
+        }
+    }
+
+    private suspend fun performRejoin(code: String): Result<RoomSnapshot> {
         val payload = JSONObject().apply {
             put("protocol", 2)
             put("code", code)
         }
 
         val res = transport.emit("jam2:join", payload)
-        res.onSuccess { json ->
+        return res.mapCatching { json ->
             val roomObj = json.getJSONObject("room")
             val snapshot = RoomSnapshot.fromJson(roomObj)
             stateStore.applySnapshot(snapshot, isEpoch = true)
             val role = if (snapshot.hostUserId == stateStore.uiState.value.myUserId) JamRole.HOST else JamRole.GUEST
             _clientState.value = JamClientState.Active(code, role)
             notFoundRetryCount = 0
-            notFoundRetryJob?.cancel()
-            notFoundRetryJob = null
-        }.onFailure { err ->
-            if (err is JamProtocolException && err.code == "NOT_FOUND") {
-                if (notFoundRetryCount < 4) {
-                    notFoundRetryCount++
-                    notFoundRetryJob?.cancel()
-                    notFoundRetryJob = scope.launch(ioDispatcher) {
-                        delay(2000L)
-                        if (isActive && _clientState.value is JamClientState.Reconnecting) {
-                            rejoinAfterReconnect(code)
-                        }
-                    }
-                } else {
-                    notFoundRetryCount = 0
-                    handleServerClosed("ended")
-                }
-            } else if (err is JamProtocolException && err.code == "FORBIDDEN") {
-                notFoundRetryCount = 0
-                handleServerClosed("kicked")
-            } else {
-                val currentAttempt = (_clientState.value as? JamClientState.Reconnecting)?.attempt ?: 1
-                scheduleReconnect(code, currentAttempt + 1)
-            }
+            snapshot
         }
     }
 
@@ -389,8 +503,8 @@ class JamClient(
     private fun stopAll() {
         reconnectJob?.cancel()
         reconnectJob = null
-        notFoundRetryJob?.cancel()
-        notFoundRetryJob = null
+        reconnectAttempt = 1
+        reconnectStartedAt = 0L
         notFoundRetryCount = 0
         clockSyncJob?.cancel()
         clockSyncJob = null

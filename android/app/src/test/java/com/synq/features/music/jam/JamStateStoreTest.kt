@@ -1,6 +1,7 @@
 package com.synq.features.music.jam
 
 import com.synq.features.music.domain.model.Song
+import kotlinx.coroutines.launch
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -162,5 +163,32 @@ class JamStateStoreTest {
         assertEquals("q1", ui.userQueue[0].qid)
         assertEquals(1, ui.recommendedQueue.size)
         assertEquals("q2", ui.recommendedQueue[0].qid)
+    }
+
+    @Test
+    fun `applyEvent kicked emits Kicked only for myUserId and Toast for bystander`() = kotlinx.coroutines.test.runTest {
+        val bystanderStore = JamStateStore(myUserId = "bystander_id")
+        val kickedEvent = Jam2Event(kind = "kicked", userId = "other_user", username = "Bob")
+
+        val bystanderEvents = mutableListOf<JamUiEvent>()
+        val job = backgroundScope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            bystanderStore.uiEvents.collect { bystanderEvents.add(it) }
+        }
+
+        bystanderStore.applyEvent(kickedEvent)
+        assertEquals(1, bystanderEvents.size)
+        assertTrue(bystanderEvents[0] is JamUiEvent.Toast)
+        assertEquals("Bob was removed", (bystanderEvents[0] as JamUiEvent.Toast).message)
+
+        // Now test for kicked user
+        val targetStore = JamStateStore(myUserId = "target_id")
+        val targetEvents = mutableListOf<JamUiEvent>()
+        val targetJob = backgroundScope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            targetStore.uiEvents.collect { targetEvents.add(it) }
+        }
+
+        targetStore.applyEvent(Jam2Event(kind = "kicked", userId = "target_id", username = "Target"))
+        assertEquals(1, targetEvents.size)
+        assertTrue(targetEvents[0] is JamUiEvent.Kicked)
     }
 }

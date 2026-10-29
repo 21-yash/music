@@ -115,8 +115,8 @@ fun JamScreen(
     }
 
     // Auto-exit if jam closed
-    LaunchedEffect(clientState) {
-        if (clientState is JamClientState.Closed) {
+    LaunchedEffect(Unit) {
+        rootViewModel.jamClosedEvents.collect {
             onBackClick()
         }
     }

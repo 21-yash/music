@@ -915,6 +915,7 @@ class MusicPlayerManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     override fun stashPersonalQueue() {
+        if (stashedPersonalQueue != null || jamInterceptor != null) return
         stashedPersonalQueue = _queue.value
         stashedPersonalIndex = _currentIndex.value
         stashedRecommendedSongIds = _recommendedSongIds.value

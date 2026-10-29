@@ -1,5 +1,6 @@
 package com.synq.features.music.jam
 
+import com.synq.data.remote.TokenRefreshResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
@@ -30,12 +31,19 @@ class JamClientStateMachineTest {
         var nextEmitResult: Result<JSONObject> = Result.success(JSONObject().apply { put("ok", true) })
 
         fun emitEvent(event: JamTransport.Event) {
+            if (event is JamTransport.Event.Disconnected) {
+                isConnected = false
+            }
             _events.tryEmit(event)
         }
 
         override fun connect(token: String?) {
-            isConnected = true
-            emitEvent(JamTransport.Event.Connected)
+            if (awaitConnectedResult.isSuccess) {
+                isConnected = true
+                emitEvent(JamTransport.Event.Connected)
+            } else {
+                isConnected = false
+            }
         }
 
         var awaitConnectedResult: Result<Unit> = Result.success(Unit)
@@ -60,6 +68,7 @@ class JamClientStateMachineTest {
 
     private var currentTime: Long = 1000L
     private var tokenToProvide: String? = "valid_token"
+    private var tokenResultToProvide: TokenRefreshResult? = null
 
     @Before
     fun setup() {
@@ -79,6 +88,13 @@ class JamClientStateMachineTest {
             scope = backgroundScope,
             ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
             tokenProvider = { tokenToProvide },
+            tokenResultProvider = {
+                tokenResultToProvide ?: if (tokenToProvide != null) {
+                    TokenRefreshResult.Success(tokenToProvide!!)
+                } else {
+                    TokenRefreshResult.Unauthorized
+                }
+            },
             autoClockSync = false,
             monotonicNowMs = { currentTime },
             wallClockNowMs = { currentTime }
@@ -215,17 +231,17 @@ class JamClientStateMachineTest {
         runCurrent()
         assertTrue(client.clientState.value is JamClientState.Active)
 
+        // Prepare NOT_FOUND failure for rejoin
+        transport.nextEmitResult = Result.failure(JamProtocolException("NOT_FOUND", "Room not found"))
+
         // Disconnect
         transport.emitEvent(JamTransport.Event.Disconnected("drop"))
         runCurrent()
         assertTrue(client.clientState.value is JamClientState.Reconnecting)
 
-        // Reconnect socket successfully, but jam2:join fails with NOT_FOUND
-        transport.nextEmitResult = Result.failure(JamProtocolException("NOT_FOUND", "Room not found"))
-        transport.emitEvent(JamTransport.Event.Connected)
+        // Advance 2s to allow initial backoff (1s+jitter) and attempt 1 to execute
+        advanceTimeBy(2000L)
         runCurrent()
-
-        // Attempt 1 fails with NOT_FOUND, should schedule retry after 2s (still reconnecting)
         assertTrue("Still reconnecting after attempt 1 NOT_FOUND", client.clientState.value is JamClientState.Reconnecting)
 
         // Advance 2s: Attempt 2
@@ -293,5 +309,127 @@ class JamClientStateMachineTest {
         assertTrue(res.isFailure)
         assertTrue(res.exceptionOrNull()?.message?.contains("Timed out waiting for Jam server") == true)
         assertEquals(JamClientState.Disconnected, client.clientState.value)
+    }
+
+    @Test
+    fun `repeated ConnectError keeps retrying and rejoins after failures`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECN", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Connection lost
+        transport.emitEvent(JamTransport.Event.Disconnected("connection lost"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        // Make connect fail on retry 1
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("Socket connection error"))
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // Should still be in Reconnecting state, attempt incremented
+        val recState = client.clientState.value
+        assertTrue(recState is JamClientState.Reconnecting)
+        assertEquals(2, (recState as JamClientState.Reconnecting).attempt)
+
+        // Now restore connection and rejoin succeeds
+        transport.awaitConnectedResult = Result.success(Unit)
+        transport.nextEmitResult = Result.success(makeRoomJson("RECN", "user_me"))
+        advanceTimeBy(3000L)
+        runCurrent()
+
+        // Successfully rejoined into Active state
+        val finalState = client.clientState.value
+        assertTrue("Expected Active state after reconnect, but was $finalState", finalState is JamClientState.Active)
+        assertEquals("RECN", (finalState as JamClientState.Active).code)
+    }
+
+    @Test
+    fun `transient token refresh failure uses fallback token and keeps retrying`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("TRAN", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+
+        // Connection lost
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        // Token refresh returns Transient with fallback token
+        tokenResultToProvide = TokenRefreshResult.Transient("cached_fallback_token")
+        // Transport connect will receive the fallback token and connect
+        transport.nextEmitResult = Result.success(makeRoomJson("TRAN", "user_me"))
+
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // Should not be closed with auth_failed; should successfully rejoin
+        val state = client.clientState.value
+        assertTrue("Should be Active with fallback token, but was $state", state is JamClientState.Active)
+    }
+
+    @Test
+    fun `resetToDisconnected allows creating new Jam after Closed`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("ROOMA", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+
+        // Host ends Jam
+        transport.emitEvent(JamTransport.Event.Closed("ended"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Closed)
+
+        // Reset to disconnected
+        client.resetToDisconnected()
+        assertEquals(JamClientState.Disconnected, client.clientState.value)
+
+        // Create new room succeeds
+        transport.nextEmitResult = Result.success(makeRoomJson("ROOMB", "user_me"))
+        val res = client.createRoom()
+        runCurrent()
+        assertTrue(res.isSuccess)
+        val state = client.clientState.value
+        assertTrue(state is JamClientState.Active)
+        assertEquals("ROOMB", (state as JamClientState.Active).code)
+    }
+
+    @Test
+    fun `stale sync response arriving after newer broadcast is dropped`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("SYNC", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+
+        // Newer state broadcast arrives: version 10
+        val v10RoomJson = makeRoomJson("SYNC", "user_me").getJSONObject("room").apply {
+            put("version", 10)
+        }
+        val v10Snapshot = RoomSnapshot.fromJson(v10RoomJson)
+        stateStore.applySnapshot(v10Snapshot, isEpoch = false)
+        assertEquals(10L, stateStore.room.value?.version)
+
+        // Now a stale sync arrives with version 5
+        val v5RoomJson = makeRoomJson("SYNC", "user_me").apply {
+            getJSONObject("room").put("version", 5)
+        }
+        transport.nextEmitResult = Result.success(v5RoomJson)
+
+        val syncRes = client.sync()
+        assertTrue(syncRes.isSuccess)
+
+        // Version should remain 10 because sync uses isEpoch = false
+        assertEquals(10L, stateStore.room.value?.version)
     }
 }

@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { jam2Manager } from './manager';
+import { resolveSong, sanitizeUrl } from './songResolver';
 import {
   createPayloadSchema,
   joinPayloadSchema,
@@ -41,6 +42,14 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         });
       }
 
+      if (!jam2Manager.checkCreateRateLimit(user.userId)) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'RATE_LIMITED',
+          message: 'Too many rooms created. Please wait a minute before creating another.',
+        });
+      }
+
       const parsed = createPayloadSchema.safeParse(rawPayload);
       if (!parsed.success) {
         return safeAck(ack, {
@@ -58,10 +67,23 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         });
       }
 
+      // Enforce ONE active room per user
+      const existingCode = jam2Manager.getActiveRoomForUser(user.userId);
+      if (existingCode) {
+        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
+        for (const sId of userSockets) {
+          const s = io.sockets.sockets.get(sId);
+          if (s) s.leave(`jam2:${existingCode}`);
+        }
+        jam2Manager.deregisterUserSockets(existingCode, user.userId);
+        await jam2Manager.leaveRoom(existingCode, user.userId);
+      }
+
+      const cleanAvatarUrl = sanitizeUrl(parsed.data.avatarUrl) ?? undefined;
       const room = await jam2Manager.createRoom(
         user.userId,
         user.username,
-        parsed.data.avatarUrl,
+        cleanAvatarUrl,
       );
 
       socket.join(`jam2:${room.code}`);
@@ -113,11 +135,25 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       }
 
       const normalizedCode = parsed.data.code.trim().toUpperCase();
+
+      // Enforce ONE active room per user
+      const existingCode = jam2Manager.getActiveRoomForUser(user.userId);
+      if (existingCode && existingCode !== normalizedCode) {
+        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
+        for (const sId of userSockets) {
+          const s = io.sockets.sockets.get(sId);
+          if (s) s.leave(`jam2:${existingCode}`);
+        }
+        jam2Manager.deregisterUserSockets(existingCode, user.userId);
+        await jam2Manager.leaveRoom(existingCode, user.userId);
+      }
+
+      const cleanAvatarUrl = sanitizeUrl(parsed.data.avatarUrl) ?? undefined;
       const res = await jam2Manager.joinRoom(
         normalizedCode,
         user.userId,
         user.username,
-        parsed.data.avatarUrl,
+        cleanAvatarUrl,
       );
 
       if ('error' in res) {
@@ -163,7 +199,13 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       }
 
       const code = parsed.data.code.trim().toUpperCase();
+      const userSockets = jam2Manager.getUserSockets(code, user.userId);
+      for (const sId of userSockets) {
+        const s = io.sockets.sockets.get(sId);
+        if (s) s.leave(`jam2:${code}`);
+      }
       socket.leave(`jam2:${code}`);
+      jam2Manager.deregisterUserSockets(code, user.userId);
       const res = await jam2Manager.leaveRoom(code, user.userId);
 
       if (!res.success && res.error) {
@@ -315,6 +357,57 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       const cmd = parsed.data;
       const normalizedCode = cmd.code.trim().toUpperCase();
 
+      // Resolve song metadata from provider outside room mutex (Task A5)
+      if (cmd.type === 'queueAdd') {
+        const resolved = await resolveSong(cmd.song.id, cmd.song.providerId);
+        if (!resolved) {
+          return safeAck(ack, {
+            ok: false,
+            code: 'INVALID',
+            message: 'Could not resolve song from music provider',
+          });
+        }
+        cmd.song = {
+          ...cmd.song,
+          title: resolved.title,
+          artists: resolved.artists,
+          album: resolved.album,
+          duration: resolved.duration,
+          imageUrl: sanitizeUrl(resolved.imageUrl),
+        };
+      } else if (cmd.type === 'queueAddMany') {
+        const resolvedSongs: typeof cmd.songs = [];
+        const chunkSize = 5;
+        for (let i = 0; i < cmd.songs.length; i += chunkSize) {
+          const chunk = cmd.songs.slice(i, i + chunkSize);
+          const results = await Promise.all(
+            chunk.map((s) => resolveSong(s.id, s.providerId)),
+          );
+          for (let j = 0; j < chunk.length; j++) {
+            const resolved = results[j];
+            if (resolved) {
+              const orig = chunk[j];
+              resolvedSongs.push({
+                ...orig,
+                title: resolved.title,
+                artists: resolved.artists,
+                album: resolved.album,
+                duration: resolved.duration,
+                imageUrl: sanitizeUrl(resolved.imageUrl),
+              });
+            }
+          }
+        }
+        if (resolvedSongs.length === 0) {
+          return safeAck(ack, {
+            ok: false,
+            code: 'INVALID',
+            message: 'None of the requested songs could be resolved',
+          });
+        }
+        cmd.songs = resolvedSongs;
+      }
+
       const res = await jam2Manager.executeCommand(
         normalizedCode,
         cmd,
@@ -339,13 +432,16 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
             s.leave(`jam2:${normalizedCode}`);
           }
         }
+        jam2Manager.deregisterUserSockets(normalizedCode, kickedUserId);
       }
 
-      if (cmd.type === 'queueAddMany') {
+      if (cmd.type === 'queueAddMany' || cmd.type === 'queueAdd') {
         safeAck(ack, {
           ok: true,
-          added: res.added ?? cmd.songs.length,
+          added: res.added ?? 1,
           skipped: res.skipped ?? 0,
+          skippedDuplicate: res.skippedDuplicate ?? 0,
+          skippedFull: res.skippedFull ?? 0,
           version: res.room.version,
         });
       } else {

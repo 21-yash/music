@@ -108,6 +108,9 @@ class JamSessionManager(
     private var isReconciling = false
     private var lastAppliedSnapshotVersion: Long? = null
     private var lastAppliedNowPlayingQid: String? = null
+    private var isTornDown: Boolean = true
+    private var isSessionOpInFlight: Boolean = false
+    private var isAddPlaylistInFlight: Boolean = false
 
     companion object {
         const val MAX_JAM_QUEUE_SIZE = 50
@@ -151,36 +154,16 @@ class JamSessionManager(
         when (event) {
             is JamTransport.Event.JamEvent -> {
                 when (event.event.kind) {
-                    "member_joined" -> {
-                        showToast("${event.event.username} joined the Jam")
-                    }
-                    "member_left" -> {
-                        showToast("${event.event.username} left the Jam")
-                    }
-                    "host_changed" -> {
-                        showToast("${event.event.username} is now the host")
-                    }
                     "kicked" -> {
-                        showToast("You were removed from the Jam session")
-                        teardownJam()
+                        if (event.event.userId == myUserId) {
+                            teardownJam()
+                        }
                     }
-                    "server_restarting" -> {
-                        showToast("Server restarting, reconnecting...")
-                    }
-                    "perm_changed" -> {
-                        showToast("Your Jam permissions were updated")
-                    }
+                    else -> {}
                 }
             }
 
             is JamTransport.Event.Closed -> {
-                val msg = when (event.reason) {
-                    "ended" -> "The host ended the Jam session."
-                    "kicked" -> "You were removed from the Jam session."
-                    "expired" -> "The Jam session expired."
-                    else -> "The Jam session was closed."
-                }
-                showToast(msg)
                 teardownJam()
             }
 
@@ -200,6 +183,7 @@ class JamSessionManager(
                 jamPreferences.clearLastJam()
                 showToast(state.message)
                 teardownJam()
+                jamClient.resetToDisconnected()
             }
 
             is JamClientState.Reconnecting -> {
@@ -417,6 +401,14 @@ class JamSessionManager(
         avatarUrl: String? = null,
         onComplete: ((Result<RoomSnapshot>) -> Unit)? = null
     ) {
+        if (_jamState.value.isInJam || isSessionOpInFlight) {
+            val err = IllegalStateException("Already in a Jam session or an operation is in progress")
+            showToast("Already in a Jam session")
+            onComplete?.invoke(Result.failure(err))
+            return
+        }
+        isSessionOpInFlight = true
+
         val playback = playerManager.playbackState.value
         val isCurrentlyPlaying = playback.isPlaying
         val currentLocalSong = playback.currentSong
@@ -428,7 +420,9 @@ class JamSessionManager(
 
         scope.launch {
             val res = jamClient.createRoom(avatarUrl)
+            isSessionOpInFlight = false
             res.onSuccess { snapshot ->
+                isTornDown = false
                 if (isCurrentlyPlaying && currentLocalSong != null) {
                     addSongToJam(currentLocalSong)
                 }
@@ -449,6 +443,14 @@ class JamSessionManager(
         avatarUrl: String? = null,
         onComplete: ((Result<RoomSnapshot>) -> Unit)? = null
     ) {
+        if (_jamState.value.isInJam || isSessionOpInFlight) {
+            val err = IllegalStateException("Already in a Jam session or an operation is in progress")
+            showToast("Already in a Jam session")
+            onComplete?.invoke(Result.failure(err))
+            return
+        }
+        isSessionOpInFlight = true
+
         myUserId = userId
         stateStore.setMyUserId(userId)
         val cleanCode = code.trim().uppercase()
@@ -458,7 +460,9 @@ class JamSessionManager(
 
         scope.launch {
             val res = jamClient.joinRoom(cleanCode, avatarUrl)
+            isSessionOpInFlight = false
             res.onSuccess { snapshot ->
+                isTornDown = false
                 onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
@@ -470,26 +474,33 @@ class JamSessionManager(
     }
 
     fun leaveJam() {
-        jamPreferences.clearLastJam()
+        teardownJam()
         scope.launch {
             jamClient.leaveRoom()
         }
-        teardownJam()
     }
 
     fun endJam() {
-        jamPreferences.clearLastJam()
         scope.launch {
-            jamClient.endRoom()
+            val res = jamClient.endRoom()
+            res.onSuccess {
+                teardownJam()
+            }
+            res.onFailure { err ->
+                showToast(err.message ?: "Failed to end Jam")
+            }
         }
-        teardownJam()
     }
 
     private fun teardownJam() {
+        if (isTornDown) return
+        isTornDown = true
+        isSessionOpInFlight = false
         jamPreferences.clearLastJam()
         playerManager.jamInterceptor = null
-        playerManager.restorePersonalQueue()
+        playerManager.stop()
         playerManager.setPlaybackSpeed(1.0f)
+        playerManager.restorePersonalQueue()
         _jamState.value = JamState()
         currentTrackSeq = 0L
         reconcilerTrackState = ReconcilerTrackState.READY
@@ -652,9 +663,9 @@ class JamSessionManager(
     }
 
     fun addSongToJam(song: Song, playNext: Boolean = false): Boolean {
-        val currentSize = stateStore.room.value?.queue?.size ?: _jamState.value.queue.size
-        if (currentSize >= MAX_JAM_QUEUE_SIZE) {
-            showToast("Jam queue is full (max $MAX_JAM_QUEUE_SIZE songs)")
+        val userQueueSize = stateStore.room.value?.queue?.filter { !it.recommended }?.size ?: 0
+        if (userQueueSize >= MAX_JAM_QUEUE_SIZE) {
+            showToast("Queue is full (50 songs)")
             return false
         }
         scope.launch {
@@ -662,9 +673,18 @@ class JamSessionManager(
                 put("song", song.toJsonObject())
                 if (playNext) put("playNext", true)
             }
-            val res = jamClient.sendCommand("queueAdd", payload)
-            res.onSuccess {
-                showToast("Added to Jam: ${song.title}")
+            val res = jamClient.sendCommandRaw("queueAdd", payload)
+            res.onSuccess { json ->
+                val added = json.optInt("added", 1)
+                val skippedDuplicate = json.optInt("skippedDuplicate", 0)
+                val skippedFull = json.optInt("skippedFull", 0)
+                if (skippedDuplicate > 0 && added == 0) {
+                    showToast("Song already in queue")
+                } else if (skippedFull > 0 && added == 0) {
+                    showToast("Queue is full (50 songs)")
+                } else {
+                    showToast("Added to Jam: ${song.title}")
+                }
             }
             res.onFailure { err ->
                 showToast(err.message ?: "Failed to add song")
@@ -674,20 +694,46 @@ class JamSessionManager(
     }
 
     fun addSongsToJam(songs: List<Song>, limit: Int = 20): Int {
-        val currentSize = stateStore.room.value?.queue?.size ?: _jamState.value.queue.size
-        val availableSlots = (MAX_JAM_QUEUE_SIZE - currentSize).coerceAtLeast(0)
+        if (isAddPlaylistInFlight) return 0
+        isAddPlaylistInFlight = true
+
+        val userQueueSize = stateStore.room.value?.queue?.filter { !it.recommended }?.size ?: 0
+        val availableSlots = (MAX_JAM_QUEUE_SIZE - userQueueSize).coerceAtLeast(0)
         val toAdd = songs.take(limit).take(availableSlots)
-        if (toAdd.isEmpty()) return 0
+        if (toAdd.isEmpty()) {
+            isAddPlaylistInFlight = false
+            showToast("Queue is full (50 songs)")
+            return 0
+        }
 
         scope.launch {
-            val array = JSONArray()
-            toAdd.forEach { array.put(it.toJsonObject()) }
-            val payload = JSONObject().apply {
-                put("songs", array)
-            }
-            val res = jamClient.sendCommand("queueAddMany", payload)
-            res.onFailure { err ->
-                showToast(err.message ?: "Failed to add songs")
+            try {
+                val array = JSONArray()
+                toAdd.forEach { array.put(it.toJsonObject()) }
+                val payload = JSONObject().apply {
+                    put("songs", array)
+                }
+                val res = jamClient.sendCommandRaw("queueAddMany", payload)
+                res.onSuccess { json ->
+                    val added = json.optInt("added", toAdd.size)
+                    val skippedDuplicate = json.optInt("skippedDuplicate", 0)
+                    val skippedFull = json.optInt("skippedFull", 0)
+                    if (added > 0 && skippedDuplicate > 0) {
+                        showToast("Added $added songs, $skippedDuplicate already in queue")
+                    } else if (added > 0) {
+                        showToast("Added $added songs to Jam")
+                    } else if (skippedDuplicate > 0) {
+                        showToast("All songs already in queue")
+                    } else if (skippedFull > 0) {
+                        showToast("Queue is full (50 songs)")
+                    }
+                }
+                res.onFailure { err ->
+                    showToast(err.message ?: "Failed to add songs")
+                }
+            } finally {
+                delay(300L) // debounce
+                isAddPlaylistInFlight = false
             }
         }
         return toAdd.size

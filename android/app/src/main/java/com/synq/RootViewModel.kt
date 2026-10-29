@@ -54,6 +54,7 @@ class RootViewModel @Inject constructor(
     val jamClientState = jamSessionManager.jamClient.clientState
     val jamLocalPlaybackState = jamSessionManager.localPlaybackState
     val jamUiEvents = jamSessionManager.stateStore.uiEvents
+    val jamClosedEvents = jamSessionManager.jamClient.closedEvents
     val jamClockSync = jamSessionManager.clockSync
 
     fun clearJamError() {
@@ -136,8 +137,25 @@ class RootViewModel @Inject constructor(
         playerManager.togglePlayPause()
     }
 
-    fun stopPlayback() {
+    private val _showLeaveJamConfirmDialog = MutableStateFlow(false)
+    val showLeaveJamConfirmDialog: StateFlow<Boolean> = _showLeaveJamConfirmDialog.asStateFlow()
+
+    fun dismissLeaveJamConfirmDialog() {
+        _showLeaveJamConfirmDialog.value = false
+    }
+
+    fun confirmLeaveJamAndStopPlayback() {
+        _showLeaveJamConfirmDialog.value = false
+        jamSessionManager.leaveJam()
         playerManager.stop()
+    }
+
+    fun stopPlayback() {
+        if (jamState.value.isInJam) {
+            _showLeaveJamConfirmDialog.value = true
+        } else {
+            playerManager.stop()
+        }
     }
 
     private val _isPlaylistEditing = MutableStateFlow(false)

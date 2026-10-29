@@ -413,7 +413,7 @@ describe('Jam2 Reducer', () => {
       }
     });
 
-    it('allows user to add duplicate songs (same song twice or while playing)', () => {
+    it('prevents adding duplicate songs already playing or queued, moves to front if playNext', () => {
       const room = makeTestRoom();
       room.nowPlaying = {
         item: {
@@ -429,7 +429,7 @@ describe('Jam2 Reducer', () => {
         trackSeq: 1,
       };
 
-      // 1. User can add currently playing song again
+      // 1. Adding currently playing song is skipped as duplicate
       const dupPlaying = makeTestSong('s1', 'Kesariya');
       const res1 = applyCommand(
         room,
@@ -439,21 +439,61 @@ describe('Jam2 Reducer', () => {
       );
       expect('room' in res1).toBe(true);
       if ('room' in res1) {
-        expect(res1.room.queue.length).toBe(1);
-        expect(res1.room.queue[0].song.id).toBe('s1');
+        expect(res1.added).toBe(0);
+        expect(res1.skippedDuplicate).toBe(1);
+        expect(res1.room.queue.length).toBe(0);
+      }
 
-        // 2. User can add the same song a second time in queue
-        const res2 = applyCommand(
-          res1.room,
-          { code: 'TEST', type: 'queueAdd', song: dupPlaying },
-          'host_1',
-          3000,
+      // Add a song to queue
+      const song2 = makeTestSong('s2', 'Channa Mereya');
+      const res2 = applyCommand(
+        room,
+        { code: 'TEST', type: 'queueAdd', song: song2 },
+        'host_1',
+        3000,
+      );
+      expect('room' in res2).toBe(true);
+      if ('room' in res2) {
+        expect(res2.room.queue.length).toBe(1);
+        expect(res2.room.queue[0].song.id).toBe('s2');
+
+        // 2. Adding the queued song again without playNext is skipped as duplicate
+        const res3 = applyCommand(
+          res2.room,
+          { code: 'TEST', type: 'queueAdd', song: song2 },
+          'guest_1',
+          4000,
         );
-        expect('room' in res2).toBe(true);
-        if ('room' in res2) {
-          expect(res2.room.queue.length).toBe(2);
-          expect(res2.room.queue[0].song.id).toBe('s1');
-          expect(res2.room.queue[1].song.id).toBe('s1');
+        expect('room' in res3).toBe(true);
+        if ('room' in res3) {
+          expect(res3.added).toBe(0);
+          expect(res3.skippedDuplicate).toBe(1);
+          expect(res3.room.queue.length).toBe(1);
+        }
+
+        // Add a 3rd song
+        const song3 = makeTestSong('s3', 'Tum Hi Ho');
+        const res4 = applyCommand(
+          res2.room,
+          { code: 'TEST', type: 'queueAdd', song: song3 },
+          'guest_1',
+          4500,
+        );
+        expect('room' in res4).toBe(true);
+        if ('room' in res4) {
+          expect(res4.room.queue.map((q) => q.song.id)).toEqual(['s2', 's3']);
+
+          // 3. Adding song3 with playNext moves it to the front
+          const res5 = applyCommand(
+            res4.room,
+            { code: 'TEST', type: 'queueAdd', song: song3, playNext: true },
+            'guest_1',
+            5000,
+          );
+          expect('room' in res5).toBe(true);
+          if ('room' in res5) {
+            expect(res5.room.queue.map((q) => q.song.id)).toEqual(['s3', 's2']);
+          }
         }
       }
     });
@@ -498,7 +538,7 @@ describe('Jam2 Reducer', () => {
       }
     });
 
-    it('evicts recommended songs when queue hits cap 50 to make space for user songs', () => {
+    it('preserves recommended songs separately and does not evict them when adding user songs', () => {
       const room = makeTestRoom();
       room.nowPlaying = {
         item: {
@@ -541,7 +581,7 @@ describe('Jam2 Reducer', () => {
 
       expect(room.queue.length).toBe(50);
 
-      // Add 49th user song -> evicts r_2
+      // Add 49th user song -> both recommendations are preserved, total becomes 51
       const res = applyCommand(
         room,
         { code: 'TEST', type: 'queueAdd', song: makeTestSong('new_user_song') },
@@ -551,8 +591,9 @@ describe('Jam2 Reducer', () => {
 
       expect('room' in res).toBe(true);
       if ('room' in res) {
-        expect(res.room.queue.length).toBe(50);
-        expect(res.room.queue.some((q) => q.song.id === 'r_2')).toBe(false);
+        expect(res.room.queue.length).toBe(51);
+        expect(res.room.queue.some((q) => q.song.id === 'r_1')).toBe(true);
+        expect(res.room.queue.some((q) => q.song.id === 'r_2')).toBe(true);
         expect(res.room.queue.some((q) => q.song.id === 'new_user_song')).toBe(true);
       }
     });

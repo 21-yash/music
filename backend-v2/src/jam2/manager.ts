@@ -94,6 +94,7 @@ export class Jam2Manager {
 
   // Rate limiting timestamp windows
   private cmdRateLimits = new Map<string, number[]>();
+  private createRateLimits = new Map<string, number[]>();
   private joinFailRateLimits = new Map<string, number[]>();
   private timeRateLimits = new Map<string, number[]>();
 
@@ -124,6 +125,39 @@ export class Jam2Manager {
     timestamps.push(now);
     this.cmdRateLimits.set(key, timestamps);
     return true;
+  }
+
+  checkCreateRateLimit(userId: string, max = 5, windowMs = 60000): boolean {
+    const now = Date.now();
+    const timestamps = (this.createRateLimits.get(userId) || []).filter(
+      (ts) => now - ts < windowMs,
+    );
+    if (timestamps.length >= max) {
+      this.createRateLimits.set(userId, timestamps);
+      return false;
+    }
+    timestamps.push(now);
+    this.createRateLimits.set(userId, timestamps);
+    return true;
+  }
+
+  clearCreateRateLimits(): void {
+    this.createRateLimits.clear();
+  }
+
+  getActiveRoomForUser(userId: string): string | null {
+    for (const [code, roomMap] of this.roomUserSockets.entries()) {
+      if (roomMap.has(userId) && (roomMap.get(userId)?.size ?? 0) > 0) {
+        return code;
+      }
+    }
+    return null;
+  }
+
+  getUserSockets(code: string, userId: string): string[] {
+    const normalizedCode = code.toUpperCase();
+    const set = this.roomUserSockets.get(normalizedCode)?.get(userId);
+    return set ? Array.from(set) : [];
   }
 
   checkJoinFailRateLimit(userId: string, max = 5, windowMs = 60000): boolean {
@@ -394,7 +428,14 @@ export class Jam2Manager {
     code: string,
     cmd: ClientCommand,
     actorUserId: string,
-  ): Promise<{ room: Room; events: Jam2Event[]; added?: number; skipped?: number } | { error: Jam2Error }> {
+  ): Promise<{
+    room: Room;
+    events: Jam2Event[];
+    added?: number;
+    skipped?: number;
+    skippedDuplicate?: number;
+    skippedFull?: number;
+  } | { error: Jam2Error }> {
     const normalizedCode = code.trim().toUpperCase();
 
     return this.mutex.runExclusive(normalizedCode, async () => {
@@ -403,7 +444,6 @@ export class Jam2Manager {
         return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
       }
 
-      const preCount = room.queue.length + (room.nowPlaying.item ? 1 : 0);
       const now = Date.now();
       const res = applyCommand(room, cmd, actorUserId, now);
       if ('error' in res) {
@@ -411,6 +451,18 @@ export class Jam2Manager {
       }
 
       const nextRoom = res.room;
+
+      // Skip persistence and broadcast if state is unchanged (no-op)
+      if (nextRoom.version === room.version) {
+        return {
+          room: nextRoom,
+          events: res.events,
+          added: res.added,
+          skipped: (res.skippedDuplicate ?? 0) + (res.skippedFull ?? 0),
+          skippedDuplicate: res.skippedDuplicate,
+          skippedFull: res.skippedFull,
+        };
+      }
 
       // Handle kick tracking for 10 minutes
       if (cmd.type === 'kick') {
@@ -436,14 +488,14 @@ export class Jam2Manager {
         this.broadcastEvent(normalizedCode, ev);
       }
 
-      if (cmd.type === 'queueAddMany') {
-        const postCount = nextRoom.queue.length + (nextRoom.nowPlaying.item ? 1 : 0);
-        const added = Math.max(0, postCount - preCount);
-        const skipped = Math.max(0, cmd.songs.length - added);
-        return { room: nextRoom, events: res.events, added, skipped };
-      }
-
-      return res;
+      return {
+        room: nextRoom,
+        events: res.events,
+        added: res.added,
+        skipped: (res.skippedDuplicate ?? 0) + (res.skippedFull ?? 0),
+        skippedDuplicate: res.skippedDuplicate,
+        skippedFull: res.skippedFull,
+      };
     });
   }
 
@@ -471,6 +523,26 @@ export class Jam2Manager {
         this.cancelHostGraceTimer(normalizedCode);
       }
     });
+  }
+
+  deregisterUserSockets(code: string, userId: string): void {
+    const normalizedCode = code.toUpperCase();
+    const roomMap = this.roomUserSockets.get(normalizedCode);
+    if (roomMap) {
+      const userSockets = roomMap.get(userId);
+      if (userSockets) {
+        for (const socketId of userSockets) {
+          const meta = this.socketMeta.get(socketId);
+          if (meta && meta.code === normalizedCode) {
+            this.socketMeta.delete(socketId);
+          }
+        }
+        roomMap.delete(userId);
+      }
+      if (roomMap.size === 0) {
+        this.roomUserSockets.delete(normalizedCode);
+      }
+    }
   }
 
   handleSocketDisconnect(socketId: string): void {

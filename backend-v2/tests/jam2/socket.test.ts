@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
 import { createApp } from '../../src/app';
@@ -7,6 +7,7 @@ import { generateAccessToken } from '../../src/utils/tokens';
 import { initializeSocketIO } from '../../src/websocket';
 import { Jam2Ack, RoomSnapshot, Song } from '../../src/jam2/types';
 import { jam2Manager } from '../../src/jam2/manager';
+import { setCustomSongResolver } from '../../src/jam2/songResolver';
 
 function makeTestSong(id: string): Song {
   return {
@@ -67,9 +68,18 @@ describe('Jam 2.0 WebSocket Integration', () => {
       new Promise<void>((res) => hostSocket.on('connect', () => res())),
       new Promise<void>((res) => guestSocket.on('connect', () => res())),
     ]);
+
+    setCustomSongResolver(async (id, providerId) => {
+      return makeTestSong(id);
+    });
+  });
+
+  beforeEach(() => {
+    jam2Manager.clearCreateRateLimits();
   });
 
   afterAll(async () => {
+    setCustomSongResolver(null);
     jam2Manager.stop();
     if (hostSocket && hostSocket.connected) hostSocket.disconnect();
     if (guestSocket && guestSocket.connected) guestSocket.disconnect();
@@ -250,6 +260,72 @@ describe('Jam 2.0 WebSocket Integration', () => {
     expect(guestClosed.reason).toBe('ended');
   });
 
+  it('A1: kick emits jam2:closed to kicked user and jam2:event kicked to bystander without closing bystander', async () => {
+    const createAck: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createAck.ok).toBe(true);
+    if (!createAck.ok) return;
+    const code = createAck.room.code;
+
+    // Join target guest
+    const targetToken = generateAccessToken({ userId: 'target-kicked-user', username: 'kicked_bob' });
+    const targetSocket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: targetToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((res) => targetSocket.on('connect', () => res()));
+    await new Promise((res) => targetSocket.emit('jam2:join', { protocol: 2, code }, res));
+
+    // Join bystander guest
+    const bystanderToken = generateAccessToken({ userId: 'bystander-user', username: 'bystander_charlie' });
+    const bystanderSocket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: bystanderToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((res) => bystanderSocket.on('connect', () => res()));
+    await new Promise((res) => bystanderSocket.emit('jam2:join', { protocol: 2, code }, res));
+
+    let bystanderReceivedClosed = false;
+    bystanderSocket.on('jam2:closed', () => {
+      bystanderReceivedClosed = true;
+    });
+
+    const bystanderEventPromise = new Promise<any>((res) => {
+      bystanderSocket.on('jam2:event', (ev) => {
+        if (ev.kind === 'kicked') res(ev);
+      });
+    });
+
+    const targetClosedPromise = new Promise<any>((res) => {
+      targetSocket.once('jam2:closed', (payload) => res(payload));
+    });
+
+    // Host kicks target user
+    const kickAck: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit('jam2:cmd', { code, type: 'kick', userId: 'target-kicked-user' }, res);
+    });
+    expect(kickAck.ok).toBe(true);
+
+    const kickedClosed = await targetClosedPromise;
+    expect(kickedClosed.reason).toBe('kicked');
+
+    const bystanderEv = await bystanderEventPromise;
+    expect(bystanderEv.kind).toBe('kicked');
+    expect(bystanderEv.userId).toBe('target-kicked-user');
+    expect(bystanderEv.username).toBe('kicked_bob');
+
+    // Wait a brief tick to ensure bystander never received jam2:closed
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bystanderReceivedClosed).toBe(false);
+    expect(bystanderSocket.connected).toBe(true);
+
+    targetSocket.disconnect();
+    bystanderSocket.disconnect();
+  });
+
   it('malformed payloads never crash the server, return INVALID or error ack, and fresh clients succeed', async () => {
     const badPayloads = [
       null,
@@ -293,6 +369,111 @@ describe('Jam 2.0 WebSocket Integration', () => {
     });
     expect(freshAck.ok).toBe(true);
     freshSocket.disconnect();
+  });
+
+  it('A5: Song metadata overwritten from provider, client-supplied bad duration and arbitrary imageUrl dropped/overwritten', async () => {
+    const createAck: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createAck.ok).toBe(true);
+    if (!createAck.ok) return;
+    const code = createAck.room.code;
+
+    // Custom resolver returns authoritative metadata: duration 180, safe saavn URL
+    setCustomSongResolver(async (id) => {
+      return {
+        id,
+        title: 'Authoritative Title',
+        artists: [{ id: 'art1', name: 'Authoritative Artist' }],
+        album: 'Authoritative Album',
+        duration: 180,
+        imageUrl: 'https://c.saavncdn.com/123/safe.jpg',
+        year: '2024',
+        language: 'en',
+        hasLyrics: false,
+        playCount: 100,
+        label: 'T-Series',
+        streamRef: 'stream_saavn_123',
+        providerId: 'jiosaavn',
+      };
+    });
+
+    const hostStatePromise = new Promise<RoomSnapshot>((res) => {
+      hostSocket.once('jam2:state', (s) => res(s));
+    });
+
+    // Client attempts to send forged metadata: bad duration 7200, untrusted imageUrl
+    const addAck: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit(
+        'jam2:cmd',
+        {
+          code,
+          type: 'queueAdd',
+          song: {
+            id: 'forged_song_id',
+            title: 'Hacked Title',
+            artists: [{ id: 'hack', name: 'Hacker' }],
+            duration: 7200,
+            imageUrl: 'http://malicious-domain.com/hack.jpg',
+            providerId: 'jiosaavn',
+          },
+        },
+        res,
+      );
+    });
+
+    expect(addAck.ok).toBe(true);
+    const updatedState = await hostStatePromise;
+    const playingSong = updatedState.nowPlaying.item?.song;
+    expect(playingSong).toBeDefined();
+    // Overwritten by authoritative provider metadata
+    expect(playingSong?.duration).toBe(180);
+    expect(playingSong?.title).toBe('Authoritative Title');
+    expect(playingSong?.imageUrl).toBe('https://c.saavncdn.com/123/safe.jpg');
+  });
+
+  it('A7: Create rate limit enforces max 5 rooms per minute per user', async () => {
+    // 5 creates succeed
+    for (let i = 0; i < 5; i++) {
+      const ack: Jam2Ack = await new Promise((res) => {
+        hostSocket.emit('jam2:create', { protocol: 2 }, res);
+      });
+      expect(ack.ok).toBe(true);
+    }
+
+    // 6th create fails with RATE_LIMITED
+    const sixthAck: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(sixthAck.ok).toBe(false);
+    if (!sixthAck.ok) {
+      expect(sixthAck.code).toBe('RATE_LIMITED');
+      expect(sixthAck.message).toContain('Too many rooms');
+    }
+  });
+
+  it('A7: Creating room B when already in room A leaves room A', async () => {
+    const ackA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(ackA.ok).toBe(true);
+    if (!ackA.ok) return;
+    const codeA = ackA.room.code;
+
+    // Verify user is in room A
+    expect(jam2Manager.getActiveRoomForUser(HOST_USER_ID)).toBe(codeA);
+
+    // Host creates room B
+    const ackB: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(ackB.ok).toBe(true);
+    if (!ackB.ok) return;
+    const codeB = ackB.room.code;
+
+    // User should now be tracked in room B and NOT in room A
+    expect(jam2Manager.getActiveRoomForUser(HOST_USER_ID)).toBe(codeB);
+    expect(jam2Manager.getUserSockets(codeA, HOST_USER_ID).length).toBe(0);
   });
 });
 

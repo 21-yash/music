@@ -44,6 +44,8 @@ class JamStateStore(
     )
     val uiEvents: SharedFlow<JamUiEvent> = _uiEvents.asSharedFlow()
 
+    private var lastMyPerms: JamPermissions? = null
+
     fun setMyUserId(userId: String) {
         myUserId = userId
         _room.value?.let { recomputeUiState(it) }
@@ -59,6 +61,28 @@ class JamStateStore(
         if (!isEpoch && current != null && snapshot.version <= current.version) {
             // Drop stale or duplicate state broadcast
             return false
+        }
+
+        val me = snapshot.members.find { it.userId == myUserId }
+        val myPerms = me?.perms ?: snapshot.defaults
+
+        if (lastMyPerms == null) {
+            lastMyPerms = myPerms
+        } else {
+            val prev = lastMyPerms!!
+            if (prev.playback != myPerms.playback) {
+                val msg = if (myPerms.playback) "You can now control playback" else "You can no longer control playback"
+                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+            }
+            if (prev.queueAdd != myPerms.queueAdd) {
+                val msg = if (myPerms.queueAdd) "You can now add songs" else "You can no longer add songs"
+                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+            }
+            if (prev.queueManage != myPerms.queueManage) {
+                val msg = if (myPerms.queueManage) "You can now manage the queue" else "You can no longer manage the queue"
+                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+            }
+            lastMyPerms = myPerms
         }
 
         _room.value = snapshot
@@ -101,15 +125,17 @@ class JamStateStore(
                 _uiEvents.tryEmit(JamUiEvent.HostChanged(event.username))
             }
             "kicked" -> {
-                _uiEvents.tryEmit(JamUiEvent.Kicked("You were kicked from the Jam."))
+                if (event.userId == myUserId) {
+                    _uiEvents.tryEmit(JamUiEvent.Kicked("You were kicked from the Jam."))
+                } else {
+                    val name = event.username.ifEmpty { "A member" }
+                    _uiEvents.tryEmit(JamUiEvent.Toast("$name was removed"))
+                }
             }
             "perm_changed" -> {
-                val member = _room.value?.members?.find { it.userId == event.userId }
-                if (member != null) {
-                    _uiEvents.tryEmit(JamUiEvent.PermChanged(member.perms))
-                    if (event.userId == myUserId) {
-                        _room.value?.let { recomputeUiState(it) }
-                    }
+                // Permission toasts are derived strictly by diffing my own perms between consecutive snapshots in applySnapshot
+                if (event.userId == myUserId) {
+                    _room.value?.let { recomputeUiState(it) }
                 }
             }
         }
@@ -120,6 +146,7 @@ class JamStateStore(
     }
 
     fun clear() {
+        lastMyPerms = null
         _room.value = null
         _uiState.value = JamUiState(myUserId = myUserId)
     }

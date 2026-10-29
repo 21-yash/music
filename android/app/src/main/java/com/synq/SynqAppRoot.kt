@@ -157,11 +157,7 @@ private fun MainAppContent(
         )
     }
 
-    // D4: Jam UI Event toasts
-    var lastPlaybackPerm by remember { mutableStateOf<Boolean?>(null) }
-    var lastQueueAddPerm by remember { mutableStateOf<Boolean?>(null) }
-    var lastQueueManagePerm by remember { mutableStateOf<Boolean?>(null) }
-
+    // Jam UI Event toasts (single source of truth: JamStateStore -> JamUiEvent -> this collector)
     LaunchedEffect(Unit) {
         rootViewModel.jamUiEvents.collect { event ->
             when (event) {
@@ -181,27 +177,7 @@ private fun MainAppContent(
                     android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
                 }
                 is JamUiEvent.PermChanged -> {
-                    val p = event.permissions
-                    val prevPb = lastPlaybackPerm
-                    val prevAdd = lastQueueAddPerm
-                    val prevManage = lastQueueManagePerm
-
-                    if (prevPb != null && prevPb != p.playback) {
-                        val msg = if (p.playback) "You can now control playback" else "You can no longer control playback"
-                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                    if (prevAdd != null && prevAdd != p.queueAdd) {
-                        val msg = if (p.queueAdd) "You can now add songs" else "You can no longer add songs"
-                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                    if (prevManage != null && prevManage != p.queueManage) {
-                        val msg = if (p.queueManage) "You can now manage the queue" else "You can no longer manage the queue"
-                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                    }
-
-                    lastPlaybackPerm = p.playback
-                    lastQueueAddPerm = p.queueAdd
-                    lastQueueManagePerm = p.queueManage
+                    // Handled via JamUiEvent.Toast derived in JamStateStore
                 }
             }
         }
@@ -271,6 +247,32 @@ private fun MainAppContent(
             },
             dismissButton = {
                 TextButton(onClick = { rootViewModel.dismissSignOut() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val showLeaveJamConfirm by rootViewModel.showLeaveJamConfirmDialog.collectAsState()
+    if (showLeaveJamConfirm) {
+        AlertDialog(
+            onDismissRequest = { rootViewModel.dismissLeaveJamConfirmDialog() },
+            title = {
+                Text("Leave Jam?", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("Leave Jam and stop playback?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = { rootViewModel.confirmLeaveJamAndStopPlayback() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Leave & Stop", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { rootViewModel.dismissLeaveJamConfirmDialog() }) {
                     Text("Cancel")
                 }
             }
