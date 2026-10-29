@@ -67,6 +67,9 @@ class JamSessionManager @Inject constructor(
     private var currentTrackSeq: Long = 0L
     private var reconcilerTrackState: ReconcilerTrackState = ReconcilerTrackState.READY
     private var loadingTrackSeq: Long? = null
+    private var trackRetryCount: Int = 0
+    private var retryTrackSeq: Long = 0L
+    private var lastReportedEndedTrackSeq: Long = 0L
     private val _localPlaybackState = MutableStateFlow<LocalPlaybackState>(LocalPlaybackState.Synchronized)
     val localPlaybackState: StateFlow<LocalPlaybackState> = _localPlaybackState.asStateFlow()
     val isLocalStepOut: Boolean get() = _localPlaybackState.value is LocalPlaybackState.LocalStepOut
@@ -231,6 +234,7 @@ class JamSessionManager @Inject constructor(
             while (isActive) {
                 delay(1000L)
                 reconcilePlayback()
+                checkNearEndTick()
             }
         }
 
@@ -398,6 +402,9 @@ class JamSessionManager @Inject constructor(
         currentTrackSeq = 0L
         reconcilerTrackState = ReconcilerTrackState.READY
         loadingTrackSeq = null
+        trackRetryCount = 0
+        retryTrackSeq = 0L
+        lastReportedEndedTrackSeq = 0L
         _localPlaybackState.value = LocalPlaybackState.Synchronized
     }
 
@@ -759,8 +766,82 @@ class JamSessionManager @Inject constructor(
 
     override fun onTrackEnded(): Boolean {
         if (!_jamState.value.isInJam) return false
-        reportTrackEnded()
+        handleTrackEndedOrError()
         return true
+    }
+
+    override fun onPlayerError(error: androidx.media3.common.PlaybackException): Boolean {
+        if (!_jamState.value.isInJam) return false
+        handleTrackEndedOrError()
+        return true
+    }
+
+    private fun handleTrackEndedOrError() {
+        val room = stateStore.room.value ?: return
+        val nowPlaying = room.nowPlaying
+        if (nowPlaying.item == null) return
+
+        val durationMs = (nowPlaying.item.song.durationSeconds ?: 0) * 1000L
+        val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+        val remainingMs = durationMs - expectedPos
+
+        if (durationMs > 0 && remainingMs > 6000L) {
+            // Premature track ended (>6s remaining on server)
+            if (retryTrackSeq != nowPlaying.trackSeq) {
+                retryTrackSeq = nowPlaying.trackSeq
+                trackRetryCount = 0
+            }
+
+            if (trackRetryCount < 2) {
+                trackRetryCount++
+                android.util.Log.d("JamSessionManager", "Premature track end (remaining: ${remainingMs}ms). Retry $trackRetryCount/2 for trackSeq ${nowPlaying.trackSeq}")
+                playerManager.playJamSyncSong(
+                    song = nowPlaying.item.song,
+                    initialPositionMs = expectedPos,
+                    playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING)
+                )
+            } else {
+                android.util.Log.w("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
+                playerManager.applyJamPause()
+            }
+        } else {
+            // Legitimately reached near-end
+            reportTrackEnded(nowPlaying.trackSeq)
+        }
+    }
+
+    private fun checkNearEndTick() {
+        val room = stateStore.room.value ?: return
+        val nowPlaying = room.nowPlaying
+        if (nowPlaying.item == null || nowPlaying.status != JamPlaybackStatus.PLAYING) return
+
+        val durationMs = (nowPlaying.item.song.durationSeconds ?: 0) * 1000L
+        val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+        val isNearEnd = if (durationMs > 0L) {
+            expectedPos >= durationMs - 6000L
+        } else {
+            (clockSync.serverNow() - nowPlaying.anchorServerTs + nowPlaying.positionMs) >= 15000L
+        }
+
+        val isSilentOrEnded = trackRetryCount >= 2 || playerManager.getPlayerPlaybackState() == androidx.media3.common.Player.STATE_ENDED
+        if (isNearEnd && isSilentOrEnded) {
+            reportTrackEnded(nowPlaying.trackSeq)
+        }
+    }
+
+    private fun reportTrackEnded(trackSeq: Long? = null) {
+        val room = stateStore.room.value ?: return
+        val targetSeq = trackSeq ?: room.nowPlaying.trackSeq
+        if (targetSeq <= 0L) return
+        if (lastReportedEndedTrackSeq == targetSeq) return
+
+        lastReportedEndedTrackSeq = targetSeq
+        scope.launch {
+            val payload = JSONObject().apply {
+                put("trackSeq", targetSeq)
+            }
+            jamClient.sendCommand("trackEnded", payload)
+        }
     }
 
     override fun onPlaybackStateChanged(state: Int) {

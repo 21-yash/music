@@ -55,6 +55,7 @@ interface JamPlaybackInterceptor {
     fun onToggleRepeat(): Boolean = false
     fun onTrackEnded(): Boolean = false
     fun onPlaybackStateChanged(state: Int) {}
+    fun onPlayerError(error: androidx.media3.common.PlaybackException): Boolean = false
 }
 
 @Singleton
@@ -1084,6 +1085,9 @@ class MusicPlayerManager @Inject constructor(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            if (jamInterceptor?.onPlayerError(error) == true) {
+                return
+            }
             _playbackState.update { 
                 it.copy(
                     isPlaying = false, 
