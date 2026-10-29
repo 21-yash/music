@@ -49,9 +49,8 @@ Ack signatures return a union of success or failure:
 - `PROTOCOL`: Incompatible client protocol version (must be 2).
 - `NOT_FOUND`: Room not found or invalid room code.
 - `NOT_MEMBER`: Socket or user is not a member of the room.
-- `FORBIDDEN`: Action denied due to insufficient permissions.
+- `FORBIDDEN`: Action denied due to insufficient permissions, or kicked from room within 10 minutes.
 - `INVALID`: Malformed payload or validation error.
-- `ALREADY_QUEUED`: Song already exists in upcoming queue or now playing.
 - `QUEUE_FULL`: Queue reached capacity (50 songs).
 - `RATE_LIMITED`: Too many commands, failed joins, or time requests.
 
@@ -80,6 +79,8 @@ Creates a new Jam room. The caller becomes the host.
 
 ### 3.2 `jam2:join`
 Joins or resumes a session in an existing Jam room.
+- If the user was kicked from this room within the last 10 minutes, the server returns `{ ok: false, code: "FORBIDDEN", message: "You were kicked from this room. Try again later." }`.
+- **Version Epoch Rule:** The full `room` snapshot received from `jam2:join` represents a new synchronization epoch. The client must accept it unconditionally and set its local version to `room.version`. Subsequent state updates or diffs reject any payload with `version <= localVersion`.
 
 **Request payload:**
 ```json
@@ -100,7 +101,28 @@ Joins or resumes a session in an existing Jam room.
 
 ---
 
-### 3.3 `jam2:leave`
+### 3.3 `jam2:sync`
+Requests a fresh, full snapshot of the room without mutating state or triggering room broadcasts. Used by clients after reconnection or packet-loss detection.
+- **Version Epoch Rule:** Like `jam2:join`, the snapshot returned in `jam2:sync` establishes a new epoch that clients accept unconditionally.
+
+**Request payload:**
+```json
+{
+  "code": "ABCD"
+}
+```
+
+**Acknowledgement response:**
+```json
+{
+  "ok": true,
+  "room": <RoomSnapshot>
+}
+```
+
+---
+
+### 3.4 `jam2:leave`
 Explicitly leaves the current room.
 - If the host leaves, host role immediately transfers to the earliest-joined online member.
 - If the room becomes empty, it is destroyed.
@@ -121,7 +143,28 @@ Explicitly leaves the current room.
 
 ---
 
-### 3.4 `jam2:end`
+### 3.4 `jam2:leave`
+Explicitly leaves the current room.
+- If the host leaves, host role immediately transfers to the earliest-joined online member (falling back to offline members if no other member is online).
+- If the room becomes empty, it is destroyed.
+
+**Request payload:**
+```json
+{
+  "code": "ABCD"
+}
+```
+
+**Acknowledgement response:**
+```json
+{
+  "ok": true
+}
+```
+
+---
+
+### 3.5 `jam2:end`
 Closes the Jam room for all participants. **Host only.**
 - Emits `jam2:closed { "reason": "ended" }` to all participants.
 
@@ -141,7 +184,7 @@ Closes the Jam room for all participants. **Host only.**
 
 ---
 
-### 3.5 `jam2:time`
+### 3.6 `jam2:time`
 Ping for server clock synchronization (calculating client-server round-trip time and clock offset).
 
 **Request payload:**
@@ -157,13 +200,23 @@ Ping for server clock synchronization (calculating client-server round-trip time
 
 ---
 
-### 3.6 `jam2:cmd`
+### 3.7 `jam2:cmd`
 Dispatches a state-mutating command to the room.
 
-**Acknowledgement response:**
+**Acknowledgement response (Standard):**
 ```json
 {
   "ok": true,
+  "version": 42
+}
+```
+
+**Acknowledgement response for `queueAddMany`:**
+```json
+{
+  "ok": true,
+  "added": 5,
+  "skipped": 0,
   "version": 42
 }
 ```
@@ -178,7 +231,7 @@ Dispatches a state-mutating command to the room.
 | `next` | none | `playback` | Skips to next track in queue |
 | `prev` | none | `playback` | If position > 3s, restarts track; otherwise pops previous from history |
 | `playItem` | `qid: string` | `playback` | Jumps directly to a specific queued track |
-| `trackEnded` | `trackSeq: number` | Any member | Reports that track finished playing. Idempotent via `trackSeq` |
+| `trackEnded` | `trackSeq: number` | Any member | Reports that track finished playing. Strictly validated (see below) |
 | `queueAdd` | `song: Song`, `playNext?: boolean` | `queueAdd` | Appends song or inserts immediately after nowPlaying |
 | `queueAddMany` | `songs: Song[]` (1-20) | `queueAdd` | Batch adds multiple songs to the user queue |
 | `promote` | `qid: string` | `queueAdd` | Moves a recommended item into user section and marks as added by user |
@@ -189,12 +242,21 @@ Dispatches a state-mutating command to the room.
 | `kick` | `userId: string` | Host only | Kicks a member (kicked member receives `jam2:closed { reason: 'kicked' }`) |
 | `transferHost` | `userId: string` | Host only | Transfers host role to another member |
 
+#### `trackEnded` Eligibility Rules
+`trackEnded` is idempotent and guarded against rogue or out-of-order skip abuse:
+- For a non-system actor:
+  - Ignored unless `status === 'playing'` and `trackSeq` matches current `nowPlaying.trackSeq`.
+  - For songs with known duration (`duration > 0`), accepted only if `expectedPosition(now) >= durationMs - 6000` (within 6 seconds of track end).
+  - For songs with unknown duration (`duration === 0`), accepted only if `(now - anchorServerTs + positionMs) >= 15000` (at least 15 seconds elapsed).
+  - If conditions are not met, the reducer returns `{ room unchanged, events: [] }` with no error, ensuring late or duplicate reports are completely harmless.
+- System actor (internal track fallback timer and rehydration catch-up) is exempt from these duration checks.
+
 ---
 
 ## 4. Server $\to$ Client Broadcasts
 
 ### 4.1 `jam2:state`
-Broadcast whenever the room state changes, and once every ~10 seconds as a heartbeat.
+Broadcast to all room members whenever the room state changes (version increments).
 
 **Payload (`RoomSnapshot`):**
 ```json
@@ -227,7 +289,7 @@ Broadcast whenever the room state changes, and once every ~10 seconds as a heart
   "queue": [
     {
       "qid": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-      "song": { "id": "song_1", "title": "Track Title", "artists": [{"id": "a1", "name": "Artist"}], "duration": 210, ... },
+      "song": { "id": "song_1", "title": "Track Title", "artists": [{"id": "a1", "name": "Artist"}], "duration": 210 },
       "addedByUserId": "user_123",
       "addedAt": 1729000005000,
       "recommended": false
@@ -237,7 +299,7 @@ Broadcast whenever the room state changes, and once every ~10 seconds as a heart
   "nowPlaying": {
     "item": {
       "qid": "8a0cea3c-2a6c-4cad-8acc-1a0c6a2cba5c",
-      "song": { "id": "song_0", "title": "Current Song", "duration": 180, ... },
+      "song": { "id": "song_0", "title": "Current Song", "duration": 180 },
       "addedByUserId": "user_123",
       "addedAt": 1729000000000,
       "recommended": false
@@ -252,7 +314,26 @@ Broadcast whenever the room state changes, and once every ~10 seconds as a heart
 
 ---
 
-### 4.2 `jam2:event`
+### 4.2 `jam2:tick`
+Periodic lightweight heartbeat emitted every 10 seconds to room members while active. Used by clients for clock drift correction and keepalive without sending full snapshot diffs.
+
+**Payload (`Jam2Tick`):**
+```json
+{
+  "code": "ABCD",
+  "serverTime": 1729000010000,
+  "nowPlaying": {
+    "positionMs": 12450,
+    "anchorServerTs": 1729000000000,
+    "status": "playing",
+    "trackSeq": 1
+  }
+}
+```
+
+---
+
+### 4.3 `jam2:event`
 Ephemeral toast notifications for user feedback.
 
 **Payload:**
@@ -266,7 +347,7 @@ Ephemeral toast notifications for user feedback.
 
 ---
 
-### 4.3 `jam2:closed`
+### 4.4 `jam2:closed`
 Emitted when the room is terminated. Clients must navigate out of the Jam screen.
 
 **Payload:**

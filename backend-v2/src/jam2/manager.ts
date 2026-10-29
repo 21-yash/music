@@ -1,7 +1,6 @@
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
 import { getRelatedSongs } from '../services/musicService';
-import { activeSessions } from '../websocket/jamHandler';
 import { jam2Store, Jam2Store } from './store';
 import { applyCommand } from './reducer';
 import {
@@ -174,7 +173,7 @@ export class Jam2Manager {
           Math.floor(Math.random() * JAM_ROOM_CODE_CHARS.length)
         ];
       }
-      if (!this.store.hasRoom(code) && !activeSessions.has(code)) {
+      if (!this.store.hasRoom(code)) {
         return code;
       }
     }

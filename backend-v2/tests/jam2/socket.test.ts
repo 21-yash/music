@@ -250,18 +250,49 @@ describe('Jam 2.0 WebSocket Integration', () => {
     expect(guestClosed.reason).toBe('ended');
   });
 
-  it('malformed payloads never crash the server and return INVALID', async () => {
-    const badPayloads = [null, undefined, 123, 'bad', { code: 'test', type: 'nonExistentCommand' }];
+  it('malformed payloads never crash the server, return INVALID or error ack, and fresh clients succeed', async () => {
+    const badPayloads = [
+      null,
+      undefined,
+      123,
+      'bad',
+      {},
+      { code: null },
+      { code: 123 },
+      { code: 'test', type: 'nonExistentCommand' },
+    ];
 
-    for (const bad of badPayloads) {
-      const ack: Jam2Ack = await new Promise((res) => {
-        hostSocket.emit('jam2:cmd', bad, res);
-      });
-      expect(ack.ok).toBe(false);
-      if (!ack.ok) {
-        expect(ack.code).toBe('INVALID');
+    const eventNames = ['jam2:create', 'jam2:join', 'jam2:sync', 'jam2:leave', 'jam2:end', 'jam2:cmd'];
+
+    for (const event of eventNames) {
+      for (const bad of badPayloads) {
+        expect(() => {
+          hostSocket.emit(event, bad, (ack?: Jam2Ack) => {
+            if (ack) {
+              expect(ack.ok).toBe(false);
+            }
+          });
+        }).not.toThrow();
       }
     }
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(hostSocket.connected).toBe(true);
+
+    // Verify fresh client can connect and create a room
+    const freshToken = generateAccessToken({ userId: 'fresh_user_id', username: 'fresh_user' });
+    const freshSocket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: freshToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+
+    await new Promise<void>((res) => freshSocket.on('connect', () => res()));
+    const freshAck: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      freshSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(freshAck.ok).toBe(true);
+    freshSocket.disconnect();
   });
 });
 

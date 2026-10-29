@@ -5,7 +5,6 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { verifyAccessToken } from '../utils/tokens';
 import { registerSportsHandlers } from './sportsHandler';
-import { registerJamHandlers } from './jamHandler';
 import { registerJam2Handlers } from '../jam2/socket';
 import { SportsWorker } from '../jobs/sportsWorker';
 
@@ -81,7 +80,6 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
 
     // Register domain handlers
     registerSportsHandlers(socket);
-    registerJamHandlers(server, socket);
     registerJam2Handlers(server, socket);
 
     socket.on('disconnect', (reason) => {
