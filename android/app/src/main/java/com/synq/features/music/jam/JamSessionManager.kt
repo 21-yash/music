@@ -279,18 +279,18 @@ class JamSessionManager @Inject constructor(
 
                 is ReconcilerAction.SetPlayWhenReady -> {
                     if (action.playWhenReady) {
-                        playerManager.play()
+                        playerManager.applyJamPlay()
                     } else {
-                        playerManager.pause()
+                        playerManager.applyJamPause()
                     }
                 }
 
                 is ReconcilerAction.Seek -> {
-                    playerManager.seekTo(action.positionMs)
+                    playerManager.applyJamSeek(action.positionMs)
                 }
 
                 is ReconcilerAction.SpeedRamp -> {
-                    playerManager.setPlaybackSpeed(action.factor)
+                    playerManager.applyJamSpeed(action.factor)
                 }
 
                 is ReconcilerAction.Nothing -> {

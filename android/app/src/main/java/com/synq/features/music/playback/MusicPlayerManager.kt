@@ -973,6 +973,29 @@ class MusicPlayerManager @Inject constructor(
         return controller?.playbackParameters?.speed ?: 1.0f
     }
 
+    fun applyJamPlay() {
+        controller?.let {
+            if (!it.isPlaying) {
+                it.play()
+                startPositionTracking()
+            }
+        }
+    }
+
+    fun applyJamPause() {
+        controller?.pause()
+        stopPositionTracking()
+    }
+
+    fun applyJamSeek(positionMs: Long) {
+        controller?.seekTo(positionMs)
+        _playbackState.update { it.copy(playbackPositionMs = positionMs) }
+    }
+
+    fun applyJamSpeed(factor: Float) {
+        controller?.setPlaybackSpeed(factor)
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Position Tracker & ExoPlayer Listener
     // ─────────────────────────────────────────────────────────────
