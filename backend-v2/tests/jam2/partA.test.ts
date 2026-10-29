@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyCommand } from '../../src/jam2/reducer';
-import { Jam2Manager } from '../../src/jam2/manager';
+import { Jam2Manager, KeyedMutex } from '../../src/jam2/manager';
 import { Jam2Store } from '../../src/jam2/store';
 import { Room, Song, DEFAULT_ROOM_PERMS } from '../../src/jam2/types';
 import * as redisConfig from '../../src/config/redis';
@@ -855,6 +855,75 @@ describe('Phase 1 Review Fixes (Part A)', () => {
         expect(rejoinRes.error.code).toBe('FORBIDDEN');
         expect(rejoinRes.error.message).toContain('removed from this Jam');
       }
+      manager.stop();
+    });
+  });
+
+  describe('Item 11: KeyedMutex cleanup & Prune loop re-fetch', () => {
+    it('KeyedMutex retains chain map entry while concurrent callers are queued and deletes only when idle', async () => {
+      const mutex = new KeyedMutex();
+      const key = 'ROOM_TEST';
+
+      let task1Entered = false;
+      let task1Release: () => void = () => {};
+      const task1Blocker = new Promise<void>((resolve) => {
+        task1Release = resolve;
+      });
+
+      let task2Entered = false;
+
+      // Start Task 1
+      const p1 = mutex.runExclusive(key, async () => {
+        task1Entered = true;
+        await task1Blocker;
+        return 'res1';
+      });
+
+      // Wait until Task 1 is inside runExclusive
+      while (!task1Entered) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      // Start Task 2 while Task 1 is still holding the lock
+      const p2 = mutex.runExclusive(key, async () => {
+        task2Entered = true;
+        return 'res2';
+      });
+
+      // Task 1 now finishes
+      task1Release();
+      const r1 = await p1;
+      expect(r1).toBe('res1');
+
+      // Crucial assertion: when Task 1 finished, Task 2 was already chained.
+      // The chains map must NOT have been deleted when Task 1 completed!
+      expect((mutex as any).chains.has(key)).toBe(true);
+
+      const r2 = await p2;
+      expect(r2).toBe('res2');
+      expect(task2Entered).toBe(true);
+
+      // Now that all queued callers are done, the chains map should be cleaned up!
+      expect((mutex as any).chains.has(key)).toBe(false);
+    });
+
+    it('pruneActiveRooms re-fetches room inside lock and skips if room was destroyed', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // Spy on store.getRoom to verify it gets called inside prune
+      const getRoomSpy = vi.spyOn(store, 'getRoom');
+
+      // Destroy the room right before prune acquires lock or inside lock
+      await manager.endRoom(room.code, 'u_host');
+
+      // Run prune loop
+      await manager.pruneActiveRooms(Date.now() + 60 * 60 * 1000);
+
+      // getRoom should have been called for room.code
+      expect(getRoomSpy).toHaveBeenCalledWith(room.code);
+
       manager.stop();
     });
   });

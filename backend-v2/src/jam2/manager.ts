@@ -42,17 +42,15 @@ export class KeyedMutex {
       release = resolve;
     });
 
-    this.chains.set(
-      normalizedKey,
-      prev.catch(() => {}).then(() => current),
-    );
+    const chainPromise = prev.catch(() => {}).then(() => current);
+    this.chains.set(normalizedKey, chainPromise);
 
     try {
       await prev.catch(() => {});
       return await fn();
     } finally {
       release!();
-      if (this.chains.get(normalizedKey) === current) {
+      if (this.chains.get(normalizedKey) === chainPromise) {
         this.chains.delete(normalizedKey);
       }
     }
@@ -736,81 +734,86 @@ export class Jam2Manager {
 
   // ─── Pruning & Expiry Background Task ────────────────────────────────
 
+  async pruneActiveRooms(now: number = Date.now()): Promise<void> {
+    const rooms = this.store.getAllActiveRooms();
+
+    for (const r of rooms) {
+      await this.mutex.runExclusive(r.code, async () => {
+        // Re-fetch room inside lock to ensure freshness and skip if room destroyed
+        const room = await this.store.getRoom(r.code);
+        if (!room) return;
+
+        // Prune non-host members offline >10 minutes
+        const membersToPrune = Array.from(room.members.values()).filter(
+          (m) =>
+            m.userId !== room.hostUserId &&
+            !m.online &&
+            now - m.lastSeenAt > 10 * 60 * 1000,
+        );
+
+        for (const m of membersToPrune) {
+          const res = applyCommand(
+            room,
+            { type: 'memberLeave', userId: m.userId },
+            'system',
+            now,
+          );
+          if ('room' in res) {
+            Object.assign(room, res.room);
+            this.store.setRoom(room);
+            this.broadcastState(room);
+            for (const ev of res.events) {
+              this.broadcastEvent(room.code, ev);
+            }
+          }
+        }
+
+        // Ensure host handover if host is offline > 20s
+        this.ensureHostLocked(room, now);
+
+        // Check room expiry (>30 minutes all offline or 0 members)
+        const allOffline = Array.from(room.members.values()).every(
+          (m) => !m.online,
+        );
+        if (allOffline) {
+          const longestInactive = Math.max(
+            ...Array.from(room.members.values()).map((m) => m.lastSeenAt),
+            room.createdAt,
+          );
+          if (
+            room.members.size === 0 ||
+            now - longestInactive > 30 * 60 * 1000
+          ) {
+            logger.info({ code: room.code }, 'Jam2 room expired due to inactivity');
+            await this.destroyRoomLocked(room.code, 'expired');
+          }
+        }
+      });
+    }
+
+    // Periodic sweep of rate-limits and kicks
+    for (const [key, timestamps] of this.cmdRateLimits.entries()) {
+      const fresh = timestamps.filter((ts) => now - ts < 10000);
+      if (fresh.length === 0) this.cmdRateLimits.delete(key);
+      else this.cmdRateLimits.set(key, fresh);
+    }
+    for (const [key, timestamps] of this.timeRateLimits.entries()) {
+      const fresh = timestamps.filter((ts) => now - ts < 60000);
+      if (fresh.length === 0) this.timeRateLimits.delete(key);
+      else this.timeRateLimits.set(key, fresh);
+    }
+    for (const [code, kicks] of this.kickedUsers.entries()) {
+      for (const [userId, expiry] of kicks.entries()) {
+        if (now >= expiry) kicks.delete(userId);
+      }
+      if (kicks.size === 0) this.kickedUsers.delete(code);
+    }
+  }
+
   private startBackgroundJobs(): void {
     // 30s prune interval
     this.pruneInterval = setInterval(() => {
-      runSafely('jam2:pruneInterval', async () => {
-        const rooms = this.store.getAllActiveRooms();
-        const now = Date.now();
-
-        for (const room of rooms) {
-          await this.mutex.runExclusive(room.code, async () => {
-            // Prune non-host members offline >10 minutes
-            const membersToPrune = Array.from(room.members.values()).filter(
-              (m) =>
-                m.userId !== room.hostUserId &&
-                !m.online &&
-                now - m.lastSeenAt > 10 * 60 * 1000,
-            );
-
-            for (const m of membersToPrune) {
-              const res = applyCommand(
-                room,
-                { type: 'memberLeave', userId: m.userId },
-                'system',
-                now,
-              );
-              if ('room' in res) {
-                Object.assign(room, res.room);
-                this.store.setRoom(room);
-                this.broadcastState(room);
-                for (const ev of res.events) {
-                  this.broadcastEvent(room.code, ev);
-                }
-              }
-            }
-
-            // Ensure host handover if host is offline > 20s
-            this.ensureHostLocked(room, now);
-
-            // Check room expiry (>30 minutes all offline or 0 members)
-            const allOffline = Array.from(room.members.values()).every(
-              (m) => !m.online,
-            );
-            if (allOffline) {
-              const longestInactive = Math.max(
-                ...Array.from(room.members.values()).map((m) => m.lastSeenAt),
-                room.createdAt,
-              );
-              if (
-                room.members.size === 0 ||
-                now - longestInactive > 30 * 60 * 1000
-              ) {
-                logger.info({ code: room.code }, 'Jam2 room expired due to inactivity');
-                await this.destroyRoomLocked(room.code, 'expired');
-              }
-            }
-          });
-        }
-
-        // Periodic sweep of rate-limits and kicks
-        for (const [key, timestamps] of this.cmdRateLimits.entries()) {
-          const fresh = timestamps.filter((ts) => now - ts < 10000);
-          if (fresh.length === 0) this.cmdRateLimits.delete(key);
-          else this.cmdRateLimits.set(key, fresh);
-        }
-        for (const [key, timestamps] of this.timeRateLimits.entries()) {
-          const fresh = timestamps.filter((ts) => now - ts < 60000);
-          if (fresh.length === 0) this.timeRateLimits.delete(key);
-          else this.timeRateLimits.set(key, fresh);
-        }
-        for (const [code, kicks] of this.kickedUsers.entries()) {
-          for (const [userId, expiry] of kicks.entries()) {
-            if (now >= expiry) kicks.delete(userId);
-          }
-          if (kicks.size === 0) this.kickedUsers.delete(code);
-        }
-      });
+      runSafely('jam2:pruneInterval', () => this.pruneActiveRooms());
     }, 30000);
     this.pruneInterval.unref();
 
