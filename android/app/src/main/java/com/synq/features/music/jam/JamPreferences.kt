@@ -12,7 +12,7 @@ import javax.inject.Singleton
 @Singleton
 class JamPreferences @Inject constructor(
     @ApplicationContext context: Context
-) {
+) : JamPreferencesBridge {
     companion object {
         private const val PREFS_NAME = "synq_jam_prefs"
         private const val KEY_SEEN_BATTERY_TIP = "seen_battery_tip"
@@ -30,7 +30,7 @@ class JamPreferences @Inject constructor(
         prefs.edit().putBoolean(KEY_SEEN_BATTERY_TIP, seen).apply()
     }
 
-    fun saveLastJam(code: String) {
+    override fun saveLastJam(code: String) {
         prefs.edit()
             .putString(KEY_LAST_JAM_CODE, code)
             .putLong(KEY_LAST_JAM_TIMESTAMP, System.currentTimeMillis())
@@ -47,9 +47,9 @@ class JamPreferences @Inject constructor(
         return code
     }
 
-    fun rejoinCandidate(): String? = getLastJamCodeIfRecent(2 * 60 * 60 * 1000L)
+    override fun rejoinCandidate(): String? = getLastJamCodeIfRecent(2 * 60 * 60 * 1000L)
 
-    fun clearLastJam() {
+    override fun clearLastJam() {
         prefs.edit()
             .remove(KEY_LAST_JAM_CODE)
             .remove(KEY_LAST_JAM_TIMESTAMP)

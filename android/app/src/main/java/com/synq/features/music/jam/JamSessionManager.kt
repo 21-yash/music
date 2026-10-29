@@ -35,30 +35,56 @@ sealed class LocalPlaybackState {
 }
 
 @Singleton
-class JamSessionManager @Inject constructor(
-    private val playerManager: MusicPlayerManager,
-    private val authRepository: AuthRepository,
-    private val networkMonitorProvider: Provider<NetworkMonitor>,
-    private val jamPreferences: JamPreferences,
-    @ApplicationContext private val context: Context
+class JamSessionManager(
+    private val playerManager: JamPlayerBridge,
+    private val authRepository: AuthRepository? = null,
+    private val networkMonitorProvider: Provider<NetworkMonitor>? = null,
+    private val jamPreferences: JamPreferencesBridge,
+    private val context: Context? = null,
+    coroutineScope: CoroutineScope? = null,
+    transportOverride: JamTransport? = null,
+    jamClientOverride: JamClient? = null,
+    clockSyncOverride: ClockSync? = null,
+    stateStoreOverride: JamStateStore? = null,
+    private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
+    private val toastEmitter: (String) -> Unit = { msg ->
+        try {
+            Handler(Looper.getMainLooper()).post {
+                context?.let { Toast.makeText(it, msg, Toast.LENGTH_SHORT).show() }
+            }
+        } catch (_: Throwable) {}
+    }
 ) : JamPlaybackInterceptor {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val mainHandler = Handler(Looper.getMainLooper())
+    @Inject
+    constructor(
+        playerManager: MusicPlayerManager,
+        authRepository: AuthRepository,
+        networkMonitorProvider: Provider<NetworkMonitor>,
+        jamPreferences: JamPreferences,
+        @ApplicationContext context: Context
+    ) : this(
+        playerManager as JamPlayerBridge,
+        authRepository,
+        networkMonitorProvider,
+        jamPreferences as JamPreferencesBridge,
+        context
+    )
 
+    private val scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var myUserId: String = ""
 
-    val transport: JamTransport = SocketIoTransport(
+    val clockSync: ClockSync = clockSyncOverride ?: ClockSync()
+    val stateStore: JamStateStore = stateStoreOverride ?: JamStateStore(myUserId)
+    val transport: JamTransport = transportOverride ?: SocketIoTransport(
         baseUrl = com.synq.BuildConfig.API_BASE_URL,
         apiKey = com.synq.BuildConfig.API_KEY
     )
-    val clockSync: ClockSync = ClockSync()
-    val stateStore: JamStateStore = JamStateStore(myUserId)
-    val jamClient: JamClient = JamClient(
+    val jamClient: JamClient = jamClientOverride ?: JamClient(
         transport = transport,
         clockSync = clockSync,
         stateStore = stateStore,
-        tokenProvider = { authRepository.getFreshAccessToken() },
+        tokenProvider = { authRepository?.getFreshAccessToken() },
         scope = scope
     )
 
@@ -73,6 +99,8 @@ class JamSessionManager @Inject constructor(
     private var retryTrackSeq: Long = 0L
     private var lastReportedEndedTrackSeq: Long = 0L
     private var isReportingEndedTrackSeq: Long? = null
+    private var hasShownAudioFocusToastInThisJam: Boolean = false
+    private var lastLoadingAbortedToastTrackSeq: Long? = null
     private val _localPlaybackState = MutableStateFlow<LocalPlaybackState>(LocalPlaybackState.Synchronized)
     val localPlaybackState: StateFlow<LocalPlaybackState> = _localPlaybackState.asStateFlow()
     val isLocalStepOut: Boolean get() = _localPlaybackState.value is LocalPlaybackState.LocalStepOut
@@ -293,14 +321,16 @@ class JamSessionManager @Inject constructor(
                 is ReconcilerAction.ChangeTrack -> {
                     reconcilerTrackState = ReconcilerTrackState.LOADING
                     loadingTrackSeq = action.trackSeq
-                    loadingStartedAt = System.currentTimeMillis()
+                    loadingStartedAt = currentTimeProvider()
                     syncJamQueue(currentRoom)
 
                     if (action.song != null) {
+                        val targetQid = currentRoom.nowPlaying.item?.qid
                         playerManager.playJamSyncSong(
                             song = action.song,
                             initialPositionMs = 0L,
-                            playWhenReady = false
+                            playWhenReady = false,
+                            targetQid = targetQid
                         )
                         // Pre-cache upcoming track
                         val nextSong = currentRoom.queue.firstOrNull()?.song
@@ -362,13 +392,17 @@ class JamSessionManager @Inject constructor(
 
             val fullQueue = listOfNotNull(room.nowPlaying.item) + room.queue
             val fullQueueSongs = fullQueue.map { it.song }
-            val recIds = room.queue.filter { it.recommended }.map { it.qid }.toSet()
+            val fullQueueQids = fullQueue.map { it.qid }
+            val recQids = room.queue.filter { it.recommended }.map { it.qid }.toSet()
             val targetSong = room.nowPlaying.item?.song
+            val targetQid = room.nowPlaying.item?.qid
 
             playerManager.setJamQueue(
                 jamQueue = fullQueueSongs,
                 targetSong = targetSong,
-                recommendedIds = recIds
+                targetQid = targetQid,
+                queueQids = fullQueueQids,
+                recommendedQids = recQids
             )
         }
     }
@@ -468,6 +502,8 @@ class JamSessionManager @Inject constructor(
         _localPlaybackState.value = LocalPlaybackState.Synchronized
         lastAppliedSnapshotVersion = null
         lastAppliedNowPlayingQid = null
+        hasShownAudioFocusToastInThisJam = false
+        lastLoadingAbortedToastTrackSeq = null
     }
 
     fun onNetworkRestored() {
@@ -765,9 +801,7 @@ class JamSessionManager @Inject constructor(
     }
 
     private fun showToast(message: String) {
-        mainHandler.post {
-            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-        }
+        toastEmitter(message)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -904,14 +938,16 @@ class JamSessionManager @Inject constructor(
 
             if (trackRetryCount < 2) {
                 trackRetryCount++
-                android.util.Log.d("JamSessionManager", "Premature track end (remaining: ${remainingMs}ms). Retry $trackRetryCount/2 for trackSeq ${nowPlaying.trackSeq}")
+                logD("JamSessionManager", "Premature track end (remaining: ${remainingMs}ms). Retry $trackRetryCount/2 for trackSeq ${nowPlaying.trackSeq}")
+                val targetQid = nowPlaying.item.qid
                 playerManager.playJamSyncSong(
                     song = nowPlaying.item.song,
                     initialPositionMs = expectedPos,
-                    playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING)
+                    playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING),
+                    targetQid = targetQid
                 )
             } else {
-                android.util.Log.w("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
+                logW("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
                 playerManager.applyJamPause()
             }
         } else {
@@ -964,7 +1000,7 @@ class JamSessionManager @Inject constructor(
         }
     }
 
-    internal fun checkLoadingTimeout(currentTimeMs: Long = System.currentTimeMillis()) {
+    internal fun checkLoadingTimeout(currentTimeMs: Long = currentTimeProvider()) {
         if (reconcilerTrackState != ReconcilerTrackState.LOADING) return
         val startedAt = loadingStartedAt
         if (startedAt <= 0L) return
@@ -984,19 +1020,26 @@ class JamSessionManager @Inject constructor(
         if (trackRetryCount < 2) {
             trackRetryCount++
             loadingStartedAt = currentTimeMs
-            android.util.Log.d("JamSessionManager", "LOADING timeout (~15s) reached. Retry $trackRetryCount/2 for trackSeq $targetSeq")
+            logD("JamSessionManager", "LOADING timeout (~15s) reached. Retry $trackRetryCount/2 for trackSeq $targetSeq")
             val expectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+            val targetQid = nowPlaying.item.qid
             playerManager.playJamSyncSong(
                 song = nowPlaying.item.song,
                 initialPositionMs = expectedPos,
-                playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING)
+                playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING),
+                targetQid = targetQid
             )
         } else {
-            android.util.Log.w("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
+            logW("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
             reconcilerTrackState = ReconcilerTrackState.READY
             loadingTrackSeq = null
             loadingStartedAt = 0L
             playerManager.applyJamPause()
+
+            if (lastLoadingAbortedToastTrackSeq != targetSeq) {
+                lastLoadingAbortedToastTrackSeq = targetSeq
+                showToast("Couldn't load this song")
+            }
         }
     }
 
@@ -1021,7 +1064,7 @@ class JamSessionManager @Inject constructor(
 
                     val actualDurationMs = playerManager.getPlayerDuration()
                     val metadataDurationMs = (serverNowPlaying.item?.song?.durationSeconds ?: 0) * 1000L
-                    android.util.Log.d("JamSessionManager", "New track READY: trackSeq=$currentTrackSeq metadataDur=$metadataDurationMs actualDur=$actualDurationMs")
+                    logD("JamSessionManager", "New track READY: trackSeq=$currentTrackSeq metadataDur=$metadataDurationMs actualDur=$actualDurationMs")
                 }
             }
         }
@@ -1029,11 +1072,32 @@ class JamSessionManager @Inject constructor(
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         if (!_jamState.value.isInJam) return
-        if (!playWhenReady && (
-            reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
-            reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
-        )) {
-            stepOutLocally()
+        if (!playWhenReady) {
+            if (reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+                stepOutLocally()
+                if (!hasShownAudioFocusToastInThisJam) {
+                    hasShownAudioFocusToastInThisJam = true
+                    showToast("Paused for you only — tap Resume to rejoin")
+                }
+            } else if (reason == androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
+                stepOutLocally()
+            }
+        }
+    }
+
+    private fun logD(tag: String, msg: String) {
+        try {
+            android.util.Log.d(tag, msg)
+        } catch (_: Throwable) {
+            println("[$tag] $msg")
+        }
+    }
+
+    private fun logW(tag: String, msg: String) {
+        try {
+            android.util.Log.w(tag, msg)
+        } catch (_: Throwable) {
+            println("[$tag] $msg")
         }
     }
 }

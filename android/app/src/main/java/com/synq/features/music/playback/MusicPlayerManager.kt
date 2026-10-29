@@ -17,6 +17,8 @@ import com.synq.features.music.domain.model.Lyrics
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.StreamInfo
 import com.synq.features.music.util.SongDeduplicator
+import com.synq.features.music.jam.JamPlayerBridge
+import com.synq.features.music.sleeptimer.SleepTimerPlayerBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,14 +69,14 @@ class MusicPlayerManager @Inject constructor(
     private val audioCacheProvider: AudioCacheProvider,
     private val streamCacheStorage: StreamCacheStorage,
     private val networkMonitor: com.synq.core.network.NetworkMonitor,
-) {
-    var jamInterceptor: JamPlaybackInterceptor? = null
+) : JamPlayerBridge, SleepTimerPlayerBridge {
+    override var jamInterceptor: JamPlaybackInterceptor? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    override val playbackState: StateFlow<PlaybackState> get() = _playbackState.asStateFlow()
     private val _playbackState = MutableStateFlow(PlaybackState())
-    val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     private val _queue = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
@@ -97,18 +99,28 @@ class MusicPlayerManager @Inject constructor(
     val isLyricsLoading: StateFlow<Boolean> = _isLyricsLoading.asStateFlow()
 
     // Sleep timer stop hook
-    var onTrackEndedListener: (() -> Unit)? = null
+    override var onTrackEndedListener: (() -> Unit)? = null
 
     // Session-based deduplication tracker
     private val sessionPlayedIds = mutableSetOf<String>()
 
-    // Tracks IDs of songs automatically appended as recommendations
+    // Tracks IDs of songs automatically appended as recommendations in personal queue
     private val _recommendedSongIds = MutableStateFlow<Set<String>>(emptySet())
     val recommendedSongIds: StateFlow<Set<String>> = _recommendedSongIds.asStateFlow()
+
+    // Mirror queue QIDs and Jam recommendations by QID for Jam sessions
+    private val _jamQueueQids = MutableStateFlow<List<String>>(emptyList())
+    val jamQueueQids: StateFlow<List<String>> = _jamQueueQids.asStateFlow()
+
+    private val _jamRecommendedQids = MutableStateFlow<Set<String>>(emptySet())
+    val jamRecommendedQids: StateFlow<Set<String>> = _jamRecommendedQids.asStateFlow()
+
+    fun isItemRecommended(qid: String): Boolean = qid in _jamRecommendedQids.value
 
     // Personal queue isolation for Jam sessions
     private var stashedPersonalQueue: List<Song>? = null
     private var stashedPersonalIndex: Int? = null
+    private var stashedRecommendedSongIds: Set<String>? = null
     private var stashedSourcePlaylist: List<Song>? = null
     private var stashedNextSourceIndex: Int = 0
 
@@ -280,8 +292,8 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
-        // If this song was part of recommended songs, push it above the separator
-        if (song.id in _recommendedSongIds.value) {
+        // If this song was part of recommended songs, push it above the separator (personal queue only)
+        if (jamInterceptor == null && song.id in _recommendedSongIds.value) {
             _recommendedSongIds.update { recs ->
                 val currentIdx = _currentIndex.value
                 val q = _queue.value
@@ -549,13 +561,13 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun pause() {
+    override fun pause() {
         if (jamInterceptor?.onPause() == true) return
         controller?.pause()
         stopPositionTracking()
     }
 
-    fun stop() {
+    override fun stop() {
         controller?.stop()
         controller?.clearMediaItems()
         stopPositionTracking()
@@ -902,34 +914,53 @@ class MusicPlayerManager @Inject constructor(
     // Queue Isolation for Jam Sessions
     // ─────────────────────────────────────────────────────────────
 
-    fun stashPersonalQueue() {
+    override fun stashPersonalQueue() {
         stashedPersonalQueue = _queue.value
         stashedPersonalIndex = _currentIndex.value
+        stashedRecommendedSongIds = _recommendedSongIds.value
         stashedSourcePlaylist = sourcePlaylist
         stashedNextSourceIndex = nextSourceIndex
         stashedActiveRadioArtist = activeRadioArtist
         activeRadioArtist = null
     }
 
-    fun restorePersonalQueue() {
+    override fun restorePersonalQueue() {
         stashedPersonalQueue?.let { stashed ->
             _queue.value = stashed
             _currentIndex.value = stashedPersonalIndex?.coerceIn(0, (stashed.size - 1).coerceAtLeast(0)) ?: 0
+            stashedRecommendedSongIds?.let {
+                _recommendedSongIds.value = it
+            }
             sourcePlaylist = stashedSourcePlaylist
             nextSourceIndex = stashedNextSourceIndex
             activeRadioArtist = stashedActiveRadioArtist
             stashedPersonalQueue = null
             stashedPersonalIndex = null
+            stashedRecommendedSongIds = null
             stashedSourcePlaylist = null
             stashedNextSourceIndex = 0
             stashedActiveRadioArtist = null
         }
+        _jamRecommendedQids.value = emptySet()
+        _jamQueueQids.value = emptyList()
     }
 
-    fun setJamQueue(jamQueue: List<Song>, targetSong: Song? = null, recommendedIds: Set<String> = emptySet()) {
+    override fun setJamQueue(
+        jamQueue: List<Song>,
+        targetSong: Song?,
+        targetQid: String?,
+        queueQids: List<String>,
+        recommendedQids: Set<String>
+    ) {
         _queue.value = jamQueue
-        _recommendedSongIds.value = recommendedIds
-        if (targetSong != null) {
+        _jamQueueQids.value = queueQids
+        _jamRecommendedQids.value = recommendedQids
+        if (targetQid != null && queueQids.isNotEmpty()) {
+            val idx = queueQids.indexOf(targetQid)
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        } else if (targetSong != null) {
             val idx = jamQueue.indexOfFirst { it.id == targetSong.id }
             if (idx >= 0) {
                 _currentIndex.value = idx
@@ -937,19 +968,31 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun playJamSyncSong(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
+    override fun playJamSyncSong(
+        song: Song,
+        initialPositionMs: Long,
+        playWhenReady: Boolean,
+        targetQid: String?
+    ) {
         activeRadioArtist = null
         sourcePlaylist = null
         nextSourceIndex = 0
         sessionPlayedIds.add(song.id)
-        val idx = _queue.value.indexOfFirst { it.id == song.id }
-        if (idx >= 0) {
-            _currentIndex.value = idx
+        if (targetQid != null && _jamQueueQids.value.isNotEmpty()) {
+            val idx = _jamQueueQids.value.indexOf(targetQid)
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        } else {
+            val idx = _queue.value.indexOfFirst { it.id == song.id }
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
         }
         loadAndPlay(song, initialPositionMs, playWhenReady)
     }
 
-    fun prefetchTrack(song: Song) {
+    override fun prefetchTrack(song: Song) {
         scope.launch(Dispatchers.IO) {
             try {
                 if (audioCacheProvider.isSongCached(song.id)) return@launch
@@ -968,73 +1011,51 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun setPlaybackSpeed(speed: Float) {
+    override fun setPlaybackSpeed(speed: Float) {
         controller?.setPlaybackSpeed(speed)
     }
 
-    fun getPlaybackSpeed(): Float {
+    override fun getPlaybackSpeed(): Float {
         return controller?.playbackParameters?.speed ?: 1.0f
     }
 
-    fun getPlayerCurrentPosition(): Long {
+    override fun getPlayerCurrentPosition(): Long {
         return controller?.currentPosition ?: _playbackState.value.playbackPositionMs
     }
 
-    fun getPlayerPlayWhenReady(): Boolean {
+    override fun getPlayerPlayWhenReady(): Boolean {
         return controller?.playWhenReady ?: false
     }
 
-    fun getPlayerPlaybackState(): Int {
+    override fun getPlayerPlaybackState(): Int {
         return controller?.playbackState ?: androidx.media3.common.Player.STATE_IDLE
     }
 
-    fun getPlayerDuration(): Long {
+    override fun getPlayerDuration(): Long {
         return controller?.duration?.takeIf { it > 0 } ?: 0L
     }
 
-    private var isApplyingJamCommand: Boolean = false
-
-    fun applyJamPlay() {
-        isApplyingJamCommand = true
-        try {
-            controller?.let {
-                if (!it.isPlaying) {
-                    it.play()
-                    startPositionTracking()
-                }
+    override fun applyJamPlay() {
+        controller?.let {
+            if (!it.isPlaying) {
+                it.play()
+                startPositionTracking()
             }
-        } finally {
-            isApplyingJamCommand = false
         }
     }
 
-    fun applyJamPause() {
-        isApplyingJamCommand = true
-        try {
-            controller?.pause()
-            stopPositionTracking()
-        } finally {
-            isApplyingJamCommand = false
-        }
+    override fun applyJamPause() {
+        controller?.pause()
+        stopPositionTracking()
     }
 
-    fun applyJamSeek(positionMs: Long) {
-        isApplyingJamCommand = true
-        try {
-            controller?.seekTo(positionMs)
-            _playbackState.update { it.copy(playbackPositionMs = positionMs) }
-        } finally {
-            isApplyingJamCommand = false
-        }
+    override fun applyJamSeek(positionMs: Long) {
+        controller?.seekTo(positionMs)
+        _playbackState.update { it.copy(playbackPositionMs = positionMs) }
     }
 
-    fun applyJamSpeed(factor: Float) {
-        isApplyingJamCommand = true
-        try {
-            controller?.setPlaybackSpeed(factor)
-        } finally {
-            isApplyingJamCommand = false
-        }
+    override fun applyJamSpeed(factor: Float) {
+        controller?.setPlaybackSpeed(factor)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1078,9 +1099,7 @@ class MusicPlayerManager @Inject constructor(
 
     private val playerListener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (!isApplyingJamCommand) {
-                jamInterceptor?.onPlayWhenReadyChanged(playWhenReady, reason)
-            }
+            jamInterceptor?.onPlayWhenReadyChanged(playWhenReady, reason)
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {

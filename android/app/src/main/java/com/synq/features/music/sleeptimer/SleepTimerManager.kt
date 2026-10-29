@@ -17,11 +17,18 @@ import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
-class SleepTimerManager @Inject constructor(
-    private val playerManager: MusicPlayerManager,
-    private val jamSessionManagerProvider: Provider<JamSessionManager>
+class SleepTimerManager(
+    private val playerManager: SleepTimerPlayerBridge,
+    private val jamSessionManagerProvider: Provider<JamSessionManager>,
+    coroutineScope: CoroutineScope? = null
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    @Inject
+    constructor(
+        playerManager: MusicPlayerManager,
+        jamSessionManagerProvider: Provider<JamSessionManager>
+    ) : this(playerManager as SleepTimerPlayerBridge, jamSessionManagerProvider, null)
+
+    private val scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var countdownJob: Job? = null
 
     private val _selectedOption = MutableStateFlow("Off")
