@@ -17,6 +17,7 @@ data class JamState(
     val hostUserId: String = "",
     val hostName: String = "",
     val allowAttendeeReorder: Boolean = false,
+    val isLocalStepOut: Boolean = false,
     val participants: List<JamParticipantUi> = emptyList(),
     val queue: List<Song> = emptyList(),
     val error: String? = null

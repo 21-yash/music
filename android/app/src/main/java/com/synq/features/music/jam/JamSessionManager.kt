@@ -28,6 +28,11 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 
+sealed class LocalPlaybackState {
+    object Synchronized : LocalPlaybackState()
+    object LocalStepOut : LocalPlaybackState()
+}
+
 @Singleton
 class JamSessionManager @Inject constructor(
     private val playerManager: MusicPlayerManager,
@@ -62,6 +67,9 @@ class JamSessionManager @Inject constructor(
     private var currentTrackSeq: Long = 0L
     private var reconcilerTrackState: ReconcilerTrackState = ReconcilerTrackState.READY
     private var loadingTrackSeq: Long? = null
+    private val _localPlaybackState = MutableStateFlow<LocalPlaybackState>(LocalPlaybackState.Synchronized)
+    val localPlaybackState: StateFlow<LocalPlaybackState> = _localPlaybackState.asStateFlow()
+    val isLocalStepOut: Boolean get() = _localPlaybackState.value is LocalPlaybackState.LocalStepOut
     private var reconcilerJob: Job? = null
     private var isReconciling = false
 
@@ -236,6 +244,7 @@ class JamSessionManager @Inject constructor(
 
     private fun reconcilePlayback() {
         if (!_jamState.value.isInJam) return
+        if (isLocalStepOut) return // Reconciler is suspended while guest is locally stepped out
         val currentRoom = stateStore.room.value ?: return
         if (isReconciling) return
 
@@ -389,6 +398,7 @@ class JamSessionManager @Inject constructor(
         currentTrackSeq = 0L
         reconcilerTrackState = ReconcilerTrackState.READY
         loadingTrackSeq = null
+        _localPlaybackState.value = LocalPlaybackState.Synchronized
     }
 
     fun onNetworkRestored() {
@@ -404,8 +414,49 @@ class JamSessionManager @Inject constructor(
     // Transport & Playback API
     // ─────────────────────────────────────────────────────────────
 
+    fun canControlPlayback(): Boolean {
+        val room = stateStore.room.value ?: return false
+        val isHost = room.hostUserId == myUserId
+        val member = room.members.find { it.userId == myUserId }
+        val playbackPerm = member?.perms?.playback ?: room.defaults.playback
+        return isHost || playbackPerm
+    }
+
+    fun stepOutLocally() {
+        _localPlaybackState.value = LocalPlaybackState.LocalStepOut
+        _jamState.update { it.copy(isLocalStepOut = true) }
+        playerManager.applyJamPause()
+    }
+
+    fun resumeFromLocalStepOut() {
+        _localPlaybackState.value = LocalPlaybackState.Synchronized
+        _jamState.update { it.copy(isLocalStepOut = false) }
+        val room = stateStore.room.value
+        if (room != null && room.nowPlaying.item != null) {
+            val serverNowPlaying = room.nowPlaying
+            val expectedPos = clockSync.expectedPosition(serverNowPlaying, clockSync.serverNow())
+            playerManager.applyJamSeek(expectedPos)
+            if (serverNowPlaying.status == JamPlaybackStatus.PLAYING) {
+                playerManager.applyJamPlay()
+            }
+        }
+        reconcilePlayback()
+    }
+
     fun togglePlayPause() {
+        if (isLocalStepOut) {
+            resumeFromLocalStepOut()
+            return
+        }
         val room = stateStore.room.value ?: return
+        if (!canControlPlayback()) {
+            if (room.nowPlaying.status == JamPlaybackStatus.PLAYING) {
+                stepOutLocally()
+            } else {
+                showToast("You don't have permission to control playback")
+            }
+            return
+        }
         val isPlaying = room.nowPlaying.status == JamPlaybackStatus.PLAYING
         scope.launch {
             val cmd = if (isPlaying) "pause" else "play"
@@ -417,6 +468,14 @@ class JamSessionManager @Inject constructor(
     }
 
     fun play() {
+        if (isLocalStepOut) {
+            resumeFromLocalStepOut()
+            return
+        }
+        if (!canControlPlayback()) {
+            showToast("You don't have permission to control playback")
+            return
+        }
         scope.launch {
             val res = jamClient.sendCommand("play")
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
@@ -424,9 +483,13 @@ class JamSessionManager @Inject constructor(
     }
 
     fun pause() {
-        scope.launch {
-            val res = jamClient.sendCommand("pause")
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        if (!canControlPlayback()) {
+            stepOutLocally()
+        } else {
+            scope.launch {
+                val res = jamClient.sendCommand("pause")
+                res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            }
         }
     }
 
