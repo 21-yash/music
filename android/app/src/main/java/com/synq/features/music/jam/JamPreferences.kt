@@ -19,6 +19,7 @@ class JamPreferences @Inject constructor(
         private const val KEY_LAST_JAM_CODE = "last_jam_code"
         private const val KEY_LAST_JAM_TIMESTAMP = "last_jam_timestamp"
         private const val KEY_LAST_AVATAR_URL = "last_avatar_url"
+        private const val KEY_REQUESTED_NOTIFICATION_PERMISSION = "requested_notification_permission"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -29,6 +30,13 @@ class JamPreferences @Inject constructor(
     fun setSeenBatteryTip(seen: Boolean = true) {
         _hasSeenBatteryTip.value = seen
         prefs.edit().putBoolean(KEY_SEEN_BATTERY_TIP, seen).apply()
+    }
+
+    fun hasRequestedNotificationPermission(): Boolean =
+        prefs.getBoolean(KEY_REQUESTED_NOTIFICATION_PERMISSION, false)
+
+    fun setRequestedNotificationPermission(requested: Boolean = true) {
+        prefs.edit().putBoolean(KEY_REQUESTED_NOTIFICATION_PERMISSION, requested).apply()
     }
 
     override fun saveLastJam(code: String, avatarUrl: String?) {

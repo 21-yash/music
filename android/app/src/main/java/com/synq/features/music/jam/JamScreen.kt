@@ -89,6 +89,7 @@ fun JamScreen(
     val room by rootViewModel.jamRoom.collectAsState()
     val clientState by rootViewModel.jamClientState.collectAsState()
     val localPlaybackState by rootViewModel.jamLocalPlaybackState.collectAsState()
+    val playerPlaybackState by rootViewModel.playbackState.collectAsState()
     val clockSync = rootViewModel.jamClockSync
 
     val isDark = isAppDark()
@@ -107,6 +108,24 @@ fun JamScreen(
 
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        onResult = { _ -> }
+    )
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!hasPermission && !rootViewModel.jamPreferences.hasRequestedNotificationPermission()) {
+                rootViewModel.jamPreferences.setRequestedNotificationPermission(true)
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     LaunchedEffect(uiState.isInJam, hasSeenBatteryTip) {
         if (uiState.isInJam && !hasSeenBatteryTip && !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
@@ -603,6 +622,8 @@ fun JamScreen(
                         val rawDurationSec = nowPlayingItem.song.durationSeconds ?: 0
                         val durationMs = if (rawDurationSec > 0) {
                             rawDurationSec * 1000L
+                        } else if (playerPlaybackState.durationMs > 0L) {
+                            playerPlaybackState.durationMs
                         } else {
                             0L
                         }

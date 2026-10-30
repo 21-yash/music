@@ -146,9 +146,15 @@ class JamClient(
         }
 
         if (token.isNullOrBlank()) {
-            val err = JamProtocolException("AUTH", "Authentication required")
-            _clientState.value = JamClientState.Closed("auth_failed", "Please log in to start a Jam.")
-            return Result.failure(err)
+            if (tokenRes is TokenRefreshResult.Transient) {
+                val err = JamProtocolException("NETWORK", "Check your internet connection and try again")
+                _clientState.value = JamClientState.Disconnected
+                return Result.failure(err)
+            } else {
+                val err = JamProtocolException("AUTH", "Authentication required")
+                _clientState.value = JamClientState.Closed("auth_failed", "Please log in to start a Jam.")
+                return Result.failure(err)
+            }
         }
 
         transport.connect(token)
@@ -174,6 +180,14 @@ class JamClient(
             _clientState.value = JamClientState.Active(snapshot.code, JamRole.HOST)
             snapshot
         }.onFailure {
+            if (res.isSuccess) {
+                val code = res.getOrNull()?.optJSONObject("room")?.optString("code")
+                if (!code.isNullOrBlank()) {
+                    try {
+                        transport.emit("jam2:end", JSONObject().apply { put("code", code) }, ackTimeoutMs = 1500L)
+                    } catch (_: Exception) {}
+                }
+            }
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
@@ -194,9 +208,15 @@ class JamClient(
         }
 
         if (token.isNullOrBlank()) {
-            val err = JamProtocolException("AUTH", "Authentication required")
-            _clientState.value = JamClientState.Closed("auth_failed", "Please log in to join a Jam.")
-            return Result.failure(err)
+            if (tokenRes is TokenRefreshResult.Transient) {
+                val err = JamProtocolException("NETWORK", "Check your internet connection and try again")
+                _clientState.value = JamClientState.Disconnected
+                return Result.failure(err)
+            } else {
+                val err = JamProtocolException("AUTH", "Authentication required")
+                _clientState.value = JamClientState.Closed("auth_failed", "Please log in to join a Jam.")
+                return Result.failure(err)
+            }
         }
 
         transport.connect(token)
@@ -224,6 +244,11 @@ class JamClient(
             _clientState.value = JamClientState.Active(snapshot.code, role)
             snapshot
         }.onFailure {
+            if (res.isSuccess) {
+                try {
+                    transport.emit("jam2:leave", JSONObject().apply { put("code", cleanCode) }, ackTimeoutMs = 1500L)
+                } catch (_: Exception) {}
+            }
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
@@ -467,6 +492,9 @@ class JamClient(
         return res.mapCatching { json ->
             val roomObj = json.getJSONObject("room")
             val snapshot = RoomSnapshot.fromJson(roomObj)
+            if (autoClockSync) {
+                performClockSync()
+            }
             stateStore.applySnapshot(snapshot, isEpoch = true)
             val role = if (snapshot.hostUserId == stateStore.uiState.value.myUserId) JamRole.HOST else JamRole.GUEST
             _clientState.value = JamClientState.Active(code, role)
@@ -500,7 +528,9 @@ class JamClient(
         clockSyncJob = scope.launch(ioDispatcher) {
             while (isActive) {
                 delay(30_000L)
-                performClockSync()
+                if (_clientState.value is JamClientState.Active) {
+                    performClockSync()
+                }
             }
         }
     }
