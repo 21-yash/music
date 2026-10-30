@@ -47,16 +47,11 @@ class SocketIoTransport(
     @Volatile
     private var connectionDeferred = CompletableDeferred<Unit>()
 
-    private val _dataEvents = MutableSharedFlow<JamTransport.Event>(
-        extraBufferCapacity = 64,
+    private val _events = MutableSharedFlow<JamTransport.Event>(
+        extraBufferCapacity = 1024,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    private val _controlEvents = MutableSharedFlow<JamTransport.Event>(
-        extraBufferCapacity = 512,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    override val events: kotlinx.coroutines.flow.Flow<JamTransport.Event> =
-        kotlinx.coroutines.flow.merge(_controlEvents, _dataEvents)
+    override val events: kotlinx.coroutines.flow.Flow<JamTransport.Event> = _events.asSharedFlow()
 
     override val isConnected: Boolean
         get() = socket?.connected() == true
@@ -93,18 +88,18 @@ class SocketIoTransport(
 
         s.on(Socket.EVENT_CONNECT) {
             deferred.complete(Unit)
-            _controlEvents.tryEmit(JamTransport.Event.Connected)
+            _events.tryEmit(JamTransport.Event.Connected)
         }
 
         s.on(Socket.EVENT_CONNECT_ERROR) { args ->
             val err = args.firstOrNull() as? Throwable ?: Exception(args.firstOrNull()?.toString() ?: "Connect error")
             deferred.completeExceptionally(err)
-            _controlEvents.tryEmit(JamTransport.Event.ConnectError(err))
+            _events.tryEmit(JamTransport.Event.ConnectError(err))
         }
 
         s.on(Socket.EVENT_DISCONNECT) { args ->
             val reason = args.firstOrNull()?.toString() ?: "unknown"
-            _controlEvents.tryEmit(JamTransport.Event.Disconnected(reason))
+            _events.tryEmit(JamTransport.Event.Disconnected(reason))
         }
 
         s.on("jam2:state") { args ->
@@ -115,10 +110,10 @@ class SocketIoTransport(
             }
             try {
                 val snapshot = RoomSnapshot.fromJson(obj)
-                _dataEvents.tryEmit(JamTransport.Event.State(snapshot))
+                _events.tryEmit(JamTransport.Event.State(snapshot))
             } catch (e: Exception) {
                 safeLogW("SocketIoTransport", "Failed to parse jam2:state payload", e)
-                _controlEvents.tryEmit(JamTransport.Event.ParseError("jam2:state"))
+                _events.tryEmit(JamTransport.Event.ParseError("jam2:state"))
             }
         }
 
@@ -130,7 +125,7 @@ class SocketIoTransport(
             }
             try {
                 val tick = Jam2Tick.fromJson(obj)
-                _dataEvents.tryEmit(JamTransport.Event.Tick(tick))
+                _events.tryEmit(JamTransport.Event.Tick(tick))
             } catch (e: Exception) {
                 safeLogW("SocketIoTransport", "Failed to parse jam2:tick payload", e)
             }
@@ -144,7 +139,7 @@ class SocketIoTransport(
             }
             try {
                 val event = Jam2Event.fromJson(obj)
-                _dataEvents.tryEmit(JamTransport.Event.JamEvent(event))
+                _events.tryEmit(JamTransport.Event.JamEvent(event))
             } catch (e: Exception) {
                 safeLogW("SocketIoTransport", "Failed to parse jam2:event payload", e)
             }
@@ -153,7 +148,7 @@ class SocketIoTransport(
         s.on("jam2:closed") { args ->
             val obj = args.firstOrNull() as? JSONObject
             val reason = obj?.optStringOrNull("reason") ?: "ended"
-            _controlEvents.tryEmit(JamTransport.Event.Closed(reason))
+            _events.tryEmit(JamTransport.Event.Closed(reason))
         }
 
         s.connect()
