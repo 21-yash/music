@@ -25,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -101,7 +102,8 @@ class JamEngineFixesTest {
             val song: Song,
             val initialPositionMs: Long,
             val playWhenReady: Boolean,
-            val targetQid: String?
+            val targetQid: String?,
+            val forceRefresh: Boolean = false
         )
 
         override fun getPlayerCurrentPosition(): Long = currentPosition
@@ -117,7 +119,7 @@ class JamEngineFixesTest {
             targetQid: String?,
             forceRefresh: Boolean
         ) {
-            playJamSyncSongCalls.add(PlayJamSyncCall(song, initialPositionMs, playWhenReady, targetQid))
+            playJamSyncSongCalls.add(PlayJamSyncCall(song, initialPositionMs, playWhenReady, targetQid, forceRefresh))
             this.playWhenReady = playWhenReady
             this.currentPosition = initialPositionMs
             if (targetQid != null && currentJamQueueQids.isNotEmpty()) {
@@ -624,6 +626,31 @@ class JamEngineFixesTest {
         fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
         runCurrent()
         assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" })
+    }
+
+    @Test
+    fun testForceRefresh_normalChangeIsFalse_loadingRetryIsTrue() = runTest {
+        val fixture = createFixture(this)
+        val song = sampleSong("refresh_test_song")
+        val snapshot = makeSnapshot("ABCD", trackSeq = 50L, song = song, status = JamPlaybackStatus.PLAYING)
+        fixture.joinTestJam("ABCD", initialSnapshot = snapshot)
+        runCurrent()
+
+        // Normal change records forceRefresh = false
+        val initialCall = fixture.fakePlayer.playJamSyncSongCalls.firstOrNull()
+        assertNotNull(initialCall)
+        assertFalse("Normal ChangeTrack must have forceRefresh=false", initialCall!!.forceRefresh)
+
+        fixture.fakePlayer.playJamSyncSongCalls.clear()
+
+        // Fast forward 16s to trigger loading timeout retry
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
+        runCurrent()
+
+        // Loading timeout retry records forceRefresh = true
+        assertEquals(1, fixture.fakePlayer.playJamSyncSongCalls.size)
+        assertTrue("Loading timeout retry must have forceRefresh=true", fixture.fakePlayer.playJamSyncSongCalls[0].forceRefresh)
     }
 
     // ─────────────────────────────────────────────────────────────

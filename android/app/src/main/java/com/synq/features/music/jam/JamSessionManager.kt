@@ -1014,7 +1014,8 @@ class JamSessionManager(
                     song = nowPlaying.item.song,
                     initialPositionMs = expectedPos,
                     playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING),
-                    targetQid = targetQid
+                    targetQid = targetQid,
+                    forceRefresh = true
                 )
             } else {
                 logW("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
@@ -1108,7 +1109,8 @@ class JamSessionManager(
                 song = nowPlaying.item.song,
                 initialPositionMs = expectedPos,
                 playWhenReady = (nowPlaying.status == JamPlaybackStatus.PLAYING),
-                targetQid = targetQid
+                targetQid = targetQid,
+                forceRefresh = true
             )
         } else {
             logW("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
