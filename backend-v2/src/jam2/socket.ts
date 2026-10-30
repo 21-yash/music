@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { jam2Manager } from './manager';
-import { resolveSong, resolveSongOrFallback, sanitizeUrl } from './songResolver';
+import { resolveSongOrFallback, sanitizeUrl } from './songResolver';
 import { checkCommandPermission } from './permissions';
 import {
   createPayloadSchema,
