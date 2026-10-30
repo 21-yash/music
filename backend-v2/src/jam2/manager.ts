@@ -90,6 +90,7 @@ export class Jam2Manager {
   private kickedUsers = new Map<string, Map<string, number>>();
   private loggedZeroDuration = new Set<string>();
   private lastTTLRefresh = new Map<string, number>();
+  private recsFailedAt = new Map<string, number>();
 
   // Background interval timers
   private pruneInterval: NodeJS.Timeout | null = null;
@@ -246,49 +247,59 @@ export class Jam2Manager {
     hostUsername: string,
     avatarUrl?: string,
   ): Promise<Room> {
-    const code = await this.generateUniqueRoomCode();
-    const now = Date.now();
-
-    return this.mutex.runExclusive(code, async () => {
-      const room: Room = {
-        code,
-        version: 1,
-        hostUserId,
-        createdAt: now,
-        members: new Map([
-          [
-            hostUserId,
-            {
-              userId: hostUserId,
-              username: hostUsername,
-              avatarUrl,
-              joinedAt: now,
-              online: true,
-              lastSeenAt: now,
-              perms: {
-                queueAdd: true,
-                playback: true,
-                queueManage: true,
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const code = await this.generateUniqueRoomCode();
+      const created = await this.mutex.runExclusive(code, async () => {
+        const exists = await this.store.checkRoomExists(code);
+        if (exists) {
+          return null;
+        }
+        const now = Date.now();
+        const room: Room = {
+          code,
+          version: 1,
+          hostUserId,
+          createdAt: now,
+          members: new Map([
+            [
+              hostUserId,
+              {
+                userId: hostUserId,
+                username: hostUsername,
+                avatarUrl,
+                joinedAt: now,
+                online: true,
+                lastSeenAt: now,
+                perms: {
+                  queueAdd: true,
+                  playback: true,
+                  queueManage: true,
+                },
               },
-            },
-          ],
-        ]),
-        defaults: { ...DEFAULT_ROOM_PERMS },
-        queue: [],
-        history: [],
-        nowPlaying: {
-          item: null,
-          status: 'idle',
-          positionMs: 0,
-          anchorServerTs: now,
-          trackSeq: 0,
-        },
-      };
+            ],
+          ]),
+          defaults: { ...DEFAULT_ROOM_PERMS },
+          queue: [],
+          history: [],
+          nowPlaying: {
+            item: null,
+            status: 'idle',
+            positionMs: 0,
+            anchorServerTs: now,
+            trackSeq: 0,
+          },
+        };
 
-      this.store.setRoom(room);
-      logger.info({ code, hostUserId, hostUsername }, 'Jam2 room created');
-      return room;
-    });
+        this.store.setRoom(room);
+        logger.info({ code, hostUserId, hostUsername }, 'Jam2 room created');
+        return room;
+      });
+
+      if (created) {
+        return created;
+      }
+    }
+    throw new Error('Unable to create room after 20 attempts');
   }
 
   async getRoom(code: string): Promise<Room | null> {
@@ -798,6 +809,10 @@ export class Jam2Manager {
     // Only fetch when recommended items in queue < 3 AND user items <= 1
     if (userAddedCount > 1 || recCount >= 3) return;
 
+    // Check 30s failure backoff (Task F11.d)
+    const failedAt = this.recsFailedAt.get(room.code);
+    if (failedAt && Date.now() - failedAt < 30_000) return;
+
     const lastSeeded = this.recsSeededForTrackSeq.get(room.code);
     if (lastSeeded === room.nowPlaying.trackSeq) return;
 
@@ -841,11 +856,13 @@ export class Jam2Manager {
           );
 
           if ('room' in res && res.room.version !== freshRoom.version) {
+            this.recsFailedAt.delete(room.code);
             this.store.setRoom(res.room);
             this.broadcastState(res.room);
           }
         });
       } catch (err) {
+        this.recsFailedAt.set(room.code, Date.now());
         logger.warn(
           { err, code: room.code },
           'Failed to fetch recommendations for jam2 room (swallowed)',
@@ -1036,6 +1053,7 @@ export class Jam2Manager {
 
     this.roomUserSockets.delete(normalizedCode);
     this.recsSeededForTrackSeq.delete(normalizedCode);
+    this.recsFailedAt.delete(normalizedCode);
     this.inflightRecs.delete(normalizedCode);
     this.kickedUsers.delete(normalizedCode);
     this.loggedZeroDuration.delete(normalizedCode);

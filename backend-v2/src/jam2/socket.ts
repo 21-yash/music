@@ -1,7 +1,8 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { jam2Manager } from './manager';
-import { resolveSong, sanitizeUrl } from './songResolver';
+import { resolveSong, resolveSongOrFallback, sanitizeUrl } from './songResolver';
+import { checkCommandPermission } from './permissions';
 import {
   createPayloadSchema,
   joinPayloadSchema,
@@ -136,17 +137,8 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
 
       const normalizedCode = parsed.data.code.trim().toUpperCase();
 
-      // Enforce ONE active room per user
+      // Track existing room to leave ONLY after successful join (Task F7)
       const existingCode = jam2Manager.getActiveRoomForUser(user.userId);
-      if (existingCode && existingCode !== normalizedCode) {
-        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
-        for (const sId of userSockets) {
-          const s = io.sockets.sockets.get(sId);
-          if (s) s.leave(`jam2:${existingCode}`);
-        }
-        jam2Manager.deregisterUserSockets(existingCode, user.userId);
-        await jam2Manager.leaveRoom(existingCode, user.userId);
-      }
 
       const cleanAvatarUrl = sanitizeUrl(parsed.data.avatarUrl) ?? undefined;
       const res = await jam2Manager.joinRoom(
@@ -165,6 +157,17 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
           code: res.error.code,
           message: res.error.message,
         });
+      }
+
+      // Enforce ONE active room per user - leave old room after successful join
+      if (existingCode && existingCode !== normalizedCode) {
+        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
+        for (const sId of userSockets) {
+          const s = io.sockets.sockets.get(sId);
+          if (s) s.leave(`jam2:${existingCode}`);
+        }
+        jam2Manager.deregisterUserSockets(existingCode, user.userId);
+        await jam2Manager.leaveRoom(existingCode, user.userId);
       }
 
       socket.join(`jam2:${normalizedCode}`);
@@ -357,44 +360,51 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       const cmd = parsed.data;
       const normalizedCode = cmd.code.trim().toUpperCase();
 
-      // Resolve song metadata from provider outside room mutex (Task A5)
+      // Fast permission precheck before resolving external metadata (Task F11.b)
+      const preRoom = await jam2Manager.getRoom(normalizedCode);
+      if (!preRoom) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'NOT_FOUND',
+          message: 'Room not found',
+        });
+      }
+      const permCheck = checkCommandPermission(preRoom, user.userId, cmd);
+      if (!permCheck.allowed) {
+        return safeAck(ack, {
+          ok: false,
+          code: 'FORBIDDEN',
+          message: permCheck.reason || 'Permission denied',
+        });
+      }
+
+      let skippedUnresolved = 0;
+      // Resolve song metadata from provider outside room mutex (Task A5, F3, F14)
       if (cmd.type === 'queueAdd') {
-        const resolved = await resolveSong(cmd.song.id, cmd.song.providerId);
+        const resolved = await resolveSongOrFallback(cmd.song);
         if (!resolved) {
+          const provider = cmd.song.providerId || 'music provider';
           return safeAck(ack, {
             ok: false,
             code: 'INVALID',
-            message: 'Could not resolve song from music provider',
+            message: `Couldn't load this song from ${provider}`,
           });
         }
-        cmd.song = {
-          ...cmd.song,
-          title: resolved.title,
-          artists: resolved.artists,
-          album: resolved.album,
-          duration: resolved.duration,
-          imageUrl: sanitizeUrl(resolved.imageUrl),
-        };
+        cmd.song = resolved;
       } else if (cmd.type === 'queueAddMany') {
         const resolvedSongs: typeof cmd.songs = [];
         const chunkSize = 5;
         for (let i = 0; i < cmd.songs.length; i += chunkSize) {
           const chunk = cmd.songs.slice(i, i + chunkSize);
           const results = await Promise.all(
-            chunk.map((s) => resolveSong(s.id, s.providerId)),
+            chunk.map((s) => resolveSongOrFallback(s)),
           );
           for (let j = 0; j < chunk.length; j++) {
             const resolved = results[j];
             if (resolved) {
-              const orig = chunk[j];
-              resolvedSongs.push({
-                ...orig,
-                title: resolved.title,
-                artists: resolved.artists,
-                album: resolved.album,
-                duration: resolved.duration,
-                imageUrl: sanitizeUrl(resolved.imageUrl),
-              });
+              resolvedSongs.push(resolved);
+            } else {
+              skippedUnresolved++;
             }
           }
         }
@@ -441,7 +451,17 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
           applied: res.applied ?? false,
           version: res.room.version,
         });
-      } else if (cmd.type === 'queueAddMany' || cmd.type === 'queueAdd') {
+      } else if (cmd.type === 'queueAddMany') {
+        safeAck(ack, {
+          ok: true,
+          added: res.added ?? 1,
+          skipped: (res.skipped ?? 0) + (skippedUnresolved ?? 0),
+          skippedDuplicate: res.skippedDuplicate ?? 0,
+          skippedFull: res.skippedFull ?? 0,
+          skippedUnresolved: skippedUnresolved ?? 0,
+          version: res.room.version,
+        });
+      } else if (cmd.type === 'queueAdd') {
         safeAck(ack, {
           ok: true,
           added: res.added ?? 1,
