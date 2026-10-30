@@ -1,6 +1,7 @@
 package com.synq.features.music.playback
 
 import androidx.media3.common.Player
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -112,5 +113,29 @@ class PlaybackCommandRouterTest {
         assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_SHUFFLE_MODE))
         assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_REPEAT_MODE))
         assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_SPEED_AND_PITCH))
+    }
+
+    @Test
+    fun testNonPermittedMemberPlayPauseMapsToToggle() {
+        val action = PlaybackCommandRouter.mapJamCommand(Player.COMMAND_PLAY_PAUSE, canPlayback = false)
+        assertEquals(PlaybackCommandRouter.Action.TOGGLE, action)
+    }
+
+    @Test
+    fun testSeekInCurrentMapsToSkipOnly() {
+        val action = PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, canPlayback = true)
+        assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, action)
+
+        val actionNonPermitted = PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, canPlayback = false)
+        assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, actionNonPermitted)
+    }
+
+    @Test
+    fun testSeekBackAndForwardGatedByCanPlayback() {
+        assertEquals(PlaybackCommandRouter.Action.SEEK_BACK, PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_BACK, canPlayback = true))
+        assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_BACK, canPlayback = false))
+
+        assertEquals(PlaybackCommandRouter.Action.SEEK_FWD, PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_FORWARD, canPlayback = true))
+        assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_FORWARD, canPlayback = false))
     }
 }
