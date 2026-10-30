@@ -100,24 +100,29 @@ class PlaybackService : MediaSessionService() {
                         }
                         androidx.media3.common.Player.COMMAND_SEEK_BACK -> {
                             if (canPlayback) {
-                                val current = session.player.currentPosition
+                                val room = jamManager.stateStore.room.value
+                                val current = room?.nowPlaying?.let {
+                                    jamManager.clockSync.expectedPosition(it, jamManager.clockSync.serverNow())
+                                } ?: session.player.currentPosition
                                 jamManager.seekTo(maxOf(0L, current - 10_000L))
                             }
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                         androidx.media3.common.Player.COMMAND_SEEK_FORWARD -> {
                             if (canPlayback) {
-                                val current = session.player.currentPosition
-                                val duration = session.player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                                val room = jamManager.stateStore.room.value
+                                val current = room?.nowPlaying?.let {
+                                    jamManager.clockSync.expectedPosition(it, jamManager.clockSync.serverNow())
+                                } ?: session.player.currentPosition
+                                val duration = room?.nowPlaying?.item?.song?.durationSeconds?.let { it * 1000L }
+                                    ?: session.player.duration.takeIf { it > 0 }
+                                    ?: Long.MAX_VALUE
                                 jamManager.seekTo(minOf(duration, current + 10_000L))
                             }
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                         androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> {
-                            if (!canPlayback) {
-                                return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
-                            }
-                            return super.onPlayerCommandRequest(session, controller, playerCommand)
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                         androidx.media3.common.Player.COMMAND_STOP -> {
                             if (isNotification) {
