@@ -118,7 +118,8 @@ class JamPartDTest {
             song: Song,
             initialPositionMs: Long,
             playWhenReady: Boolean,
-            targetQid: String?
+            targetQid: String?,
+            forceRefresh: Boolean
         ) {
             this.playWhenReady = playWhenReady
             this.currentPosition = initialPositionMs

@@ -152,7 +152,7 @@ class JamF1F2Test {
         override fun getPlaybackSpeed(): Float = speed
         override fun getPlayerDuration(): Long = duration
 
-        override fun playJamSyncSong(song: Song, initialPositionMs: Long, playWhenReady: Boolean, targetQid: String?) {}
+        override fun playJamSyncSong(song: Song, initialPositionMs: Long, playWhenReady: Boolean, targetQid: String?, forceRefresh: Boolean) {}
         override fun prefetchTrack(song: Song) {}
         override fun stop() {}
         override fun pause() {}

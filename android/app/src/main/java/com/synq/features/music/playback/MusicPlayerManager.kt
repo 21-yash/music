@@ -144,7 +144,7 @@ class MusicPlayerManager @Inject constructor(
         initializeController()
     }
 
-    private var hasReResolvedOnError: Boolean = false
+    private var reResolveAttemptedFor: String? = null
 
     private fun initializeController() {
         val sessionToken = SessionToken(
@@ -355,7 +355,9 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
-        hasReResolvedOnError = false
+        if (reResolveAttemptedFor != song.id) {
+            reResolveAttemptedFor = null
+        }
 
         // If this song was part of recommended songs, push it above the separator (personal queue only)
         if (jamInterceptor == null && song.id in _recommendedSongIds.value) {
@@ -1032,13 +1034,16 @@ class MusicPlayerManager @Inject constructor(
         song: Song,
         initialPositionMs: Long,
         playWhenReady: Boolean,
-        targetQid: String?
+        targetQid: String?,
+        forceRefresh: Boolean
     ) {
         activeRadioArtist = null
         sourcePlaylist = null
         nextSourceIndex = 0
         sessionPlayedIds.add(song.id)
-        streamCacheStorage.invalidateStreamUri(song.id)
+        if (forceRefresh) {
+            streamCacheStorage.invalidateStreamUri(song.id)
+        }
         if (targetQid != null && _jamQueueQids.value.isNotEmpty()) {
             val idx = _jamQueueQids.value.indexOf(targetQid)
             if (idx >= 0) {
@@ -1178,6 +1183,9 @@ class MusicPlayerManager @Inject constructor(
 
         override fun onPlaybackStateChanged(state: Int) {
             jamInterceptor?.onPlaybackStateChanged(state)
+            if (state == Player.STATE_READY) {
+                reResolveAttemptedFor = null
+            }
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener
                 if (listener != null) {
@@ -1207,9 +1215,9 @@ class MusicPlayerManager @Inject constructor(
                 return
             }
 
-            // Attempt one automatic re-resolution before failing (e.g. expired CDN URL)
-            if (!hasReResolvedOnError && song != null && networkMonitor.isOnline.value) {
-                hasReResolvedOnError = true
+            // Attempt one automatic re-resolution per song ID before failing (Task F4)
+            if (song != null && reResolveAttemptedFor != song.id && networkMonitor.isOnline.value) {
+                reResolveAttemptedFor = song.id
                 scope.launch {
                     val pos = getPlayerCurrentPosition()
                     loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)

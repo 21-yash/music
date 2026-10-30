@@ -19,7 +19,8 @@ interface JamPlayerBridge {
         song: Song,
         initialPositionMs: Long = 0L,
         playWhenReady: Boolean = true,
-        targetQid: String? = null
+        targetQid: String? = null,
+        forceRefresh: Boolean = false
     )
 
     fun prefetchTrack(song: Song)

@@ -114,7 +114,8 @@ class JamEngineFixesTest {
             song: Song,
             initialPositionMs: Long,
             playWhenReady: Boolean,
-            targetQid: String?
+            targetQid: String?,
+            forceRefresh: Boolean
         ) {
             playJamSyncSongCalls.add(PlayJamSyncCall(song, initialPositionMs, playWhenReady, targetQid))
             this.playWhenReady = playWhenReady
