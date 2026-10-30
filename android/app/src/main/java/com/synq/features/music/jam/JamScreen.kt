@@ -144,7 +144,6 @@ fun JamScreen(
                     onClick = {
                         showConfirmEndDialog = false
                         rootViewModel.endJam()
-                        onBackClick()
                     }
                 ) {
                     Text("End Jam", color = Danger, fontWeight = FontWeight.Bold)
@@ -604,8 +603,6 @@ fun JamScreen(
                         val rawDurationSec = nowPlayingItem.song.durationSeconds ?: 0
                         val durationMs = if (rawDurationSec > 0) {
                             rawDurationSec * 1000L
-                        } else if (localPlaybackState.durationMs > 0L) {
-                            localPlaybackState.durationMs
                         } else {
                             0L
                         }
@@ -1061,7 +1058,6 @@ fun JamScreen(
                             )
                             .clickable {
                                 rootViewModel.leaveJam()
-                                onBackClick()
                             }
                             .padding(vertical = 14.dp),
                         horizontalArrangement = Arrangement.Center,
