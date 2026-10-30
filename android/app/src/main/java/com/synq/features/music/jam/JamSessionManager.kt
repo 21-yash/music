@@ -410,6 +410,7 @@ class JamSessionManager(
             return
         }
         isSessionOpInFlight = true
+        isTornDown = false
 
         val playback = playerManager.playbackState.value
         val isCurrentlyPlaying = playback.isPlaying
@@ -417,8 +418,8 @@ class JamSessionManager(
         myUserId = userId
         myAvatarUrl = avatarUrl
         stateStore.setMyUserId(userId)
-        playerManager.jamInterceptor = this
         playerManager.stashPersonalQueue()
+        playerManager.jamInterceptor = this
         _jamState.update { it.copy(isInJam = true, error = null) }
 
         scope.launch {
@@ -434,6 +435,7 @@ class JamSessionManager(
             res.onFailure { err ->
                 showToast("Failed to create Jam: ${err.message}")
                 teardownJam()
+                jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))
             }
         }
@@ -453,12 +455,13 @@ class JamSessionManager(
             return
         }
         isSessionOpInFlight = true
+        isTornDown = false
 
         myUserId = userId
         stateStore.setMyUserId(userId)
         val cleanCode = code.trim().uppercase()
-        playerManager.jamInterceptor = this
         playerManager.stashPersonalQueue()
+        playerManager.jamInterceptor = this
         _jamState.update { it.copy(isInJam = true, sessionCode = cleanCode, error = null) }
 
         scope.launch {
@@ -471,13 +474,16 @@ class JamSessionManager(
             res.onFailure { err ->
                 showToast("Failed to join Jam: ${err.message}")
                 teardownJam()
+                jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))
             }
         }
     }
 
     fun leaveJam() {
+        isTornDown = false
         teardownJam()
+        jamClient.resetToDisconnected()
         scope.launch {
             jamClient.leaveRoom()
         }

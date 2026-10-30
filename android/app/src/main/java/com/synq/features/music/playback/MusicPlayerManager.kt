@@ -120,15 +120,10 @@ class MusicPlayerManager @Inject constructor(
     fun isItemRecommended(qid: String): Boolean = qid in _jamRecommendedQids.value
 
     // Personal queue isolation for Jam sessions
-    private var stashedPersonalQueue: List<Song>? = null
-    private var stashedPersonalIndex: Int? = null
-    private var stashedRecommendedSongIds: Set<String>? = null
-    private var stashedSourcePlaylist: List<Song>? = null
-    private var stashedNextSourceIndex: Int = 0
+    private val personalQueueStash = PersonalQueueStash()
 
     // Artist Radio state tracking (ensures only this artist's songs play during radio)
     private var activeRadioArtist: String? = null
-    private var stashedActiveRadioArtist: String? = null
 
     // Lazy paging state for large playlists
     private var sourcePlaylist: List<Song>? = null
@@ -985,32 +980,26 @@ class MusicPlayerManager @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     override fun stashPersonalQueue() {
-        if (stashedPersonalQueue != null || jamInterceptor != null) return
-        stashedPersonalQueue = _queue.value
-        stashedPersonalIndex = _currentIndex.value
-        stashedRecommendedSongIds = _recommendedSongIds.value
-        stashedSourcePlaylist = sourcePlaylist
-        stashedNextSourceIndex = nextSourceIndex
-        stashedActiveRadioArtist = activeRadioArtist
+        if (personalQueueStash.isStashed) return
+        personalQueueStash.stash(
+            queue = _queue.value,
+            currentIndex = _currentIndex.value,
+            recommendedSongIds = _recommendedSongIds.value,
+            sourcePlaylist = sourcePlaylist,
+            nextSourceIndex = nextSourceIndex,
+            activeRadioArtist = activeRadioArtist
+        )
         activeRadioArtist = null
     }
 
     override fun restorePersonalQueue() {
-        stashedPersonalQueue?.let { stashed ->
-            _queue.value = stashed
-            _currentIndex.value = stashedPersonalIndex?.coerceIn(0, (stashed.size - 1).coerceAtLeast(0)) ?: 0
-            stashedRecommendedSongIds?.let {
-                _recommendedSongIds.value = it
-            }
-            sourcePlaylist = stashedSourcePlaylist
-            nextSourceIndex = stashedNextSourceIndex
-            activeRadioArtist = stashedActiveRadioArtist
-            stashedPersonalQueue = null
-            stashedPersonalIndex = null
-            stashedRecommendedSongIds = null
-            stashedSourcePlaylist = null
-            stashedNextSourceIndex = 0
-            stashedActiveRadioArtist = null
+        personalQueueStash.restore()?.let { stashed ->
+            _queue.value = stashed.queue
+            _currentIndex.value = stashed.currentIndex.coerceIn(0, (stashed.queue.size - 1).coerceAtLeast(0))
+            _recommendedSongIds.value = stashed.recommendedSongIds
+            sourcePlaylist = stashed.sourcePlaylist
+            nextSourceIndex = stashed.nextSourceIndex
+            activeRadioArtist = stashed.activeRadioArtist
         }
         _jamRecommendedQids.value = emptySet()
         _jamQueueQids.value = emptyList()

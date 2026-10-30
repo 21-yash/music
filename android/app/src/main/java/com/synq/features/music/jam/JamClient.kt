@@ -324,9 +324,7 @@ class JamClient(
     }
 
     fun resetToDisconnected() {
-        if (_clientState.value is JamClientState.Closed) {
-            _clientState.value = JamClientState.Disconnected
-        }
+        _clientState.value = JamClientState.Disconnected
     }
 
     fun onNetworkRestored() {

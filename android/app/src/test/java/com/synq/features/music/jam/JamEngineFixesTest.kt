@@ -616,13 +616,13 @@ class JamEngineFixesTest {
         // Player paused
         assertTrue(fixture.fakePlayer.applyJamPauseCallCount > pauseCallsBefore)
         // Toast "Couldn't play <title>" emitted once
-        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" || it == "Couldn't load this song" })
+        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" })
 
         // Subsequent checkLoadingTimeout calls do not spam toasts
         fixture.currentTime = 65_000L
         fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
         runCurrent()
-        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" || it == "Couldn't load this song" })
+        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" })
     }
 
     // ─────────────────────────────────────────────────────────────
