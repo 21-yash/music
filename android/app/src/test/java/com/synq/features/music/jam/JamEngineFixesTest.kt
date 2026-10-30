@@ -267,6 +267,8 @@ class JamEngineFixesTest {
         )
     }
 
+    private class TimeHolder(var time: Long = 1000L)
+
     private class TestFixture(
         val sessionManager: JamSessionManager,
         val fakePlayer: FakeJamPlayerBridge,
@@ -274,9 +276,13 @@ class JamEngineFixesTest {
         val stateStore: JamStateStore,
         val clockSync: ClockSync,
         val toasts: MutableList<String>,
-        var currentTime: Long,
+        private val timeHolder: TimeHolder,
         val testScope: TestScope
     ) {
+        var currentTime: Long
+            get() = timeHolder.time
+            set(value) { timeHolder.time = value }
+
         fun joinTestJam(code: String = "ABCD", initialSnapshot: RoomSnapshot? = null) {
             val snapshot = initialSnapshot ?: RoomSnapshot(
                 code = code,
@@ -330,10 +336,10 @@ class JamEngineFixesTest {
         val fakePlayer = FakeJamPlayerBridge()
         val transport = FakeJamTransport()
         val stateStore = JamStateStore(myUserId = "user_me")
-        var currentTime = 1000L
+        val timeHolder = TimeHolder(1000L)
         val clockSync = ClockSync(
-            monotonicNowMs = { currentTime },
-            wallClockNowMs = { currentTime }
+            monotonicNowMs = { timeHolder.time },
+            wallClockNowMs = { timeHolder.time }
         )
         val toasts = mutableListOf<String>()
 
@@ -345,8 +351,8 @@ class JamEngineFixesTest {
             ioDispatcher = StandardTestDispatcher(scheduler = testScope.testScheduler),
             tokenProvider = { "valid_token" },
             autoClockSync = false,
-            monotonicNowMs = { currentTime },
-            wallClockNowMs = { currentTime }
+            monotonicNowMs = { timeHolder.time },
+            wallClockNowMs = { timeHolder.time }
         )
 
         val sessionManager = JamSessionManager(
@@ -357,7 +363,7 @@ class JamEngineFixesTest {
             jamClientOverride = client,
             clockSyncOverride = clockSync,
             stateStoreOverride = stateStore,
-            currentTimeProvider = { currentTime },
+            currentTimeProvider = { timeHolder.time },
             toastEmitter = { msg -> toasts.add(msg) }
         )
 
@@ -368,7 +374,7 @@ class JamEngineFixesTest {
             stateStore = stateStore,
             clockSync = clockSync,
             toasts = toasts,
-            currentTime = currentTime,
+            timeHolder = timeHolder,
             testScope = testScope
         )
     }
@@ -749,5 +755,63 @@ class JamEngineFixesTest {
             targetQid = "qid_user"
         )
         assertEquals(0, fakePlayer.currentIndex)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // G8: Unknown duration (durationSeconds = 0) handling
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `testG8_unknownDuration_doesNotTriggerPrematureEndRetry`() = runTest {
+        val fixture = createFixture(this)
+        val unknownDurationSong = sampleSong("unk_1", durationSec = 0)
+        val snap = makeSnapshot("ABCD", trackSeq = 42L, song = unknownDurationSong, status = JamPlaybackStatus.PLAYING)
+        fixture.joinTestJam("ABCD", snap)
+
+        val playCallsBefore = fixture.fakePlayer.playJamSyncSongCalls.size
+
+        // When track ends locally with duration 0
+        fixture.sessionManager.onTrackEnded()
+        runCurrent()
+
+        // Must NOT trigger premature-end retry (playJamSyncSong count stays unchanged)
+        val playCallsAfter = fixture.fakePlayer.playJamSyncSongCalls.size
+        assertEquals(playCallsBefore, playCallsAfter)
+    }
+
+    @Test
+    fun `testG8_unknownDuration_reportsTrackEndedOnce`() = runTest {
+        val fixture = createFixture(this)
+        val unknownDurationSong = sampleSong("unk_2", durationSec = 0)
+        val snap = makeSnapshot("ABCD", trackSeq = 99L, song = unknownDurationSong, status = JamPlaybackStatus.PLAYING)
+        fixture.joinTestJam("ABCD", snap)
+
+        // Mock server response for trackEnded
+        fixture.transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("applied", true)
+        })
+
+        // Advance time so throttling check (now - lastReportedEndedAttemptTs < 2000L) passes
+        fixture.currentTime += 5000L
+
+        // Local track ended
+        fixture.sessionManager.onTrackEnded()
+        advanceTimeBy(1000L)
+        runCurrent()
+
+        val trackEndedCommands = fixture.transport.sentCommands.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "trackEnded"
+        }
+        assertEquals(1, trackEndedCommands.size)
+
+        // Calling onTrackEnded again does not report it a second time
+        fixture.sessionManager.onTrackEnded()
+        runCurrent()
+
+        val trackEndedCommandsAfter = fixture.transport.sentCommands.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "trackEnded"
+        }
+        assertEquals(1, trackEndedCommandsAfter.size)
     }
 }

@@ -620,19 +620,13 @@ fun JamScreen(
                             }
                         }
 
-                        val rawDurationSec = nowPlayingItem.song.durationSeconds ?: 0
-                        val durationMs = if (rawDurationSec > 0) {
-                            rawDurationSec * 1000L
-                        } else if (playerPlaybackState.durationMs > 0L) {
-                            playerPlaybackState.durationMs
-                        } else {
-                            0L
-                        }
-                        val progress = if (durationMs > 0L) {
-                            (liveExpectedPos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                        } else {
-                            0f
-                        }
+                        val jamProgress = computeJamProgress(
+                            metadataDurationSec = nowPlayingItem.song.durationSeconds,
+                            playerDurationMs = playerPlaybackState.durationMs,
+                            positionMs = liveExpectedPos
+                        )
+                        val durationMs = jamProgress.durationMs
+                        val progress = jamProgress.fraction
 
                         Card(
                             shape = RoundedCornerShape(24.dp),
@@ -694,12 +688,12 @@ fun JamScreen(
                                     onValueChange = { targetRatio ->
                                         if (!uiState.canControlPlayback) {
                                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                        } else if (durationMs > 0L) {
+                                        } else if (jamProgress.canSeek) {
                                             val targetMs = (targetRatio * durationMs).toLong()
                                             rootViewModel.jamSeekTo(targetMs)
                                         }
                                     },
-                                    enabled = uiState.canControlPlayback,
+                                    enabled = uiState.canControlPlayback && jamProgress.canSeek,
                                     colors = SliderDefaults.colors(
                                         thumbColor = Accent,
                                         activeTrackColor = Accent,
