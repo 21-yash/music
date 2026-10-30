@@ -145,6 +145,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private var reResolveAttemptedFor: String? = null
+    private var consecutivePlaybackFailures: Int = 0
 
     private fun initializeController() {
         val sessionToken = SessionToken(
@@ -394,8 +395,8 @@ class MusicPlayerManager @Inject constructor(
                 recentlyPlayedRepository.recordPlay(song)
             } catch (_: Exception) {}
 
-            // 1. Check if song is already cached in local SimpleCache
-            val isCached = audioCacheProvider.isSongCached(song.id)
+            // 1. Check if song is already cached in local SimpleCache (Task F16: verify FULL cache)
+            val isCached = audioCacheProvider.isFullyCached(song.id)
             val cachedStreamUri = streamCacheStorage.getStreamUri(song.id)
 
             if (isCached) {
@@ -421,6 +422,7 @@ class MusicPlayerManager @Inject constructor(
                         controller?.clearMediaItems()
                         stopPositionTracking()
                         _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
+                        handleUnrecoverablePlaybackError(song, "Failed to fetch stream info")
                     }
                     return@launch
                 }
@@ -440,6 +442,7 @@ class MusicPlayerManager @Inject constructor(
                         controller?.clearMediaItems()
                         stopPositionTracking()
                         _playbackState.update { it.copy(error = "Stream not available for this song", isPlaying = false) }
+                        handleUnrecoverablePlaybackError(song, "Stream not available for this song")
                     }
                     return@launch
                 }
@@ -1184,6 +1187,7 @@ class MusicPlayerManager @Inject constructor(
         override fun onPlaybackStateChanged(state: Int) {
             jamInterceptor?.onPlaybackStateChanged(state)
             if (state == Player.STATE_READY) {
+                consecutivePlaybackFailures = 0
                 reResolveAttemptedFor = null
             }
             if (state == Player.STATE_ENDED) {
@@ -1209,13 +1213,14 @@ class MusicPlayerManager @Inject constructor(
             val song = _playbackState.value.currentSong
             if (song != null) {
                 streamCacheStorage.invalidateStreamUri(song.id)
+                audioCacheProvider.remove(song.id)
             }
 
             if (jamInterceptor?.onPlayerError(error) == true) {
                 return
             }
 
-            // Attempt one automatic re-resolution per song ID before failing (Task F4)
+            // Attempt one automatic re-resolution per song ID before failing (Task F4 & F16)
             if (song != null && reResolveAttemptedFor != song.id && networkMonitor.isOnline.value) {
                 reResolveAttemptedFor = song.id
                 scope.launch {
@@ -1232,6 +1237,23 @@ class MusicPlayerManager @Inject constructor(
                 ) 
             }
             stopPositionTracking()
+
+            if (song != null) {
+                handleUnrecoverablePlaybackError(song, error.message ?: "Playback error")
+            }
+        }
+    }
+
+    private fun handleUnrecoverablePlaybackError(song: Song, message: String) {
+        if (jamInterceptor == null) {
+            consecutivePlaybackFailures++
+            if (consecutivePlaybackFailures <= 3) {
+                scope.launch {
+                    skipToNext()
+                }
+            } else {
+                consecutivePlaybackFailures = 0
+            }
         }
     }
 }
