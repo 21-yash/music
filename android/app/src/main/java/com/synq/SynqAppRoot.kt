@@ -157,6 +157,72 @@ private fun MainAppContent(
         )
     }
 
+    // C4: One-time battery optimization tip dialog to help background playback on aggressive battery savers
+    var showBatteryOptimizationTip by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val hasSeen = rootViewModel.jamPreferences.hasSeenBatteryTip.value
+        val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+        val isIgnoring = powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+        if (!hasSeen && !isIgnoring) {
+            showBatteryOptimizationTip = true
+        }
+    }
+
+    if (showBatteryOptimizationTip) {
+        AlertDialog(
+            onDismissRequest = {
+                rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                showBatteryOptimizationTip = false
+            },
+            title = {
+                Text(
+                    text = "Background Playback Tip",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    text = "To keep music and Jam sessions playing continuously in the background (especially with the screen off on devices with aggressive OEM battery savers), disable battery optimization for Synq. You will only see this tip once.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                        showBatteryOptimizationTip = false
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            try {
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2D7A))
+                ) {
+                    Text("Allow", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        rootViewModel.jamPreferences.setSeenBatteryTip(true)
+                        showBatteryOptimizationTip = false
+                    }
+                ) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
     // Jam UI Event toasts (single source of truth: JamStateStore -> JamUiEvent -> this collector)
     LaunchedEffect(Unit) {
         rootViewModel.jamUiEvents.collect { event ->

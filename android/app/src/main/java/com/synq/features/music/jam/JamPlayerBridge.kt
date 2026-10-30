@@ -40,5 +40,6 @@ interface JamPlayerBridge {
     fun stashPersonalQueue()
     fun restorePersonalQueue()
     fun setPlaybackSpeed(speed: Float)
+    fun invalidateStreamCache(songId: String)
 }
 

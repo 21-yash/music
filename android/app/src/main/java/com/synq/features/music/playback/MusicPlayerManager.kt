@@ -12,7 +12,9 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.synq.core.domain.AppResult
 import com.synq.data.repository.RecentlyPlayedRepository
 import com.synq.features.music.data.repository.MusicRepository
+import com.synq.features.music.domain.model.AlbumRef
 import com.synq.features.music.domain.model.Artist
+import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.features.music.domain.model.Lyrics
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.StreamInfo
@@ -147,6 +149,8 @@ class MusicPlayerManager @Inject constructor(
         initializeController()
     }
 
+    private var hasReResolvedOnError: Boolean = false
+
     private fun initializeController() {
         val sessionToken = SessionToken(
             context,
@@ -156,10 +160,74 @@ class MusicPlayerManager @Inject constructor(
         controllerFuture?.addListener(
             {
                 controller = controllerFuture?.get()
-                controller?.addListener(playerListener)
+                controller?.let { ctrl ->
+                    ctrl.addListener(playerListener)
+                    syncStateFromController(ctrl)
+                }
             },
             MoreExecutors.directExecutor()
         )
+    }
+
+    private fun syncStateFromController(ctrl: MediaController) {
+        val currentItem = ctrl.currentMediaItem
+        val isPlaying = ctrl.isPlaying
+        val position = ctrl.currentPosition
+        val duration = ctrl.duration.takeIf { it > 0 } ?: 0L
+
+        if (currentItem != null) {
+            val songId = currentItem.mediaId
+            val title = currentItem.mediaMetadata.title?.toString() ?: ""
+            val artistName = currentItem.mediaMetadata.artist?.toString() ?: ""
+            val artworkUri = currentItem.mediaMetadata.artworkUri?.toString()
+
+            val existingSong = _playbackState.value.currentSong
+            val songToSet = if (existingSong != null && existingSong.id == songId) {
+                existingSong
+            } else {
+                Song(
+                    id = songId,
+                    title = title,
+                    artists = listOf(ArtistCredit(id = "", name = artistName)),
+                    album = AlbumRef(id = "", title = currentItem.mediaMetadata.albumTitle?.toString() ?: ""),
+                    durationSeconds = (duration / 1000).toInt(),
+                    imageUrl = artworkUri,
+                    year = "",
+                    language = "",
+                    hasLyrics = false,
+                    playCount = 0,
+                    label = "",
+                    streamRef = "",
+                    providerId = ""
+                )
+            }
+
+            if (_queue.value.isEmpty()) {
+                _queue.value = listOf(songToSet)
+                _currentIndex.value = 0
+            }
+
+            _playbackState.update {
+                it.copy(
+                    currentSong = songToSet,
+                    isPlaying = isPlaying,
+                    playbackPositionMs = position,
+                    durationMs = duration
+                )
+            }
+        } else {
+            _playbackState.update {
+                it.copy(
+                    isPlaying = isPlaying,
+                    playbackPositionMs = position,
+                    durationMs = duration
+                )
+            }
+        }
+
+        if (isPlaying) {
+            startPositionTracking()
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -292,6 +360,8 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
+        hasReResolvedOnError = false
+
         // If this song was part of recommended songs, push it above the separator (personal queue only)
         if (jamInterceptor == null && song.id in _recommendedSongIds.value) {
             _recommendedSongIds.update { recs ->
@@ -979,6 +1049,7 @@ class MusicPlayerManager @Inject constructor(
         sourcePlaylist = null
         nextSourceIndex = 0
         sessionPlayedIds.add(song.id)
+        streamCacheStorage.invalidateStreamUri(song.id)
         if (targetQid != null && _jamQueueQids.value.isNotEmpty()) {
             val idx = _jamQueueQids.value.indexOf(targetQid)
             if (idx >= 0) {
@@ -991,6 +1062,10 @@ class MusicPlayerManager @Inject constructor(
             }
         }
         loadAndPlay(song, initialPositionMs, playWhenReady)
+    }
+
+    override fun invalidateStreamCache(songId: String) {
+        streamCacheStorage.invalidateStreamUri(songId)
     }
 
     override fun prefetchTrack(song: Song) {
@@ -1134,9 +1209,25 @@ class MusicPlayerManager @Inject constructor(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            val song = _playbackState.value.currentSong
+            if (song != null) {
+                streamCacheStorage.invalidateStreamUri(song.id)
+            }
+
             if (jamInterceptor?.onPlayerError(error) == true) {
                 return
             }
+
+            // Attempt one automatic re-resolution before failing (e.g. expired CDN URL)
+            if (!hasReResolvedOnError && song != null && networkMonitor.isOnline.value) {
+                hasReResolvedOnError = true
+                scope.launch {
+                    val pos = getPlayerCurrentPosition()
+                    loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+                }
+                return
+            }
+
             _playbackState.update { 
                 it.copy(
                     isPlaying = false, 

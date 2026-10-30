@@ -198,6 +198,8 @@ class JamEngineFixesTest {
         override fun setPlaybackSpeed(speed: Float) {
             this.speed = speed
         }
+
+        override fun invalidateStreamCache(songId: String) {}
     }
 
     private class FakeJamPreferences : JamPreferencesBridge {

@@ -44,6 +44,7 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
         val callback = object : MediaSession.Callback {
@@ -66,24 +67,64 @@ class PlaybackService : MediaSessionService() {
                 controller: MediaSession.ControllerInfo,
                 playerCommand: Int
             ): Int {
-                val isExternal = session.isMediaNotificationController(controller) ||
-                        controller.packageName != packageName
+                val isNotification = session.isMediaNotificationController(controller)
+                val isExternal = isNotification || controller.packageName != packageName
 
                 val jamManager = jamSessionManagerProvider.get()
-                if (PlaybackCommandRouter.shouldIntercept(isExternal, jamManager.jamState.value.isInJam, playerCommand)) {
+                val isInJam = jamManager.jamState.value.isInJam
+
+                if (PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, playerCommand)) {
+                    val uiState = jamManager.stateStore.uiState.value
+                    val canPlayback = uiState.canControlPlayback || uiState.isHost
+
                     when (playerCommand) {
                         androidx.media3.common.Player.COMMAND_PLAY_PAUSE -> {
-                            jamManager.togglePlayPause()
+                            if (canPlayback) {
+                                jamManager.togglePlayPause()
+                            }
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                         androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT,
                         androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
-                            jamManager.nextTrack()
+                            if (canPlayback) {
+                                jamManager.nextTrack()
+                            }
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                         androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS,
                         androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
-                            jamManager.previousTrack()
+                            if (canPlayback) {
+                                jamManager.previousTrack()
+                            }
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                        androidx.media3.common.Player.COMMAND_SEEK_BACK -> {
+                            if (canPlayback) {
+                                val current = session.player.currentPosition
+                                jamManager.seekTo(maxOf(0L, current - 10_000L))
+                            }
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                        androidx.media3.common.Player.COMMAND_SEEK_FORWARD -> {
+                            if (canPlayback) {
+                                val current = session.player.currentPosition
+                                val duration = session.player.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                                jamManager.seekTo(minOf(duration, current + 10_000L))
+                            }
+                            return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                        }
+                        androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> {
+                            if (!canPlayback) {
+                                return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
+                            }
+                            return super.onPlayerCommandRequest(session, controller, playerCommand)
+                        }
+                        androidx.media3.common.Player.COMMAND_STOP -> {
+                            if (isNotification) {
+                                // Notification dismiss in Jam: leave Jam and stop playback
+                                jamManager.leaveJam()
+                                pauseAllPlayersAndStopSelf()
+                            }
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
                     }
@@ -105,15 +146,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaSession?.player
-        val isInJam = try {
-            jamSessionManagerProvider.get().jamState.value.isInJam
-        } catch (_: Exception) {
-            false
-        }
-        if (!isInJam && (player == null || !player.playWhenReady || player.mediaItemCount == 0)) {
-            stopSelf()
-        }
+        try {
+            val jamManager = jamSessionManagerProvider.get()
+            if (jamManager.jamState.value.isInJam) {
+                jamManager.leaveJam()
+            }
+        } catch (_: Exception) {}
+        pauseAllPlayersAndStopSelf()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {

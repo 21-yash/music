@@ -16,18 +16,38 @@ class StreamCacheStorage @Inject constructor(
 ) {
     companion object {
         private const val PREFS_NAME = "stream_cache_urls"
+        const val DEFAULT_TTL_MS = 4 * 60 * 60 * 1000L // 4 hours TTL for CDN stream URLs
     }
 
     private val prefs by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    fun saveStreamUri(songId: String, uri: String) {
-        prefs.edit().putString(songId, uri).apply()
+    fun saveStreamUri(songId: String, uri: String, timestamp: Long = System.currentTimeMillis()) {
+        prefs.edit().putString(songId, "$timestamp|$uri").apply()
     }
 
-    fun getStreamUri(songId: String): String? {
-        return prefs.getString(songId, null)
+    fun getStreamUri(songId: String, maxAgeMs: Long = DEFAULT_TTL_MS): String? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) {
+            // Legacy entry without timestamp: invalidate
+            removeStreamUri(songId)
+            return null
+        }
+        val timestamp = entry.substring(0, delimiter).toLongOrNull() ?: run {
+            removeStreamUri(songId)
+            return null
+        }
+        if (System.currentTimeMillis() - timestamp > maxAgeMs) {
+            removeStreamUri(songId)
+            return null
+        }
+        return entry.substring(delimiter + 1)
+    }
+
+    fun invalidateStreamUri(songId: String) {
+        removeStreamUri(songId)
     }
 
     fun removeStreamUri(songId: String) {

@@ -81,4 +81,36 @@ class PlaybackCommandRouterTest {
         )
         assertFalse("Notification controller must not be intercepted when not in Jam", intercepted)
     }
+
+    @Test
+    fun testExternalSeekAndStopCommandsInterceptedInJam() {
+        val isExternal = true
+        val isInJam = true
+
+        val commands = listOf(
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_BACK,
+            Player.COMMAND_SEEK_FORWARD,
+            Player.COMMAND_STOP,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+        )
+
+        for (cmd in commands) {
+            assertTrue(
+                "Command $cmd must be intercepted when external and in Jam",
+                PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, cmd)
+            )
+        }
+    }
+
+    @Test
+    fun testUnrelatedCommandsNeverIntercepted() {
+        val isExternal = true
+        val isInJam = true
+
+        assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_SHUFFLE_MODE))
+        assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_REPEAT_MODE))
+        assertFalse(PlaybackCommandRouter.shouldIntercept(isExternal, isInJam, Player.COMMAND_SET_SPEED_AND_PITCH))
+    }
 }
