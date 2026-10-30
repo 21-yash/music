@@ -68,6 +68,15 @@ export function registerMusicProvider(provider: MusicProvider, isDefault: boolea
   logger.info({ provider: provider.id }, 'Music provider registered');
 }
 
+export function isProviderRegistered(providerId: string): boolean {
+  return _providers.has(providerId);
+}
+
+export function getProviderInstance(providerId?: string): MusicProvider | null {
+  const id = providerId || _defaultProviderId;
+  return _providers.get(id) || null;
+}
+
 function getProvider(providerId?: string): MusicProvider {
   const id = providerId || _defaultProviderId;
   const provider = _providers.get(id);

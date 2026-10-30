@@ -601,9 +601,19 @@ fun JamScreen(
                             }
                         }
 
-                        val durationMs = (nowPlayingItem.song.durationSeconds ?: 0) * 1000L
-                        val safeDurationMs = if (durationMs > 0) durationMs else 1L
-                        val progress = (liveExpectedPos.toFloat() / safeDurationMs.toFloat()).coerceIn(0f, 1f)
+                        val rawDurationSec = nowPlayingItem.song.durationSeconds ?: 0
+                        val durationMs = if (rawDurationSec > 0) {
+                            rawDurationSec * 1000L
+                        } else if (localPlaybackState.durationMs > 0L) {
+                            localPlaybackState.durationMs
+                        } else {
+                            0L
+                        }
+                        val progress = if (durationMs > 0L) {
+                            (liveExpectedPos.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
 
                         Card(
                             shape = RoundedCornerShape(24.dp),
@@ -665,8 +675,8 @@ fun JamScreen(
                                     onValueChange = { targetRatio ->
                                         if (!uiState.canControlPlayback) {
                                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            val targetMs = (targetRatio * safeDurationMs).toLong()
+                                        } else if (durationMs > 0L) {
+                                            val targetMs = (targetRatio * durationMs).toLong()
                                             rootViewModel.jamSeekTo(targetMs)
                                         }
                                     },
@@ -691,7 +701,7 @@ fun JamScreen(
                                         color = textSecondary
                                     )
                                     Text(
-                                        text = formatTime(durationMs),
+                                        text = if (durationMs > 0L) formatTime(durationMs) else "--:--",
                                         fontSize = 11.sp,
                                         color = textSecondary
                                     )

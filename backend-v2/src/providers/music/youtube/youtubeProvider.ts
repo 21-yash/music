@@ -5,6 +5,7 @@ import YTMusic from 'ytmusic-api';
 export class YouTubeProvider implements MusicProvider {
   id = 'youtube';
   name = 'YouTube';
+  readonly getSongIsReliable = false;
   private ytmusic: YTMusic;
   private isInitialized = false;
 
