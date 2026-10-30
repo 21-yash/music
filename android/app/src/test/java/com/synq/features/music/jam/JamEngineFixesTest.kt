@@ -204,8 +204,16 @@ class JamEngineFixesTest {
 
     private class FakeJamPreferences : JamPreferencesBridge {
         var savedCode: String? = null
-        override fun saveLastJam(code: String) { savedCode = code }
-        override fun clearLastJam() { savedCode = null }
+        var savedAvatarUrl: String? = null
+        override fun saveLastJam(code: String, avatarUrl: String?) {
+            savedCode = code
+            savedAvatarUrl = avatarUrl
+        }
+        override fun getLastAvatarUrl(): String? = savedAvatarUrl
+        override fun clearLastJam() {
+            savedCode = null
+            savedAvatarUrl = null
+        }
         override fun rejoinCandidate(): String? = savedCode
     }
 
@@ -607,14 +615,14 @@ class JamEngineFixesTest {
 
         // Player paused
         assertTrue(fixture.fakePlayer.applyJamPauseCallCount > pauseCallsBefore)
-        // Toast "Couldn't load this song" emitted once
-        assertEquals(1, fixture.toasts.count { it == "Couldn't load this song" })
+        // Toast "Couldn't play <title>" emitted once
+        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" || it == "Couldn't load this song" })
 
         // Subsequent checkLoadingTimeout calls do not spam toasts
         fixture.currentTime = 65_000L
         fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
         runCurrent()
-        assertEquals(1, fixture.toasts.count { it == "Couldn't load this song" })
+        assertEquals(1, fixture.toasts.count { it == "Couldn't play ${song.title}" || it == "Couldn't load this song" })
     }
 
     // ─────────────────────────────────────────────────────────────

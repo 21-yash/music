@@ -123,6 +123,13 @@ class JamClient(
                     handleConnectionLoss()
                 }
             }
+
+            is JamTransport.Event.ParseError -> {
+                safeLogW("JamClient", "Parse error for ${event.eventName}; keeping current state and requesting sync()")
+                scope.launch(ioDispatcher) {
+                    sync()
+                }
+            }
         }
     }
 

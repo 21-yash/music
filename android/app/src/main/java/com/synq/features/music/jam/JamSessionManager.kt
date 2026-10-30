@@ -73,6 +73,7 @@ class JamSessionManager(
 
     private val scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var myUserId: String = ""
+    private var myAvatarUrl: String? = null
 
     val clockSync: ClockSync = clockSyncOverride ?: ClockSync()
     val stateStore: JamStateStore = stateStoreOverride ?: JamStateStore(myUserId)
@@ -175,7 +176,7 @@ class JamSessionManager(
     private fun handleClientStateChange(state: JamClientState) {
         when (state) {
             is JamClientState.Active -> {
-                jamPreferences.saveLastJam(state.code)
+                jamPreferences.saveLastJam(state.code, myAvatarUrl)
                 playerManager.jamInterceptor = this
                 updateLegacyState(stateStore.room.value, state)
             }
@@ -414,6 +415,7 @@ class JamSessionManager(
         val isCurrentlyPlaying = playback.isPlaying
         val currentLocalSong = playback.currentSong
         myUserId = userId
+        myAvatarUrl = avatarUrl
         stateStore.setMyUserId(userId)
         playerManager.jamInterceptor = this
         playerManager.stashPersonalQueue()
@@ -1001,6 +1003,10 @@ class JamSessionManager(
             } else {
                 logW("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
                 playerManager.applyJamPause()
+                if (lastLoadingAbortedToastTrackSeq != nowPlaying.trackSeq) {
+                    lastLoadingAbortedToastTrackSeq = nowPlaying.trackSeq
+                    showToast("Couldn't play ${nowPlaying.item.song.title}")
+                }
             }
         } else {
             // Legitimately reached near-end
@@ -1096,7 +1102,7 @@ class JamSessionManager(
 
             if (lastLoadingAbortedToastTrackSeq != targetSeq) {
                 lastLoadingAbortedToastTrackSeq = targetSeq
-                showToast("Couldn't load this song")
+                showToast("Couldn't play ${nowPlaying.item.song.title}")
             }
         }
     }

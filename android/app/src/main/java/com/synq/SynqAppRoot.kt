@@ -137,7 +137,7 @@ private fun MainAppContent(
                 Button(
                     onClick = {
                         rejoinCandidateCode = null
-                        rootViewModel.joinJam(codeToRejoin)
+                        rootViewModel.joinJam(codeToRejoin, avatarUrl = rootViewModel.jamPreferences.getLastAvatarUrl())
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2D7A))
                 ) {

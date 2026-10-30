@@ -8,6 +8,30 @@ import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun safeLogW(tag: String, msg: String, tr: Throwable? = null) {
+    try {
+        if (tr != null) {
+            android.util.Log.w(tag, msg, tr)
+        } else {
+            android.util.Log.w(tag, msg)
+        }
+    } catch (_: Throwable) {
+        if (tr != null) {
+            println("WARN: [$tag] $msg: ${tr.message}")
+        } else {
+            println("WARN: [$tag] $msg")
+        }
+    }
+}
+
+class JamDecodeException(message: String) : Exception(message)
+
+fun JSONObject.optStringOrNull(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    val v = optString(key)
+    return if (v.trim().isEmpty() || v == "null") null else v
+}
+
 private val jamJson = Json {
     ignoreUnknownKeys = true
     isLenient = true
@@ -43,9 +67,9 @@ data class JamMember(
     companion object {
         fun fromJson(obj: JSONObject): JamMember {
             return JamMember(
-                userId = obj.optString("userId"),
-                username = obj.optString("username"),
-                avatarUrl = obj.optString("avatarUrl").takeIf { it.isNotEmpty() },
+                userId = obj.optStringOrNull("userId") ?: "",
+                username = obj.optStringOrNull("username") ?: "",
+                avatarUrl = obj.optStringOrNull("avatarUrl"),
                 joinedAt = obj.optLong("joinedAt"),
                 online = obj.optBoolean("online", true),
                 lastSeenAt = obj.optLong("lastSeenAt"),
@@ -64,19 +88,28 @@ data class JamQueueItem(
 ) {
     companion object {
         fun fromJson(obj: JSONObject): JamQueueItem? {
-            val qid = obj.optString("qid")
-            val songObj = obj.optJSONObject("song") ?: return null
+            val qid = obj.optStringOrNull("qid")
+            if (qid == null) {
+                safeLogW("JamQueueItem", "Missing or null qid in queue item")
+                return null
+            }
+            val songObj = obj.optJSONObject("song")
+            if (songObj == null) {
+                safeLogW("JamQueueItem", "Missing or null 'song' in queue item $qid")
+                return null
+            }
             val song = try {
                 val dto = jamJson.decodeFromString<SongDto>(songObj.toString())
                 dto.toDomain()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                safeLogW("JamQueueItem", "Failed to decode song in queue item $qid", e)
                 return null
             }
 
             return JamQueueItem(
                 qid = qid,
                 song = song,
-                addedByUserId = obj.optString("addedByUserId").takeIf { it.isNotEmpty() },
+                addedByUserId = obj.optStringOrNull("addedByUserId"),
                 addedAt = obj.optLong("addedAt"),
                 recommended = obj.optBoolean("recommended", false)
             )
@@ -111,10 +144,16 @@ data class JamNowPlaying(
         fun fromJson(obj: JSONObject?): JamNowPlaying {
             if (obj == null) return JamNowPlaying()
             val itemObj = obj.optJSONObject("item")
-            val item = if (itemObj != null) JamQueueItem.fromJson(itemObj) else null
+            val item = if (itemObj != null) {
+                val parsed = JamQueueItem.fromJson(itemObj)
+                if (parsed == null) {
+                    safeLogW("JamNowPlaying", "Failed to decode nowPlaying item: $itemObj")
+                }
+                parsed
+            } else null
             return JamNowPlaying(
                 item = item,
-                status = JamPlaybackStatus.fromString(obj.optString("status")),
+                status = JamPlaybackStatus.fromString(obj.optStringOrNull("status")),
                 positionMs = obj.optLong("positionMs", 0L),
                 anchorServerTs = obj.optLong("anchorServerTs", 0L),
                 trackSeq = obj.optLong("trackSeq", 0L)
@@ -147,9 +186,19 @@ data class RoomSnapshot(
 
             val queueArr = obj.optJSONArray("queue")
             val queue = mutableListOf<JamQueueItem>()
+            var queueItemDecodeFailed = false
             if (queueArr != null) {
                 for (i in 0 until queueArr.length()) {
-                    queueArr.optJSONObject(i)?.let { JamQueueItem.fromJson(it)?.let { item -> queue.add(item) } }
+                    val itemObj = queueArr.optJSONObject(i)
+                    if (itemObj != null) {
+                        val parsed = JamQueueItem.fromJson(itemObj)
+                        if (parsed != null) {
+                            queue.add(parsed)
+                        } else {
+                            queueItemDecodeFailed = true
+                            safeLogW("RoomSnapshot", "Failed to decode queue item at index $i")
+                        }
+                    }
                 }
             }
 
@@ -161,17 +210,26 @@ data class RoomSnapshot(
                 }
             }
 
+            val npObj = obj.optJSONObject("nowPlaying")
+            val nowPlayingItemObj = npObj?.optJSONObject("item")
+            val nowPlaying = JamNowPlaying.fromJson(npObj)
+            val nowPlayingDecodeFailed = nowPlayingItemObj != null && nowPlaying.item == null
+
+            if (nowPlayingDecodeFailed || queueItemDecodeFailed) {
+                throw JamDecodeException("Failed to decode nowPlaying item or queue")
+            }
+
             return RoomSnapshot(
-                code = obj.optString("code"),
+                code = obj.optStringOrNull("code") ?: "",
                 version = obj.optLong("version", 0L),
                 serverNow = obj.optLong("serverNow", 0L),
-                hostUserId = obj.optString("hostUserId"),
+                hostUserId = obj.optStringOrNull("hostUserId") ?: "",
                 createdAt = obj.optLong("createdAt", 0L),
                 members = members,
                 defaults = JamPermissions.fromJson(obj.optJSONObject("defaults")),
                 queue = queue,
                 history = history,
-                nowPlaying = JamNowPlaying.fromJson(obj.optJSONObject("nowPlaying"))
+                nowPlaying = nowPlaying
             )
         }
     }
@@ -190,19 +248,26 @@ data class Jam2Tick(
     val serverTime: Long,
     val nowPlaying: JamTickNowPlaying
 ) {
+    val serverNow: Long get() = serverTime
+
     companion object {
         fun fromJson(obj: JSONObject): Jam2Tick {
             val npObj = obj.optJSONObject("nowPlaying")
             val nowPlaying = JamTickNowPlaying(
                 positionMs = npObj?.optLong("positionMs", 0L) ?: 0L,
                 anchorServerTs = npObj?.optLong("anchorServerTs", 0L) ?: 0L,
-                status = JamPlaybackStatus.fromString(npObj?.optString("status")),
+                status = JamPlaybackStatus.fromString(npObj?.optStringOrNull("status")),
                 trackSeq = npObj?.optLong("trackSeq", 0L) ?: 0L
             )
+            val serverNow = if (obj.has("serverNow")) {
+                obj.optLong("serverNow", 0L)
+            } else {
+                obj.optLong("serverTime", 0L)
+            }
             return Jam2Tick(
-                code = obj.optString("code"),
+                code = obj.optStringOrNull("code") ?: "",
                 version = obj.optLong("version", 0L),
-                serverTime = obj.optLong("serverTime", 0L),
+                serverTime = serverNow,
                 nowPlaying = nowPlaying
             )
         }
@@ -217,9 +282,9 @@ data class Jam2Event(
     companion object {
         fun fromJson(obj: JSONObject): Jam2Event {
             return Jam2Event(
-                kind = obj.optString("kind"),
-                userId = obj.optString("userId"),
-                username = obj.optString("username")
+                kind = obj.optStringOrNull("kind") ?: "",
+                userId = obj.optStringOrNull("userId") ?: "",
+                username = obj.optStringOrNull("username") ?: ""
             )
         }
     }

@@ -347,7 +347,7 @@ fun SearchScreen(
                 },
                 onPlayNext = { song ->
                     if (jamState.isInJam) {
-                        rootViewModel.addSongToJam(song)
+                        rootViewModel.addSongToJam(song, playNext = true)
                     } else {
                         viewModel.playNext(song)
                     }

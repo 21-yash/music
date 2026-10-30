@@ -252,7 +252,7 @@ class RootViewModel @Inject constructor(
             return
         }
         val username = currUser.username
-        val userAvatar = avatarUrl
+        val userAvatar = avatarUrl ?: jamPreferences.getLastAvatarUrl()
         jamSessionManager.createJam(userId, username, userAvatar) { res ->
             onComplete?.invoke(res.map { })
         }
@@ -268,7 +268,7 @@ class RootViewModel @Inject constructor(
             return
         }
         val username = currUser.username
-        val userAvatar = avatarUrl
+        val userAvatar = avatarUrl ?: jamPreferences.getLastAvatarUrl()
         jamSessionManager.joinJam(code, userId, username, userAvatar) { res ->
             onComplete?.invoke(res.map { })
         }
@@ -306,8 +306,8 @@ class RootViewModel @Inject constructor(
         jamSessionManager.previousTrack()
     }
 
-    fun addSongToJam(song: Song) {
-        jamSessionManager.addSongToJam(song)
+    fun addSongToJam(song: Song, playNext: Boolean = false) {
+        jamSessionManager.addSongToJam(song, playNext)
     }
 
     fun removeSongFromJam(index: Int) {

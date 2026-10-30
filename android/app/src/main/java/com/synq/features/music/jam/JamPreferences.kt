@@ -18,6 +18,7 @@ class JamPreferences @Inject constructor(
         private const val KEY_SEEN_BATTERY_TIP = "seen_battery_tip"
         private const val KEY_LAST_JAM_CODE = "last_jam_code"
         private const val KEY_LAST_JAM_TIMESTAMP = "last_jam_timestamp"
+        private const val KEY_LAST_AVATAR_URL = "last_avatar_url"
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -30,12 +31,17 @@ class JamPreferences @Inject constructor(
         prefs.edit().putBoolean(KEY_SEEN_BATTERY_TIP, seen).apply()
     }
 
-    override fun saveLastJam(code: String) {
-        prefs.edit()
+    override fun saveLastJam(code: String, avatarUrl: String?) {
+        val editor = prefs.edit()
             .putString(KEY_LAST_JAM_CODE, code)
             .putLong(KEY_LAST_JAM_TIMESTAMP, System.currentTimeMillis())
-            .apply()
+        if (avatarUrl != null) {
+            editor.putString(KEY_LAST_AVATAR_URL, avatarUrl)
+        }
+        editor.apply()
     }
+
+    override fun getLastAvatarUrl(): String? = prefs.getString(KEY_LAST_AVATAR_URL, null)
 
     fun getLastJamCodeIfRecent(maxAgeMs: Long = 2 * 60 * 60 * 1000L): String? {
         val code = prefs.getString(KEY_LAST_JAM_CODE, null) ?: return null
@@ -53,6 +59,7 @@ class JamPreferences @Inject constructor(
         prefs.edit()
             .remove(KEY_LAST_JAM_CODE)
             .remove(KEY_LAST_JAM_TIMESTAMP)
+            .remove(KEY_LAST_AVATAR_URL)
             .apply()
     }
 }
