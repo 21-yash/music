@@ -16,6 +16,12 @@ const MAX_USER_QUEUE_SIZE = 50;
 const MAX_REC_QUEUE_SIZE = 10;
 const MAX_HISTORY_SIZE = 20;
 
+function isSameUserSong(a: Song, b: Song): boolean {
+  const providerA = a.providerId || '';
+  const providerB = b.providerId || '';
+  return a.id === b.id && providerA === providerB;
+}
+
 function isSameSong(a: Song, b: Song): boolean {
   if (a.id === b.id) return true;
   const fpA = getSongFingerprint(a.title, a.artists?.[0]?.name);
@@ -344,9 +350,9 @@ export function applyCommand(
         nextRoom.queue.splice(recIdx, 1);
       }
 
-      // Authoritative duplicate check:
+      // Authoritative duplicate check for USER adds (Task F6: exact providerId + id):
       // 1. Check if song is currently playing
-      if (nextRoom.nowPlaying.item && isSameSong(nextRoom.nowPlaying.item.song, song)) {
+      if (nextRoom.nowPlaying.item && isSameUserSong(nextRoom.nowPlaying.item.song, song)) {
         return {
           room,
           events: [],
@@ -358,7 +364,7 @@ export function applyCommand(
 
       // 2. Check if song is already in user queue
       const existingUserIdx = nextRoom.queue.findIndex(
-        (q) => !q.recommended && isSameSong(q.song, song),
+        (q) => !q.recommended && isSameUserSong(q.song, song),
       );
 
       if (existingUserIdx !== -1) {
@@ -440,15 +446,15 @@ export function applyCommand(
           nextRoom.queue.splice(recIdx, 1);
         }
 
-        // Duplicate check against nowPlaying
-        if (nextRoom.nowPlaying.item && isSameSong(nextRoom.nowPlaying.item.song, song)) {
+        // Duplicate check against nowPlaying (Task F6: exact providerId + id)
+        if (nextRoom.nowPlaying.item && isSameUserSong(nextRoom.nowPlaying.item.song, song)) {
           skippedDuplicate++;
           continue;
         }
 
-        // Duplicate check against user queue
+        // Duplicate check against user queue (Task F6: exact providerId + id)
         const isQueued = nextRoom.queue.some(
-          (q) => !q.recommended && isSameSong(q.song, song),
+          (q) => !q.recommended && isSameUserSong(q.song, song),
         );
         if (isQueued) {
           skippedDuplicate++;
