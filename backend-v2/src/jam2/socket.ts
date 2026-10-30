@@ -2,7 +2,6 @@ import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { jam2Manager } from './manager';
 import { resolveSongOrFallback, sanitizeUrl } from './songResolver';
-import { checkCommandPermission } from './permissions';
 import {
   createPayloadSchema,
   joinPayloadSchema,
@@ -360,21 +359,13 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       const cmd = parsed.data;
       const normalizedCode = cmd.code.trim().toUpperCase();
 
-      // Fast permission precheck before resolving external metadata (Task F11.b)
-      const preRoom = await jam2Manager.getRoom(normalizedCode);
-      if (!preRoom) {
+      // Fast permission precheck before resolving external metadata (Task F11.b / G9.a)
+      const precheck = await jam2Manager.precheckCommand(normalizedCode, cmd, user.userId);
+      if (!precheck.ok) {
         return safeAck(ack, {
           ok: false,
-          code: 'NOT_FOUND',
-          message: 'Room not found',
-        });
-      }
-      const permCheck = checkCommandPermission(preRoom, user.userId, cmd);
-      if (!permCheck.allowed) {
-        return safeAck(ack, {
-          ok: false,
-          code: 'FORBIDDEN',
-          message: permCheck.reason || 'Permission denied',
+          code: precheck.code,
+          message: precheck.error,
         });
       }
 

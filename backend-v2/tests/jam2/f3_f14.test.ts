@@ -86,6 +86,24 @@ describe('Task F3: mergeResolvedSong', () => {
     const merged = mergeResolvedSong(baseClientSong, resolved);
     expect(merged.streamRef).toBe('');
   });
+
+  it('F3 table: resolver 240 + client 5 -> 240', () => {
+    const resolved: Song = {
+      ...baseClientSong,
+      duration: 240,
+    };
+    const merged = mergeResolvedSong({ ...baseClientSong, duration: 5 }, resolved);
+    expect(merged.duration).toBe(240);
+  });
+
+  it('F3 table: resolver 0 + client 99999 -> 0', () => {
+    const resolved: Song = {
+      ...baseClientSong,
+      duration: 0,
+    };
+    const merged = mergeResolvedSong({ ...baseClientSong, duration: 99999 }, resolved);
+    expect(merged.duration).toBe(0);
+  });
 });
 
 describe('Task F14 & F11.e: Song resolution & sanitization', () => {
@@ -98,9 +116,17 @@ describe('Task F14 & F11.e: Song resolution & sanitization', () => {
     delete process.env.JAM_ALLOWED_IMAGE_HOSTS;
   });
 
-  it('F11.e: sanitizeUrl allows valid image hosts and rejects unknown domains', () => {
+  it('F11.e & G9.f: sanitizeUrl allows valid image hosts and rejects removed/unknown domains', () => {
+    // Active allowed hosts
     expect(sanitizeUrl('https://i.ytimg.com/vi/123/default.jpg')).toBe('https://i.ytimg.com/vi/123/default.jpg');
     expect(sanitizeUrl('https://c.saavncdn.com/123/song.jpg')).toBe('https://c.saavncdn.com/123/song.jpg');
+    expect(sanitizeUrl('https://i.scdn.co/image/ab67616d0000b273')).toBe('https://i.scdn.co/image/ab67616d0000b273');
+    expect(sanitizeUrl('https://lh3.googleusercontent.com/a/default-user')).toBe('https://lh3.googleusercontent.com/a/default-user');
+    expect(sanitizeUrl('https://yt3.ggpht.com/ytc/artist-avatar')).toBe('https://yt3.ggpht.com/ytc/artist-avatar');
+
+    // Removed / rejected domains (G9.f: cricbuzz and spotifycdn removed)
+    expect(sanitizeUrl('https://images.cricbuzz.com/leaderboard.jpg')).toBeNull();
+    expect(sanitizeUrl('https://lineup-images.spotifycdn.com/artist.jpg')).toBeNull();
     expect(sanitizeUrl('https://malicious.evil.com/hack.jpg')).toBeNull();
     expect(sanitizeUrl('http://i.ytimg.com/vi/123/default.jpg')).toBeNull(); // not https
 
@@ -183,6 +209,141 @@ describe('Task F14 & F11.e: Song resolution & sanitization', () => {
     };
 
     const resolved = await resolveSongOrFallback(clientSong);
+    expect(resolved).toBeNull();
+  });
+
+  it('G9.d: Unreliable provider whose getSong throws is accepted via fallback metadata', async () => {
+    const mockUnreliableProvider: MusicProvider = {
+      id: 'unreliable_throwing',
+      name: 'Unreliable Throwing Provider',
+      getSongIsReliable: false,
+      search: vi.fn(),
+      getTrending: vi.fn(),
+      getHomeData: vi.fn(),
+      getSong: vi.fn().mockRejectedValue(new Error('Network failure / scraping blocked')),
+      getAlbum: vi.fn(),
+      getArtist: vi.fn(),
+      getPlaylist: vi.fn(),
+      getSongsByIds: vi.fn(),
+      getRelatedSongs: vi.fn(),
+    };
+    registerMusicProvider(mockUnreliableProvider, false);
+
+    const clientSong: Song = {
+      id: 'fallback_ok_1',
+      title: 'Fallback Song',
+      artists: [{ id: 'a1', name: 'Artist', imageUrl: null }],
+      album: null,
+      duration: 180,
+      imageUrl: 'https://c.saavncdn.com/123/song.jpg',
+      year: '2024',
+      language: 'en',
+      hasLyrics: false,
+      playCount: 0,
+      label: '',
+      streamRef: 'client-stream',
+      providerId: 'unreliable_throwing',
+    };
+
+    const resolved = await resolveSongOrFallback(clientSong);
+    expect(resolved).not.toBeNull();
+    expect(resolved?.id).toBe('fallback_ok_1');
+    expect(resolved?.title).toBe('Fallback Song');
+    expect(resolved?.streamRef).toBe(''); // discarded
+  });
+
+  it('G9.d: Reliable provider throwing returns null (strictly rejected)', async () => {
+    const mockReliableProvider: MusicProvider = {
+      id: 'reliable_throwing',
+      name: 'Reliable Throwing Provider',
+      getSongIsReliable: true,
+      search: vi.fn(),
+      getTrending: vi.fn(),
+      getHomeData: vi.fn(),
+      getSong: vi.fn().mockRejectedValue(new Error('Database error')),
+      getAlbum: vi.fn(),
+      getArtist: vi.fn(),
+      getPlaylist: vi.fn(),
+      getSongsByIds: vi.fn(),
+      getRelatedSongs: vi.fn(),
+    };
+    registerMusicProvider(mockReliableProvider, false);
+
+    const clientSong: Song = {
+      id: 'rel_fail_1',
+      title: 'Reliable Failed Song',
+      artists: [{ id: 'a1', name: 'Artist', imageUrl: null }],
+      album: null,
+      duration: 180,
+      imageUrl: null,
+      year: '',
+      language: '',
+      hasLyrics: false,
+      playCount: 0,
+      label: '',
+      streamRef: 'client-stream',
+      providerId: 'reliable_throwing',
+    };
+
+    const resolved = await resolveSongOrFallback(clientSong);
+    expect(resolved).toBeNull();
+  });
+
+  it('G9.d: Unregistered providerId returns null', async () => {
+    const clientSong: Song = {
+      id: 'unregistered_123',
+      title: 'Unknown Provider Song',
+      artists: [{ id: 'a1', name: 'Artist', imageUrl: null }],
+      album: null,
+      duration: 180,
+      imageUrl: null,
+      year: '',
+      language: '',
+      hasLyrics: false,
+      playCount: 0,
+      label: '',
+      streamRef: '',
+      providerId: 'completely_unknown_provider_xyz',
+    };
+
+    const resolved = await resolveSongOrFallback(clientSong);
+    expect(resolved).toBeNull();
+  });
+
+  it('G9.d: YouTube id with invalid/bad shape returns null', async () => {
+    const mockYouTubeProvider: MusicProvider = {
+      id: 'youtube',
+      name: 'YouTube',
+      getSongIsReliable: false,
+      search: vi.fn(),
+      getTrending: vi.fn(),
+      getHomeData: vi.fn(),
+      getSong: vi.fn().mockResolvedValue(null),
+      getAlbum: vi.fn(),
+      getArtist: vi.fn(),
+      getPlaylist: vi.fn(),
+      getSongsByIds: vi.fn(),
+      getRelatedSongs: vi.fn(),
+    };
+    registerMusicProvider(mockYouTubeProvider, false);
+
+    const badIdSong: Song = {
+      id: 'bad_id!@#', // not 11 chars [A-Za-z0-9_-]
+      title: 'Bad ID Song',
+      artists: [{ id: 'a1', name: 'Artist', imageUrl: null }],
+      album: null,
+      duration: 200,
+      imageUrl: null,
+      year: '',
+      language: '',
+      hasLyrics: false,
+      playCount: 0,
+      label: '',
+      streamRef: '',
+      providerId: 'youtube',
+    };
+
+    const resolved = await resolveSongOrFallback(badIdSong);
     expect(resolved).toBeNull();
   });
 });

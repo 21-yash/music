@@ -7,9 +7,7 @@ export const DEFAULT_ALLOWED_HOST_PATTERNS = [
   /(^|\.)ytimg\.com$/,
   /(^|\.)googleusercontent\.com$/,
   /(^|\.)ggpht\.com$/,
-  /(^|\.)cricbuzz\.com$/,
   /(^|\.)scdn\.co$/,
-  /(^|\.)spotifycdn\.com$/,
 ];
 
 export function getAllowedHostPatterns(): RegExp[] {

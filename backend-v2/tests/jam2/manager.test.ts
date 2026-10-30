@@ -88,6 +88,29 @@ describe('Jam2Manager', () => {
         expect(res.error.code).toBe('NOT_FOUND');
       }
     });
+
+    it('F11.a: concurrent createRoom calls resolve collisions via retry loop without overwrite', async () => {
+      let count = 0;
+      vi.spyOn(manager, 'generateUniqueRoomCode').mockImplementation(async () => {
+        count++;
+        // Return duplicate code for first two calls, then distinct codes
+        if (count === 1 || count === 2) {
+          return 'DUPE';
+        }
+        return `CD0${count}`;
+      });
+
+      const [room1, room2] = await Promise.all([
+        manager.createRoom('user_1', 'UserOne'),
+        manager.createRoom('user_2', 'UserTwo'),
+      ]);
+
+      expect(room1.code).not.toBe(room2.code);
+      expect([room1.code, room2.code]).toContain('DUPE');
+      expect([room1.code, room2.code]).toContain('CD03');
+      expect(store.hasRoom(room1.code)).toBe(true);
+      expect(store.hasRoom(room2.code)).toBe(true);
+    });
   });
 
   describe('Silent Host Drop & 20s Grace Period Handover', () => {

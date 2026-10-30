@@ -5,6 +5,7 @@ import { getRelatedSongs } from '../services/musicService';
 import { getRedisClient } from '../config/redis';
 import { jam2Store, Jam2Store } from './store';
 import { applyCommand } from './reducer';
+import { checkCommandPermission } from './permissions';
 import {
   Room,
   RoomSnapshot,
@@ -13,6 +14,7 @@ import {
   ClientCommand,
   Jam2Event,
   Jam2Error,
+  Jam2ErrorCode,
   JAM_ROOM_CODE_CHARS,
   DEFAULT_ROOM_PERMS,
   Song,
@@ -475,6 +477,29 @@ export class Jam2Manager {
       await this.destroyRoomLocked(normalizedCode, 'ended');
       return { success: true };
     });
+  }
+
+  async precheckCommand(
+    code: string,
+    cmd: ClientCommand,
+    userId: string,
+  ): Promise<{ ok: true } | { ok: false; error: string; code: Jam2ErrorCode }> {
+    const normalizedCode = code.trim().toUpperCase();
+    const room = await this.store.getRoom(normalizedCode);
+    if (!room) {
+      return { ok: false, code: 'NOT_FOUND', error: 'Room not found' };
+    }
+
+    if (!room.members.has(userId)) {
+      return { ok: false, code: 'FORBIDDEN', error: 'You are not a member of this Jam session' };
+    }
+
+    const permCheck = checkCommandPermission(room, userId, cmd);
+    if (!permCheck.allowed) {
+      return { ok: false, code: 'FORBIDDEN', error: permCheck.reason || 'Permission denied' };
+    }
+
+    return { ok: true };
   }
 
   async executeCommand(

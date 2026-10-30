@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import http from 'http';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
 import { createApp } from '../../src/app';
@@ -8,6 +8,7 @@ import { initializeSocketIO } from '../../src/websocket';
 import { Jam2Ack, RoomSnapshot, Song } from '../../src/jam2/types';
 import { jam2Manager } from '../../src/jam2/manager';
 import { setCustomSongResolver } from '../../src/jam2/songResolver';
+import * as songResolverModule from '../../src/jam2/songResolver';
 
 function makeTestSong(id: string): Song {
   return {
@@ -474,6 +475,131 @@ describe('Jam 2.0 WebSocket Integration', () => {
     // User should now be tracked in room B and NOT in room A
     expect(jam2Manager.getActiveRoomForUser(HOST_USER_ID)).toBe(codeB);
     expect(jam2Manager.getUserSockets(codeA, HOST_USER_ID).length).toBe(0);
+  });
+
+  it('G9.b (F7): failed join keeps user in room A; successful join room B leaves room A', async () => {
+    // Host creates room A
+    const ackA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(ackA.ok).toBe(true);
+    if (!ackA.ok) return;
+    const codeA = ackA.room.code;
+
+    // Guest joins room A
+    const joinA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: codeA }, res);
+    });
+    expect(joinA.ok).toBe(true);
+
+    // Verify guest is tracked in room A and online
+    expect(jam2Manager.getActiveRoomForUser(GUEST_USER_ID)).toBe(codeA);
+    const roomA = await jam2Manager.getRoom(codeA);
+    expect(roomA?.members.get(GUEST_USER_ID)?.online).toBe(true);
+
+    // Guest attempts to join a non-existent room code
+    const joinFail: Jam2Ack = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: 'ZZZZ' }, res);
+    });
+    expect(joinFail.ok).toBe(false);
+    if (!joinFail.ok) {
+      expect(joinFail.code).toBe('NOT_FOUND');
+    }
+
+    // Verify guest is STILL a member and online in room A
+    expect(jam2Manager.getActiveRoomForUser(GUEST_USER_ID)).toBe(codeA);
+    const roomAAfter = await jam2Manager.getRoom(codeA);
+    expect(roomAAfter?.members.has(GUEST_USER_ID)).toBe(true);
+    expect(roomAAfter?.members.get(GUEST_USER_ID)?.online).toBe(true);
+
+    // Create room B via manager
+    const roomBEntity = await jam2Manager.createRoom('other_host', 'OtherHost');
+    const codeB = roomBEntity.code;
+
+    // Guest joins room B successfully
+    const joinB: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: codeB }, res);
+    });
+    expect(joinB.ok).toBe(true);
+
+    // Verify guest is now tracked in room B and REMOVED from room A
+    expect(jam2Manager.getActiveRoomForUser(GUEST_USER_ID)).toBe(codeB);
+    const roomBAfter = await jam2Manager.getRoom(codeB);
+    expect(roomBAfter?.members.has(GUEST_USER_ID)).toBe(true);
+    const roomAFinal = await jam2Manager.getRoom(codeA);
+    expect(roomAFinal?.members.has(GUEST_USER_ID)).toBe(false);
+  });
+
+  it('G9.a: non-member and unprivileged user get FORBIDDEN and music resolver is never called', async () => {
+    // Host creates room
+    const ackA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(ackA.ok).toBe(true);
+    if (!ackA.ok) return;
+    const codeA = ackA.room.code;
+
+    const resolverSpy = vi.spyOn(songResolverModule, 'resolveSongOrFallback');
+
+    // Case 1: Guest is NOT a member of room A, attempts queueAdd
+    const nonMemberAck: Jam2Ack = await new Promise((res) => {
+      guestSocket.emit(
+        'jam2:cmd',
+        {
+          code: codeA,
+          type: 'queueAdd',
+          song: makeTestSong('song_non_member'),
+        },
+        res,
+      );
+    });
+    expect(nonMemberAck.ok).toBe(false);
+    if (!nonMemberAck.ok) {
+      expect(nonMemberAck.code).toBe('FORBIDDEN');
+    }
+    expect(resolverSpy).not.toHaveBeenCalled();
+
+    // Guest joins room A
+    const joinA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: codeA }, res);
+    });
+    expect(joinA.ok).toBe(true);
+
+    // Host demotes guest (revokes queueAdd permission)
+    const demoteAck: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit(
+        'jam2:cmd',
+        {
+          code: codeA,
+          type: 'setMemberPerms',
+          userId: GUEST_USER_ID,
+          perms: { queueAdd: false, playback: false, queueManage: false },
+        },
+        res,
+      );
+    });
+    expect(demoteAck.ok).toBe(true);
+
+    // Case 2: Guest is in room A but does NOT have queueAdd permission
+    resolverSpy.mockClear();
+    const unprivilegedAck: Jam2Ack = await new Promise((res) => {
+      guestSocket.emit(
+        'jam2:cmd',
+        {
+          code: codeA,
+          type: 'queueAdd',
+          song: makeTestSong('song_unprivileged'),
+        },
+        res,
+      );
+    });
+    expect(unprivilegedAck.ok).toBe(false);
+    if (!unprivilegedAck.ok) {
+      expect(unprivilegedAck.code).toBe('FORBIDDEN');
+    }
+    expect(resolverSpy).not.toHaveBeenCalled();
+
+    resolverSpy.mockRestore();
   });
 });
 
