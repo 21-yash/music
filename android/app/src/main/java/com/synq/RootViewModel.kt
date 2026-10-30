@@ -61,6 +61,10 @@ class RootViewModel @Inject constructor(
         jamSessionManager.clearError()
     }
 
+    fun retryJamPlayback() {
+        jamSessionManager.retryPlayback()
+    }
+
     val isLoggedIn: StateFlow<Boolean?> = authRepository.isLoggedIn
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

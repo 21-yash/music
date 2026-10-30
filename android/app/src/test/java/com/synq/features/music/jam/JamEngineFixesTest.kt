@@ -653,6 +653,63 @@ class JamEngineFixesTest {
         assertTrue("Loading timeout retry must have forceRefresh=true", fixture.fakePlayer.playJamSyncSongCalls[0].forceRefresh)
     }
 
+    @Test
+    fun testUnplayableTrackSequence_setsFlag_retryClearsAndReplays_newTrackClears() = runTest {
+        val fixture = createFixture(this)
+        val song1 = sampleSong("unplayable_song_1")
+        val snap1 = makeSnapshot("ABCD", trackSeq = 10L, song = song1, status = JamPlaybackStatus.PLAYING)
+        fixture.joinTestJam("ABCD", initialSnapshot = snap1)
+        runCurrent()
+
+        // Track is loading
+        fixture.currentTime = 1000L
+        fixture.sessionManager.syncJamQueue(snap1, force = true)
+        runCurrent()
+
+        // Exhaust 2 retries via loading timeout (15s, 30s, 45s)
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime) // Retry 1
+        runCurrent()
+
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime) // Retry 2
+        runCurrent()
+
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime) // Max retries exhausted
+        runCurrent()
+
+        // 1. After retries exhausted, isLocalPlaybackUnplayable must be true
+        assertTrue(fixture.sessionManager.jamState.value.isLocalPlaybackUnplayable)
+
+        val callsBeforeRetry = fixture.fakePlayer.playJamSyncSongCalls.size
+
+        // 2. Calling retryPlayback() clears flag and issues playJamSyncSong again
+        fixture.sessionManager.retryPlayback()
+        runCurrent()
+
+        assertFalse(fixture.sessionManager.jamState.value.isLocalPlaybackUnplayable)
+        assertTrue(fixture.fakePlayer.playJamSyncSongCalls.size > callsBeforeRetry)
+
+        // Exhaust retries again to re-set flag
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
+        fixture.currentTime += 16_000L
+        fixture.sessionManager.checkLoadingTimeout(fixture.currentTime)
+        runCurrent()
+        assertTrue(fixture.sessionManager.jamState.value.isLocalPlaybackUnplayable)
+
+        // 3. New trackSeq clears it
+        val song2 = sampleSong("unplayable_song_2")
+        val snap2 = makeSnapshot("ABCD", trackSeq = 11L, song = song2, status = JamPlaybackStatus.PLAYING)
+        fixture.sessionManager.stateStore.applySnapshot(snap2, isEpoch = true)
+        runCurrent()
+
+        assertFalse(fixture.sessionManager.jamState.value.isLocalPlaybackUnplayable)
+    }
+
     // ─────────────────────────────────────────────────────────────
     // F2: Duplicate songs in jam queue with different QIDs: recommended & index by QID
     // ─────────────────────────────────────────────────────────────

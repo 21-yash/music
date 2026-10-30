@@ -86,6 +86,7 @@ fun JamScreen(
     rootViewModel: RootViewModel = hiltViewModel()
 ) {
     val uiState by rootViewModel.jamUiState.collectAsState()
+    val jamState by rootViewModel.jamState.collectAsState()
     val room by rootViewModel.jamRoom.collectAsState()
     val clientState by rootViewModel.jamClientState.collectAsState()
     val localPlaybackState by rootViewModel.jamLocalPlaybackState.collectAsState()
@@ -802,6 +803,38 @@ fun JamScreen(
                                             tint = textPrimary,
                                             modifier = Modifier.size(32.dp)
                                         )
+                                    }
+                                }
+
+                                val isUnplayable = uiState.isLocalPlaybackUnplayable || jamState.isLocalPlaybackUnplayable
+                                if (isUnplayable) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Danger.copy(alpha = 0.12f))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Can't play on this device",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Danger
+                                        )
+                                        TextButton(
+                                            onClick = { rootViewModel.retryJamPlayback() },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                text = "Retry",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Danger
+                                            )
+                                        }
                                     }
                                 }
 

@@ -26,7 +26,8 @@ data class JamUiState(
     val recommendedQueue: List<JamQueueItem> = emptyList(),
     val history: List<JamQueueItem> = emptyList(),
     val nowPlaying: JamNowPlaying = JamNowPlaying(),
-    val error: String? = null
+    val error: String? = null,
+    val isLocalPlaybackUnplayable: Boolean = false
 )
 
 class JamStateStore(

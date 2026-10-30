@@ -241,6 +241,12 @@ class JamSessionManager(
         val fullQueue = listOfNotNull(snapshot.nowPlaying.item) + snapshot.queue
         val queueSongs = fullQueue.map { it.song }
 
+        val isUnplayable = unplayableTrackSeq != null && unplayableTrackSeq == snapshot.nowPlaying.trackSeq
+        if (unplayableTrackSeq != null && !isUnplayable) {
+            unplayableTrackSeq = null
+            trackRetryCount = 0
+        }
+
         _jamState.value = JamState(
             isInJam = true,
             sessionCode = snapshot.code,
@@ -251,6 +257,7 @@ class JamSessionManager(
             participants = participants,
             queue = queueSongs,
             isLocalStepOut = isLocalStepOut,
+            isLocalPlaybackUnplayable = isUnplayable,
             error = null
         )
     }
@@ -284,15 +291,21 @@ class JamSessionManager(
         val currentRoom = stateStore.room.value ?: return
         if (isReconciling) return
 
-        // Task F9: Suppress playback loop if this track sequence was marked unplayable
+        // Task F9 & G6: Suppress playback loop if this track sequence was marked unplayable
         val unplayable = unplayableTrackSeq
         if (unplayable != null) {
             if (currentRoom.nowPlaying.trackSeq == unplayable) {
+                if (!_jamState.value.isLocalPlaybackUnplayable) {
+                    _jamState.update { it.copy(isLocalPlaybackUnplayable = true) }
+                }
                 return
             } else {
                 unplayableTrackSeq = null
                 trackRetryCount = 0
+                _jamState.update { it.copy(isLocalPlaybackUnplayable = false) }
             }
+        } else if (_jamState.value.isLocalPlaybackUnplayable) {
+            _jamState.update { it.copy(isLocalPlaybackUnplayable = false) }
         }
 
         try {
@@ -576,7 +589,9 @@ class JamSessionManager(
         _localPlaybackState.value = LocalPlaybackState.Synchronized
         lastAppliedSnapshotVersion = null
         lastAppliedNowPlayingQid = null
-        _jamState.update { it.copy(isLocalStepOut = false) }
+        unplayableTrackSeq = null
+        trackRetryCount = 0
+        _jamState.update { it.copy(isLocalStepOut = false, isLocalPlaybackUnplayable = false) }
         val room = stateStore.room.value
         if (room != null && room.nowPlaying.item != null) {
             val serverNowPlaying = room.nowPlaying
@@ -1020,6 +1035,7 @@ class JamSessionManager(
             } else {
                 logW("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
                 unplayableTrackSeq = nowPlaying.trackSeq
+                _jamState.update { it.copy(isLocalPlaybackUnplayable = true) }
                 playerManager.applyJamPause()
                 if (lastLoadingAbortedToastTrackSeq != nowPlaying.trackSeq) {
                     lastLoadingAbortedToastTrackSeq = nowPlaying.trackSeq
@@ -1115,6 +1131,7 @@ class JamSessionManager(
         } else {
             logW("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
             unplayableTrackSeq = targetSeq
+            _jamState.update { it.copy(isLocalPlaybackUnplayable = true) }
             reconcilerTrackState = ReconcilerTrackState.READY
             loadingTrackSeq = null
             loadingStartedAt = 0L
@@ -1172,6 +1189,10 @@ class JamSessionManager(
     fun retryPlayback() {
         unplayableTrackSeq = null
         trackRetryCount = 0
+        reconcilerTrackState = ReconcilerTrackState.READY
+        loadingTrackSeq = null
+        loadingStartedAt = 0L
+        _jamState.update { it.copy(isLocalPlaybackUnplayable = false) }
         reconcilePlayback()
     }
 
