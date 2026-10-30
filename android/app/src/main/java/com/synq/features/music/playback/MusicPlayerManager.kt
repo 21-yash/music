@@ -146,7 +146,7 @@ class MusicPlayerManager @Inject constructor(
 
     private var reResolveAttemptedFor: String? = null
     private var playingFromFullCache: Boolean = false
-    private var consecutivePlaybackFailures: Int = 0
+    private val autoSkipPolicy = AutoSkipPolicy()
 
     private fun initializeController() {
         val sessionToken = SessionToken(
@@ -676,7 +676,7 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun skipToNext() {
+    fun skipToNext(isAutoSkip: Boolean = false) {
         if (jamInterceptor?.onSkipToNext() == true) return
         if (_isRepeatOne.value) {
             seekTo(0)
@@ -688,11 +688,13 @@ class MusicPlayerManager @Inject constructor(
         val isOffline = !networkMonitor.isOnline.value
 
         if (isOffline) {
-            // 1. Look for next cached song in current queue (forward or wrap-around)
+            // 1. Look for next cached song in current queue (forward or wrap-around unless auto-skipping)
             val nextCachedIdx = ((_currentIndex.value + 1) until q.size)
                 .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
-                ?: (0 until _currentIndex.value)
-                    .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                ?: if (!isAutoSkip) {
+                    (0 until _currentIndex.value)
+                        .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                } else null
 
             if (nextCachedIdx != null && nextCachedIdx != _currentIndex.value) {
                 _currentIndex.value = nextCachedIdx
@@ -747,7 +749,7 @@ class MusicPlayerManager @Inject constructor(
             }
         } else {
             // Queue ended:
-            if (activeRadioArtist != null) {
+            if (!isAutoSkip && activeRadioArtist != null) {
                 // Radio should only play songs of the artist: loop & reshuffle artist tracks
                 if (q.isNotEmpty()) {
                     val reshuffled = q.shuffled()
@@ -1196,7 +1198,7 @@ class MusicPlayerManager @Inject constructor(
         override fun onPlaybackStateChanged(state: Int) {
             jamInterceptor?.onPlaybackStateChanged(state)
             if (state == Player.STATE_READY) {
-                consecutivePlaybackFailures = 0
+                autoSkipPolicy.onReady()
                 reResolveAttemptedFor = null
             }
             if (state == Player.STATE_ENDED) {
@@ -1276,13 +1278,25 @@ class MusicPlayerManager @Inject constructor(
 
     private fun handleUnrecoverablePlaybackError(song: Song, message: String) {
         if (jamInterceptor == null) {
-            consecutivePlaybackFailures++
-            if (consecutivePlaybackFailures <= 3) {
-                scope.launch {
-                    skipToNext()
+            val shouldSkip = autoSkipPolicy.onFailure()
+            if (shouldSkip) {
+                val q = _queue.value
+                val hasNext = if (!networkMonitor.isOnline.value) {
+                    ((_currentIndex.value + 1) until q.size).any { audioCacheProvider.isSongCached(q[it].id) }
+                } else {
+                    autoSkipPolicy.canSkipForward(_currentIndex.value, q.size) || (sourcePlaylist != null && nextSourceIndex < (sourcePlaylist?.size ?: 0))
+                }
+
+                if (hasNext) {
+                    scope.launch {
+                        skipToNext(isAutoSkip = true)
+                    }
+                } else {
+                    autoSkipPolicy.onReady()
+                    controller?.stop()
                 }
             } else {
-                consecutivePlaybackFailures = 0
+                controller?.stop()
             }
         }
     }
