@@ -91,7 +91,7 @@ class TokenRefresher @Inject constructor(
     suspend fun refresh(staleAccessToken: String? = null): String? {
         return when (val res = refreshResult(staleAccessToken)) {
             is TokenRefreshResult.Success -> res.token
-            is TokenRefreshResult.Transient -> res.fallbackToken
+            is TokenRefreshResult.Transient -> null
             is TokenRefreshResult.Unauthorized -> null
         }
     }
