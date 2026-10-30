@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.random.Random
 
-data class JamClosedEvent(val reason: String, val message: String)
+data class JamClosedEvent(val reason: String, val message: String, val initiatedByMe: Boolean = false)
 
 class JamClient(
     private val transport: JamTransport,
@@ -66,6 +66,15 @@ class JamClient(
     private var clockSyncJob: Job? = null
     private var eventListenerJob: Job? = null
     private var notFoundRetryCount = 0
+    private var closedEmittedForSession = false
+
+    private fun emitClosedOnce(reason: String, message: String, initiatedByMe: Boolean) {
+        if (activeRoomCode == null && closedEmittedForSession) {
+            return
+        }
+        closedEmittedForSession = true
+        _closedEvents.tryEmit(JamClosedEvent(reason, message, initiatedByMe))
+    }
 
     init {
         startEventListener()
@@ -137,6 +146,7 @@ class JamClient(
      * Creates a new Jam room.
      */
     suspend fun createRoom(avatarUrl: String? = null): Result<RoomSnapshot> {
+        closedEmittedForSession = false
         _clientState.value = JamClientState.Connecting
         val tokenRes = fetchFreshTokenResult()
         val token = when (tokenRes) {
@@ -197,6 +207,7 @@ class JamClient(
      * Joins an existing Jam room.
      */
     suspend fun joinRoom(code: String, avatarUrl: String? = null): Result<RoomSnapshot> {
+        closedEmittedForSession = false
         val cleanCode = code.trim().uppercase()
         _clientState.value = JamClientState.Joining(cleanCode)
 
@@ -309,6 +320,7 @@ class JamClient(
 
         transport.disconnect()
         stateStore.clear()
+        emitClosedOnce("left", "You left the Jam", initiatedByMe = true)
         _clientState.value = JamClientState.Disconnected
         return Result.success(Unit)
     }
@@ -325,12 +337,15 @@ class JamClient(
         stopAll()
         transport.disconnect()
         stateStore.clear()
-        _closedEvents.tryEmit(JamClosedEvent("ended", "The host ended this Jam"))
+        emitClosedOnce("ended", "The host ended this Jam", initiatedByMe = true)
         _clientState.value = JamClientState.Disconnected
         return Result.success(Unit)
     }
 
     private fun handleServerClosed(reason: String) {
+        if (activeRoomCode == null && closedEmittedForSession) {
+            return
+        }
         activeRoomCode = null
         stopAll()
         transport.disconnect()
@@ -344,7 +359,7 @@ class JamClient(
             else -> "The Jam session was closed ($reason)."
         }
 
-        _closedEvents.tryEmit(JamClosedEvent(reason, userMessage))
+        emitClosedOnce(reason, userMessage, initiatedByMe = false)
         _clientState.value = JamClientState.Closed(reason, userMessage)
     }
 

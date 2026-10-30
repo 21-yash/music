@@ -103,6 +103,12 @@ private fun MainAppContent(
     
     var showFullPlayer by remember { mutableStateOf(false) }
 
+    LaunchedEffect(playbackState.currentSong) {
+        if (playbackState.currentSong == null) {
+            showFullPlayer = false
+        }
+    }
+
     // D6: Rejoin candidate dialog on app start
     var rejoinCandidateCode by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
