@@ -144,7 +144,7 @@ class MusicPlayerManager @Inject constructor(
         initializeController()
     }
 
-    private var reResolveAttemptedFor: String? = null
+    private val reResolveGuard = ReResolveGuard()
     private var playingFromFullCache: Boolean = false
     private val autoSkipPolicy = AutoSkipPolicy()
 
@@ -357,9 +357,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
-        if (reResolveAttemptedFor != song.id) {
-            reResolveAttemptedFor = null
-        }
+        reResolveGuard.onSongStarted(song.id)
 
         // If this song was part of recommended songs, push it above the separator (personal queue only)
         if (jamInterceptor == null && song.id in _recommendedSongIds.value) {
@@ -1199,7 +1197,7 @@ class MusicPlayerManager @Inject constructor(
             jamInterceptor?.onPlaybackStateChanged(state)
             if (state == Player.STATE_READY) {
                 autoSkipPolicy.onReady()
-                reResolveAttemptedFor = null
+                reResolveGuard.onReady()
             }
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener
@@ -1228,7 +1226,7 @@ class MusicPlayerManager @Inject constructor(
             }
 
             if (song != null) {
-                val alreadyRetried = (reResolveAttemptedFor == song.id)
+                val alreadyRetried = !reResolveGuard.shouldReResolve(song.id)
                 val action = PlaybackSourcePolicy.onErrorAction(
                     playingFromFullCache = playingFromFullCache,
                     alreadyRetried = alreadyRetried,
@@ -1237,7 +1235,6 @@ class MusicPlayerManager @Inject constructor(
 
                 when (action) {
                     PlaybackSourcePolicy.ErrorAction.EVICT_AND_RETRY_NETWORK -> {
-                        reResolveAttemptedFor = song.id
                         audioCacheProvider.remove(song.id)
                         streamCacheStorage.invalidateStreamUri(song.id)
                         playingFromFullCache = false
@@ -1248,7 +1245,6 @@ class MusicPlayerManager @Inject constructor(
                         return
                     }
                     PlaybackSourcePolicy.ErrorAction.RE_RESOLVE_ONCE -> {
-                        reResolveAttemptedFor = song.id
                         streamCacheStorage.invalidateStreamUri(song.id)
                         scope.launch {
                             val pos = getPlayerCurrentPosition()
