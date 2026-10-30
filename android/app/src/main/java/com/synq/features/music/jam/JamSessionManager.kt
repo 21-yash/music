@@ -98,6 +98,7 @@ class JamSessionManager(
     private var loadingStartedAt: Long = 0L
     private var trackRetryCount: Int = 0
     private var retryTrackSeq: Long = 0L
+    internal var unplayableTrackSeq: Long? = null
     private var lastReportedEndedTrackSeq: Long = 0L
     private var lastReportedEndedAttemptTs: Long = 0L
     private var isReportingEndedTrackSeq: Long? = null
@@ -282,6 +283,17 @@ class JamSessionManager(
         if (isLocalStepOut) return // Reconciler is suspended while guest is locally stepped out
         val currentRoom = stateStore.room.value ?: return
         if (isReconciling) return
+
+        // Task F9: Suppress playback loop if this track sequence was marked unplayable
+        val unplayable = unplayableTrackSeq
+        if (unplayable != null) {
+            if (currentRoom.nowPlaying.trackSeq == unplayable) {
+                return
+            } else {
+                unplayableTrackSeq = null
+                trackRetryCount = 0
+            }
+        }
 
         try {
             isReconciling = true
@@ -517,6 +529,7 @@ class JamSessionManager(
         loadingStartedAt = 0L
         trackRetryCount = 0
         retryTrackSeq = 0L
+        unplayableTrackSeq = null
         lastReportedEndedTrackSeq = 0L
         lastReportedEndedAttemptTs = 0L
         isReportingEndedTrackSeq = null
@@ -889,10 +902,7 @@ class JamSessionManager(
     override fun onPlayQueue(songs: List<Song>, startIndex: Int): Boolean {
         if (!_jamState.value.isInJam) return false
         val toAdd = songs.drop(startIndex).ifEmpty { songs }
-        val count = addSongsToJam(toAdd, limit = 20)
-        if (count > 0) {
-            showToast("Added top $count songs to Jam queue")
-        }
+        addSongsToJam(toAdd, limit = 20)
         return true
     }
 
@@ -1008,6 +1018,7 @@ class JamSessionManager(
                 )
             } else {
                 logW("JamSessionManager", "Max retries reached for trackSeq ${nowPlaying.trackSeq}. Staying silent until near-end.")
+                unplayableTrackSeq = nowPlaying.trackSeq
                 playerManager.applyJamPause()
                 if (lastLoadingAbortedToastTrackSeq != nowPlaying.trackSeq) {
                     lastLoadingAbortedToastTrackSeq = nowPlaying.trackSeq
@@ -1101,6 +1112,7 @@ class JamSessionManager(
             )
         } else {
             logW("JamSessionManager", "Max retries reached on LOADING timeout for trackSeq $targetSeq. Aborting loading.")
+            unplayableTrackSeq = targetSeq
             reconcilerTrackState = ReconcilerTrackState.READY
             loadingTrackSeq = null
             loadingStartedAt = 0L
@@ -1153,6 +1165,12 @@ class JamSessionManager(
                 stepOutLocally()
             }
         }
+    }
+
+    fun retryPlayback() {
+        unplayableTrackSeq = null
+        trackRetryCount = 0
+        reconcilePlayback()
     }
 
     private fun logD(tag: String, msg: String) {
