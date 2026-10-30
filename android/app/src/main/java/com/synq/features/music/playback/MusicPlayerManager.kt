@@ -145,6 +145,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private var reResolveAttemptedFor: String? = null
+    private var playingFromFullCache: Boolean = false
     private var consecutivePlaybackFailures: Int = 0
 
     private fun initializeController() {
@@ -395,15 +396,23 @@ class MusicPlayerManager @Inject constructor(
                 recentlyPlayedRepository.recordPlay(song)
             } catch (_: Exception) {}
 
-            // 1. Check if song is already cached in local SimpleCache (Task F16: verify FULL cache)
+            // 1. Check if song is already cached in local SimpleCache (Task F16 & G4: verify FULL cache)
             val isCached = audioCacheProvider.isFullyCached(song.id)
             val cachedStreamUri = streamCacheStorage.getStreamUri(song.id)
+            val sourceChoice = PlaybackSourcePolicy.chooseSource(isCached, cachedStreamUri)
 
-            if (isCached) {
-                val streamUri = cachedStreamUri ?: "https://audio.cache/${song.id}.mp4"
+            if (sourceChoice != PlaybackSourcePolicy.SourceType.NETWORK) {
+                playingFromFullCache = true
+                val streamUri = if (sourceChoice == PlaybackSourcePolicy.SourceType.CACHE_WITH_SAVED_URI) {
+                    cachedStreamUri!!
+                } else {
+                    "https://audio.cache/${song.id}.mp4"
+                }
                 playMediaUri(song, streamUri, initialPositionMs, playWhenReady)
                 return@launch
             }
+
+            playingFromFullCache = false
 
             // 2. If not cached, check if offline
             if (!networkMonitor.isOnline.value) {
@@ -1211,23 +1220,44 @@ class MusicPlayerManager @Inject constructor(
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             val song = _playbackState.value.currentSong
-            if (song != null) {
-                streamCacheStorage.invalidateStreamUri(song.id)
-                audioCacheProvider.remove(song.id)
-            }
 
             if (jamInterceptor?.onPlayerError(error) == true) {
                 return
             }
 
-            // Attempt one automatic re-resolution per song ID before failing (Task F4 & F16)
-            if (song != null && reResolveAttemptedFor != song.id && networkMonitor.isOnline.value) {
-                reResolveAttemptedFor = song.id
-                scope.launch {
-                    val pos = getPlayerCurrentPosition()
-                    loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+            if (song != null) {
+                val alreadyRetried = (reResolveAttemptedFor == song.id)
+                val action = PlaybackSourcePolicy.onErrorAction(
+                    playingFromFullCache = playingFromFullCache,
+                    alreadyRetried = alreadyRetried,
+                    online = networkMonitor.isOnline.value
+                )
+
+                when (action) {
+                    PlaybackSourcePolicy.ErrorAction.EVICT_AND_RETRY_NETWORK -> {
+                        reResolveAttemptedFor = song.id
+                        audioCacheProvider.remove(song.id)
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                        playingFromFullCache = false
+                        scope.launch {
+                            val pos = getPlayerCurrentPosition()
+                            loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+                        }
+                        return
+                    }
+                    PlaybackSourcePolicy.ErrorAction.RE_RESOLVE_ONCE -> {
+                        reResolveAttemptedFor = song.id
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                        scope.launch {
+                            val pos = getPlayerCurrentPosition()
+                            loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+                        }
+                        return
+                    }
+                    PlaybackSourcePolicy.ErrorAction.GIVE_UP -> {
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                    }
                 }
-                return
             }
 
             _playbackState.update { 
