@@ -23,6 +23,10 @@ import com.synq.features.music.util.SongDeduplicator
 import com.synq.features.music.jam.JamPlayerBridge
 import com.synq.features.music.sleeptimer.SleepTimerPlayerBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicBoolean
+import com.synq.features.music.jam.safeLogI
+import com.synq.features.music.jam.safeLogW
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -136,13 +140,31 @@ class MusicPlayerManager @Inject constructor(
     companion object {
         private const val MAX_INITIAL_QUEUE_SIZE = 100
         private const val QUEUE_PAGE_CHUNK = 50
+        private val isNewPipeWarmedUp = AtomicBoolean(false)
     }
 
     private var positionTrackerJob: Job? = null
     private var isFetchingRecommendations = false
+    private var lastPlayMediaUriTimestamp: Long? = null
 
     init {
         initializeController()
+        warmUpNewPipeAsync()
+    }
+
+    private fun warmUpNewPipeAsync() {
+        if (isNewPipeWarmedUp.compareAndSet(false, true)) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val warmStartTime = SystemClock.elapsedRealtime()
+                    extractYouTubeStream("dQw4w9WgXcQ")
+                    val duration = SystemClock.elapsedRealtime() - warmStartTime
+                    safeLogI("PlayTiming", "NewPipe warm-up completed in $duration ms")
+                } catch (e: Exception) {
+                    safeLogW("PlayTiming", "NewPipe warm-up failed: ${e.message}")
+                }
+            }
+        }
     }
 
     private val reResolveGuard = ReResolveGuard()
@@ -419,58 +441,75 @@ class MusicPlayerManager @Inject constructor(
                 return@launch
             }
 
+            safeLogI("PlayTiming", "resolveStream started: songId=${song.id}, provider=${song.providerId}")
+            val resolveStartTime = SystemClock.elapsedRealtime()
+
             try {
-                // 3. Resolve stream via backend with retry policy
+                // Check if direct on-device YouTube extraction applies
                 var finalUri: String? = null
                 var lastError: AppError? = null
-                var attempt = 1
+                var isDirect = false
 
-                while (attempt <= 3) {
-                    if (!networkMonitor.isOnline.value) {
-                        notifyOfflineUnavailable()
-                        return@launch
+                val plan = StreamResolutionPlan.choose(song.providerId, song.id)
+                if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
+                    val directUri = extractYouTubeStream(song.id)
+                    if (!directUri.isNullOrBlank()) {
+                        finalUri = directUri
+                        isDirect = true
                     }
+                }
 
-                    val streamResult = repository.resolveStream(song.id, song.providerId)
-                    if (streamResult is AppResult.Success) {
-                        when (val info = streamResult.data) {
-                            is StreamInfo.JioSaavn -> {
-                                finalUri = info.url
-                                break
-                            }
-                            is StreamInfo.YouTube -> {
-                                val ytUri = extractYouTubeStream(info.videoId)
-                                if (ytUri.isNullOrBlank()) {
-                                    val err = AppError.Server(StreamRetryPolicy.CODE_YOUTUBE_EXTRACTION_FAILED, "YouTube extraction failed")
-                                    lastError = err
-                                    val decision = StreamRetryPolicy.decide(err, attempt)
-                                    if (decision is StreamRetryDecision.Retry) {
-                                        attempt++
-                                        delay(decision.delayMs)
-                                        continue
+                if (finalUri.isNullOrBlank()) {
+                    // 3. Resolve stream via backend with retry policy
+                    var attempt = 1
+
+                    while (attempt <= 3) {
+                        if (!networkMonitor.isOnline.value) {
+                            notifyOfflineUnavailable()
+                            return@launch
+                        }
+
+                        val streamResult = repository.resolveStream(song.id, song.providerId)
+                        if (streamResult is AppResult.Success) {
+                            when (val info = streamResult.data) {
+                                is StreamInfo.JioSaavn -> {
+                                    finalUri = info.url
+                                    break
+                                }
+                                is StreamInfo.YouTube -> {
+                                    val ytUri = extractYouTubeStream(info.videoId)
+                                    if (ytUri.isNullOrBlank()) {
+                                        val err = AppError.Server(StreamRetryPolicy.CODE_YOUTUBE_EXTRACTION_FAILED, "YouTube extraction failed")
+                                        lastError = err
+                                        val decision = StreamRetryPolicy.decide(err, attempt)
+                                        if (decision is StreamRetryDecision.Retry) {
+                                            attempt++
+                                            delay(decision.delayMs)
+                                            continue
+                                        } else {
+                                            break
+                                        }
                                     } else {
+                                        finalUri = ytUri
                                         break
                                     }
-                                } else {
-                                    finalUri = ytUri
+                                }
+                                is StreamInfo.None -> {
+                                    val err = AppError.Server("STREAM_UNAVAILABLE", "No playable stream")
+                                    lastError = err
                                     break
                                 }
                             }
-                            is StreamInfo.None -> {
-                                val err = AppError.Server("STREAM_UNAVAILABLE", "No playable stream")
-                                lastError = err
+                        } else if (streamResult is AppResult.Error) {
+                            lastError = streamResult.error
+                            val decision = StreamRetryPolicy.decide(streamResult.error, attempt)
+                            if (decision is StreamRetryDecision.Retry) {
+                                attempt++
+                                delay(decision.delayMs)
+                                continue
+                            } else {
                                 break
                             }
-                        }
-                    } else if (streamResult is AppResult.Error) {
-                        lastError = streamResult.error
-                        val decision = StreamRetryPolicy.decide(streamResult.error, attempt)
-                        if (decision is StreamRetryDecision.Retry) {
-                            attempt++
-                            delay(decision.delayMs)
-                            continue
-                        } else {
-                            break
                         }
                     }
                 }
@@ -492,6 +531,9 @@ class MusicPlayerManager @Inject constructor(
                     }
                     return@launch
                 }
+
+                val resolveDuration = SystemClock.elapsedRealtime() - resolveStartTime
+                safeLogI("PlayTiming", "resolveStream finished in $resolveDuration ms (direct: $isDirect)")
 
                 // 5. Store resolved stream URI for future offline playback from SimpleCache
                 streamCacheStorage.saveStreamUri(song.id, finalUri)
@@ -542,6 +584,10 @@ class MusicPlayerManager @Inject constructor(
         } else {
             song.id
         }
+
+        val isCached = audioCacheProvider.isFullyCached(song.id) || audioCacheProvider.hasSpansForKey(cacheKey)
+        safeLogI("PlayTiming", "playMediaUri called: songId=${song.id}, cacheKey=$cacheKey, isCached=$isCached")
+        lastPlayMediaUriTimestamp = SystemClock.elapsedRealtime()
 
         val mediaItem = MediaItem.Builder()
             .setMediaId(song.id)
@@ -641,14 +687,20 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private suspend fun extractYouTubeStream(videoId: String): String? = withContext(Dispatchers.IO) {
+        val extractStartTime = SystemClock.elapsedRealtime()
         try {
             val url = "https://www.youtube.com/watch?v=$videoId"
             val extractor = NewPipe.getService(0).getStreamExtractor(url) as YoutubeStreamExtractor
             extractor.fetchPage()
             val audioStreams = extractor.audioStreams
             val bestAudio = audioStreams.maxByOrNull { it.averageBitrate }
-            return@withContext bestAudio?.content ?: audioStreams.firstOrNull()?.content
+            val result = bestAudio?.content ?: audioStreams.firstOrNull()?.content
+            val duration = SystemClock.elapsedRealtime() - extractStartTime
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms")
+            return@withContext result
         } catch (e: Exception) {
+            val duration = SystemClock.elapsedRealtime() - extractStartTime
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms")
             android.util.Log.w("NewPipeExtractor", "Failed to extract YouTube stream: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
@@ -1117,16 +1169,32 @@ class MusicPlayerManager @Inject constructor(
         scope.launch(Dispatchers.IO) {
             try {
                 if (audioCacheProvider.isSongCached(song.id)) return@launch
-                val streamResult = repository.resolveStream(song.id, song.providerId)
-                if (streamResult is AppResult.Success) {
-                    val finalUri = when (val info = streamResult.data) {
-                        is StreamInfo.JioSaavn -> info.url
-                        is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
-                        is StreamInfo.None -> null
+                val cachedUri = streamCacheStorage.getStreamUri(song.id)
+                val finalUri = if (!cachedUri.isNullOrBlank()) {
+                    cachedUri
+                } else {
+                    val plan = StreamResolutionPlan.choose(song.providerId, song.id)
+                    val directUri = if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
+                        extractYouTubeStream(song.id)
+                    } else null
+
+                    if (!directUri.isNullOrBlank()) {
+                        directUri
+                    } else {
+                        val streamResult = repository.resolveStream(song.id, song.providerId)
+                        if (streamResult is AppResult.Success) {
+                            when (val info = streamResult.data) {
+                                is StreamInfo.JioSaavn -> info.url
+                                is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
+                                is StreamInfo.None -> null
+                            }
+                        } else null
                     }
-                    if (!finalUri.isNullOrBlank()) {
-                        streamCacheStorage.saveStreamUri(song.id, finalUri)
-                    }
+                }
+
+                if (!finalUri.isNullOrBlank()) {
+                    streamCacheStorage.saveStreamUri(song.id, finalUri)
+                    audioCacheProvider.warmBytes(song.id, finalUri)
                 }
             } catch (_: Exception) {}
         }
@@ -1237,6 +1305,12 @@ class MusicPlayerManager @Inject constructor(
             if (state == Player.STATE_READY) {
                 autoSkipPolicy.onReady()
                 reResolveGuard.onReady()
+                val playTimestamp = lastPlayMediaUriTimestamp
+                if (playTimestamp != null) {
+                    val readyDuration = SystemClock.elapsedRealtime() - playTimestamp
+                    lastPlayMediaUriTimestamp = null
+                    safeLogI("PlayTiming", "ExoPlayer STATE_READY reached in $readyDuration ms from playMediaUri")
+                }
             }
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener

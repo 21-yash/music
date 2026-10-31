@@ -114,6 +114,7 @@ class JamSessionManager(
     private var isTornDown: Boolean = true
     private var isSessionOpInFlight: Boolean = false
     private var isAddPlaylistInFlight: Boolean = false
+    private var lastPrefetchedHeadQid: String? = null
 
     companion object {
         const val MAX_JAM_QUEUE_SIZE = 50
@@ -146,6 +147,7 @@ class JamSessionManager(
         scope.launch {
             stateStore.room.collect { room ->
                 updateLegacyState(room, jamClient.clientState.value)
+                maybePrefetchQueueHead(room)
             }
         }
 
@@ -551,6 +553,15 @@ class JamSessionManager(
         lastAppliedNowPlayingQid = null
         hasShownAudioFocusToastInThisJam = false
         lastLoadingAbortedToastTrackSeq = null
+        lastPrefetchedHeadQid = null
+    }
+
+    private fun maybePrefetchQueueHead(room: RoomSnapshot?) {
+        val headItem = room?.queue?.firstOrNull() ?: return
+        if (headItem.qid != lastPrefetchedHeadQid) {
+            lastPrefetchedHeadQid = headItem.qid
+            playerManager.prefetchTrack(headItem.song)
+        }
     }
 
     private val networkDebouncer = NetworkChangeDebouncer(scope) {
