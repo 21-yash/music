@@ -184,7 +184,7 @@ class JamSessionManager(
 
             is JamClientState.Closed -> {
                 jamPreferences.clearLastJam()
-                showToast(state.message)
+                closedToastFor(state.reason, alreadyToasted = false)?.let { showToast(it) }
                 teardownJam()
                 jamClient.resetToDisconnected()
             }

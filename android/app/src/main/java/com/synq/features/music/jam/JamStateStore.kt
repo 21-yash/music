@@ -65,25 +65,29 @@ class JamStateStore(
         }
 
         val me = snapshot.members.find { it.userId == myUserId }
-        val myPerms = me?.perms ?: snapshot.defaults
-
-        if (lastMyPerms == null) {
-            lastMyPerms = myPerms
+        if (me == null) {
+            // Task H2.a: if me == null do NOT diff or emit permission toasts
+            lastMyPerms = null
         } else {
-            val prev = lastMyPerms!!
-            if (prev.playback != myPerms.playback) {
-                val msg = if (myPerms.playback) "You can now control playback" else "You can no longer control playback"
-                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+            val myPerms = me.perms
+            if (lastMyPerms == null) {
+                lastMyPerms = myPerms
+            } else {
+                val prev = lastMyPerms!!
+                if (prev.playback != myPerms.playback) {
+                    val msg = if (myPerms.playback) "You can now control playback" else "You can no longer control playback"
+                    _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+                }
+                if (prev.queueAdd != myPerms.queueAdd) {
+                    val msg = if (myPerms.queueAdd) "You can now add songs" else "You can no longer add songs"
+                    _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+                }
+                if (prev.queueManage != myPerms.queueManage) {
+                    val msg = if (myPerms.queueManage) "You can now manage the queue" else "You can no longer manage the queue"
+                    _uiEvents.tryEmit(JamUiEvent.Toast(msg))
+                }
+                lastMyPerms = myPerms
             }
-            if (prev.queueAdd != myPerms.queueAdd) {
-                val msg = if (myPerms.queueAdd) "You can now add songs" else "You can no longer add songs"
-                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
-            }
-            if (prev.queueManage != myPerms.queueManage) {
-                val msg = if (myPerms.queueManage) "You can now manage the queue" else "You can no longer manage the queue"
-                _uiEvents.tryEmit(JamUiEvent.Toast(msg))
-            }
-            lastMyPerms = myPerms
         }
 
         _room.value = snapshot
@@ -127,7 +131,7 @@ class JamStateStore(
             }
             "kicked" -> {
                 if (event.userId == myUserId) {
-                    _uiEvents.tryEmit(JamUiEvent.Kicked("You were kicked from the Jam."))
+                    _uiEvents.tryEmit(JamUiEvent.Kicked("You were removed from the Jam by the host"))
                 } else {
                     val name = event.username.ifEmpty { "A member" }
                     _uiEvents.tryEmit(JamUiEvent.Toast("$name was removed"))
