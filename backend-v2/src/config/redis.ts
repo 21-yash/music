@@ -16,6 +16,11 @@ export function createRedisClient(): Redis {
 
   redisClient = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: 3,
+    enableOfflineQueue: true,
+    // Task H7: Detect half-open NAT/TCP connections and bound command latency
+    keepAlive: 10_000,
+    connectTimeout: 5_000,
+    commandTimeout: 2_000,
     retryStrategy(times: number) {
       // Exponential backoff capped at 10 seconds
       const delay = Math.min(times * 200, 10_000);

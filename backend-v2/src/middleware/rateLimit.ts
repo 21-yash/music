@@ -12,18 +12,25 @@ interface LazyLimiterOptions {
   keyGenerator?: (req: Request) => string;
   skip?: (req: Request) => boolean;
   skipSuccessfulRequests?: boolean;
+  enableInTest?: boolean;
+  customStore?: any;
 }
+
+const lastLimiterWarnMap = new Map<string, number>();
 
 /**
  * Creates a rate limiter middleware that is initialized lazily on the first request.
  * This prevents calling getRedisClient() during module import time before Redis is connected.
- * In test mode (NODE_ENV === 'test'), rate limiting is bypassed.
+ * In test mode (NODE_ENV === 'test'), rate limiting is bypassed unless enableInTest is set.
+ *
+ * Task H7: Fail-open 750ms timeout guard to ensure an idle/stalled Redis connection cannot
+ * block requests indefinitely.
  */
-function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
+export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
   let limiterInstance: RequestHandler | null = null;
 
   return (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === 'test') {
+    if (process.env.NODE_ENV === 'test' && !options.enableInTest) {
       return next();
     }
 
@@ -40,7 +47,7 @@ function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
         skip: options.skip,
         skipSuccessfulRequests: options.skipSuccessfulRequests,
         keyGenerator: options.keyGenerator,
-        store: new RedisStore({
+        store: options.customStore || new RedisStore({
           sendCommand: async (cmd: string, ...args: string[]) => {
             try {
               return (await getRedisClient().call(cmd, ...args)) as any;
@@ -59,7 +66,40 @@ function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
       });
     }
 
-    return limiterInstance(req, res, next);
+    let called = false;
+    const startMs = Date.now();
+
+    const safeNext = (err?: any) => {
+      if (called) return;
+      called = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      const waitMs = Date.now() - startMs;
+      (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
+      next(err);
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      if (called) return;
+      called = true;
+      const now = Date.now();
+      const lastWarn = lastLimiterWarnMap.get(options.keyPrefix) || 0;
+      if (now - lastWarn >= 60_000) {
+        lastLimiterWarnMap.set(options.keyPrefix, now);
+        logger.warn(
+          { limiter: options.keyPrefix, path: req.path },
+          `Rate limiter '${options.keyPrefix}' timed out after 750ms; failing open`
+        );
+      }
+      const waitMs = now - startMs;
+      (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
+      next();
+    }, 750);
+
+    try {
+      limiterInstance(req, res, safeNext);
+    } catch (err) {
+      safeNext(err);
+    }
   };
 }
 
