@@ -1,6 +1,7 @@
 import type { MusicProvider, Song, Album, Artist, Playlist, SearchResults, StreamInfo } from '../providers/music';
 import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
+import { AppError } from '../utils/errors';
 import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
 import { Playlist as PlaylistModel } from '../models/Playlist';
@@ -77,7 +78,7 @@ export function getProviderInstance(providerId?: string): MusicProvider | null {
   return _providers.get(id) || null;
 }
 
-function getProvider(providerId?: string): MusicProvider {
+export function getProvider(providerId?: string): MusicProvider {
   const id = providerId || _defaultProviderId;
   const provider = _providers.get(id);
   if (!provider) {
@@ -393,20 +394,52 @@ export async function resolveStreamUrl(
   let streamRef = await getStreamToken(songId);
 
   if (!streamRef) {
-    // If not in Redis (expired/evicted), fetch fresh from provider
-    const song = await provider.getSong(songId);
-    if (!song || !song.streamRef) {
-      throw new Error(`No playable stream found for song ${songId}`);
+    // If not in Redis (expired/evicted), fetch fresh from provider with 1 retry
+    let song: Song | null = null;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        song = await provider.getSong(songId);
+        if (song && song.streamRef) {
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      if (attempt === 1) {
+        const errorMsg = lastError instanceof Error ? lastError.message : (song ? 'No streamRef in song' : 'Song not found');
+        logger.warn(
+          { songId, provider: provider.name, attempt: 1, error: errorMsg },
+          'resolveStreamUrl token missing, retrying provider.getSong after 300ms'
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
     }
+
+    if (!song || !song.streamRef) {
+      const errorMsg = lastError instanceof Error ? lastError.message : (song ? 'No streamRef in song' : 'Song not found');
+      logger.warn(
+        { songId, provider: provider.name, attempt: 2, error: errorMsg },
+        'resolveStreamUrl failed after retry'
+      );
+      throw new AppError('Stream unavailable for this song', 404, 'STREAM_UNAVAILABLE');
+    }
+
     await storeStreamTokens([song]);
     streamRef = song.streamRef;
   }
 
-  const result = await provider.resolveStreamUrl(streamRef, quality);
-  // Cache the resolved result for 2 hours (CDN links are usually valid for 4-6 hours)
-  await setCache(cacheKey, result, 2 * 60 * 60);
-  
-  return result;
+  try {
+    const result = await provider.resolveStreamUrl(streamRef, quality);
+    // Cache the resolved result for 2 hours (CDN links are usually valid for 4-6 hours)
+    await setCache(cacheKey, result, 2 * 60 * 60);
+    return result;
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError('Stream unavailable for this song', 404, 'STREAM_UNAVAILABLE');
+  }
 }
 
 // ─── Redis cache helpers ─────────────────────────────────────────────
@@ -457,7 +490,7 @@ function stripStreamRef(song: Song): Song {
  * Store songId → streamRef mappings in Redis.
  * These are used by resolveStreamUrl to look up the encrypted URL server-side.
  */
-async function storeStreamTokens(songs: Song[]): Promise<void> {
+export async function storeStreamTokens(songs: Song[]): Promise<void> {
   try {
     const redis = getRedisClient();
     const pipeline = redis.pipeline();
@@ -473,9 +506,19 @@ async function storeStreamTokens(songs: Song[]): Promise<void> {
 }
 
 /**
+ * Store stream token for a single song.
+ * For YouTube songs without streamRef, defaults streamRef to song.id.
+ */
+export async function storeStreamTokensFor(song: Song): Promise<void> {
+  const streamRef = song.streamRef || (song.providerId === 'youtube' ? song.id : '');
+  if (!streamRef) return;
+  await storeStreamTokens([{ ...song, streamRef }]);
+}
+
+/**
  * Retrieve the stored streamRef for a song ID.
  */
-async function getStreamToken(songId: string): Promise<string | null> {
+export async function getStreamToken(songId: string): Promise<string | null> {
   try {
     const redis = getRedisClient();
     return await redis.get(`${CACHE_PREFIX.streamToken}${songId}`);

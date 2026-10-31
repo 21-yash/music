@@ -9,6 +9,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.synq.core.domain.AppError
 import com.synq.core.domain.AppResult
 import com.synq.data.repository.RecentlyPlayedRepository
 import com.synq.features.music.data.repository.MusicRepository
@@ -419,37 +420,75 @@ class MusicPlayerManager @Inject constructor(
             }
 
             try {
-                // 3. Resolve stream via backend
-                val streamResult = repository.resolveStream(song.id, song.providerId)
-                if (streamResult !is AppResult.Success) {
+                // 3. Resolve stream via backend with retry policy
+                var finalUri: String? = null
+                var lastError: AppError? = null
+                var attempt = 1
+
+                while (attempt <= 3) {
                     if (!networkMonitor.isOnline.value) {
                         notifyOfflineUnavailable()
-                    } else {
-                        controller?.stop()
-                        controller?.clearMediaItems()
-                        stopPositionTracking()
-                        _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
-                        handleUnrecoverablePlaybackError(song, "Failed to fetch stream info")
+                        return@launch
                     }
-                    return@launch
-                }
 
-                // 4. Extract media URI
-                val finalUri = when (val info = streamResult.data) {
-                    is StreamInfo.JioSaavn -> info.url
-                    is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
-                    is StreamInfo.None -> null
+                    val streamResult = repository.resolveStream(song.id, song.providerId)
+                    if (streamResult is AppResult.Success) {
+                        when (val info = streamResult.data) {
+                            is StreamInfo.JioSaavn -> {
+                                finalUri = info.url
+                                break
+                            }
+                            is StreamInfo.YouTube -> {
+                                val ytUri = extractYouTubeStream(info.videoId)
+                                if (ytUri.isNullOrBlank()) {
+                                    val err = AppError.Server(StreamRetryPolicy.CODE_YOUTUBE_EXTRACTION_FAILED, "YouTube extraction failed")
+                                    lastError = err
+                                    val decision = StreamRetryPolicy.decide(err, attempt)
+                                    if (decision is StreamRetryDecision.Retry) {
+                                        attempt++
+                                        delay(decision.delayMs)
+                                        continue
+                                    } else {
+                                        break
+                                    }
+                                } else {
+                                    finalUri = ytUri
+                                    break
+                                }
+                            }
+                            is StreamInfo.None -> {
+                                val err = AppError.Server("STREAM_UNAVAILABLE", "No playable stream")
+                                lastError = err
+                                break
+                            }
+                        }
+                    } else if (streamResult is AppResult.Error) {
+                        lastError = streamResult.error
+                        val decision = StreamRetryPolicy.decide(streamResult.error, attempt)
+                        if (decision is StreamRetryDecision.Retry) {
+                            attempt++
+                            delay(decision.delayMs)
+                            continue
+                        } else {
+                            break
+                        }
+                    }
                 }
 
                 if (finalUri.isNullOrBlank()) {
                     if (!networkMonitor.isOnline.value) {
                         notifyOfflineUnavailable()
                     } else {
+                        android.util.Log.w(
+                            "StreamResolve",
+                            "Stream resolution failed: errorClass=${lastError?.javaClass?.simpleName} code=${lastError?.code} message=${lastError?.message} songId=${song.id} provider=${song.providerId}"
+                        )
+                        val userMessage = lastError?.let { StreamRetryPolicy.userFriendlyMessage(it) } ?: "This song can't be played right now"
                         controller?.stop()
                         controller?.clearMediaItems()
                         stopPositionTracking()
-                        _playbackState.update { it.copy(error = "Stream not available for this song", isPlaying = false) }
-                        handleUnrecoverablePlaybackError(song, "Stream not available for this song")
+                        _playbackState.update { it.copy(error = userMessage, isPlaying = false) }
+                        handleUnrecoverablePlaybackError(song, userMessage)
                     }
                     return@launch
                 }
@@ -610,7 +649,7 @@ class MusicPlayerManager @Inject constructor(
             val bestAudio = audioStreams.maxByOrNull { it.averageBitrate }
             return@withContext bestAudio?.content ?: audioStreams.firstOrNull()?.content
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("NewPipeExtractor", "Failed to extract YouTube stream: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }

@@ -1,6 +1,11 @@
 import { Song } from './types';
 import { getSong, getProviderInstance } from '../services/musicService';
+import * as musicService from '../services/musicService';
 import { logger } from '../utils/logger';
+
+export async function storeStreamTokensFor(song: Song): Promise<void> {
+  return musicService.storeStreamTokensFor(song);
+}
 
 export const DEFAULT_ALLOWED_HOST_PATTERNS = [
   /(^|\.)saavncdn\.com$/,
@@ -138,6 +143,7 @@ export async function resolveSong(id: string, providerId?: string): Promise<Song
     const res = await customResolver(id, providerId);
     if (res) {
       cacheResolvedSong(res);
+      await musicService.storeStreamTokensFor(res);
       return res;
     }
   }
@@ -171,6 +177,7 @@ export async function resolveSong(id: string, providerId?: string): Promise<Song
         providerId: fetched.providerId || providerId || '',
       };
       cacheResolvedSong(normalized);
+      await musicService.storeStreamTokensFor(fetched);
       return normalized;
     }
   } catch (err) {
@@ -252,6 +259,12 @@ export async function resolveSongOrFallback(clientSong: Song): Promise<Song | nu
     { provider: providerId, id: clientSong.id },
     'jam2:songResolver:accepted_client_metadata_fallback',
   );
+
+  await musicService.storeStreamTokensFor({
+    ...clientSong,
+    streamRef: clientSong.id,
+    providerId,
+  });
 
   return {
     id: clientSong.id,
