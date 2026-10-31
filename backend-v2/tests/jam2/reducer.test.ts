@@ -676,6 +676,72 @@ describe('Jam2 Reducer', () => {
         expect(item.addedByUserId).toBe('guest_1');
       }
     });
+
+    it('allows dismissal of recommended song by member with queueAdd or queueManage', () => {
+      const room = makeTestRoom();
+      room.queue = [
+        {
+          qid: 'rec_1',
+          song: makeTestSong('r1'),
+          addedByUserId: null,
+          addedAt: 1000,
+          recommended: true,
+        },
+      ];
+
+      // 1. Guest with queueAdd=true can remove recommendation
+      const guest = room.members.get('guest_1')!;
+      guest.perms = { queueAdd: true, playback: false, queueManage: false };
+
+      const res1 = applyCommand(
+        room,
+        { code: 'TEST', type: 'queueRemove', qid: 'rec_1' },
+        'guest_1',
+        2000,
+      );
+      expect('room' in res1).toBe(true);
+      if ('room' in res1) {
+        expect(res1.room.queue.length).toBe(0);
+      }
+
+      // 2. Guest with queueManage=true can remove recommendation
+      const room2 = makeTestRoom();
+      room2.queue = [
+        {
+          qid: 'rec_2',
+          song: makeTestSong('r2'),
+          addedByUserId: null,
+          addedAt: 1000,
+          recommended: true,
+        },
+      ];
+      const guest2 = room2.members.get('guest_1')!;
+      guest2.perms = { queueAdd: false, playback: false, queueManage: true };
+
+      const res2 = applyCommand(
+        room2,
+        { code: 'TEST', type: 'queueRemove', qid: 'rec_2' },
+        'guest_1',
+        2000,
+      );
+      expect('room' in res2).toBe(true);
+      if ('room' in res2) {
+        expect(res2.room.queue.length).toBe(0);
+      }
+
+      // 3. Guest with only playback=true is rejected
+      guest2.perms = { queueAdd: false, playback: true, queueManage: false };
+      const res3 = applyCommand(
+        room2,
+        { code: 'TEST', type: 'queueRemove', qid: 'rec_2' },
+        'guest_1',
+        2000,
+      );
+      expect('error' in res3).toBe(true);
+      if ('error' in res3) {
+        expect(res3.error.code).toBe('FORBIDDEN');
+      }
+    });
   });
 
   describe('Playback Flow & Idempotency', () => {

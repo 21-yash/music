@@ -787,7 +787,20 @@ class JamSessionManager(
         removeByQid(item.qid)
     }
 
+    fun removeSongFromJam(qid: String) {
+        removeByQid(qid)
+    }
+
     fun removeByQid(qid: String) {
+        val room = stateStore.room.value
+        val item = room?.queue?.find { it.qid == qid }
+        if (item != null && item.recommended) {
+            val uiState = stateStore.uiState.value
+            if (!canDismissRecommendation(uiState.isHost, uiState.myPerms)) {
+                showToast("You do not have permission to manage recommended songs")
+                return
+            }
+        }
         scope.launch {
             val payload = JSONObject().apply { put("qid", qid) }
             val res = jamClient.sendCommand("queueRemove", payload)

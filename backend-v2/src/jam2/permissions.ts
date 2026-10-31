@@ -91,8 +91,8 @@ export function checkCommandPermission(
     }
 
     if (item.recommended) {
-      // Dismissing a recommendation requires queueAdd
-      if (!member.perms.queueAdd) {
+      // Dismissing a recommendation requires queueAdd or queueManage
+      if (!member.perms.queueAdd && !member.perms.queueManage) {
         return { allowed: false, reason: 'You do not have permission to manage recommended songs.' };
       }
       return { allowed: true };

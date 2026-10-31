@@ -994,7 +994,7 @@ fun JamScreen(
                                     song = recItem.song,
                                     isDark = isDark,
                                     canAdd = uiState.canAddSongs,
-                                    canDismiss = uiState.canManageQueue || uiState.isHost,
+                                    canDismiss = canDismissRecommendation(uiState.isHost, uiState.myPerms),
                                     onAdd = {
                                         if (uiState.canAddSongs) {
                                             rootViewModel.promoteRecommended(recItem.qid)
