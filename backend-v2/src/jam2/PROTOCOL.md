@@ -241,7 +241,7 @@ Dispatches a state-mutating command to the room.
 | `seek` | `positionMs: number` | `playback` | Seeks current track to `positionMs` |
 | `next` | none | `playback` | Skips to next track in queue |
 | `prev` | none | `playback` | If position > 3s, restarts track; otherwise pops previous from history |
-| `playItem` | `qid: string` | `playback` | Jumps directly to a specific queued track |
+| `playItem` | `qid: string` | `playback` | Jumps directly to a specific queued track. Extracts and plays that item; all preceding and following items remain in the queue in their relative order, and only the previously playing track is pushed to history |
 | `trackEnded` | `trackSeq: number` | Any member | Reports that track finished playing. Strictly validated (see below) |
 | `queueAdd` | `song: Song`, `playNext?: boolean` | `queueAdd` | Appends song or inserts immediately after nowPlaying. Moves existing to front if `playNext` is true. |
 | `queueAddMany` | `songs: Song[]` (1-20) | `queueAdd` | Batch adds multiple songs to the user queue, skipping duplicates |

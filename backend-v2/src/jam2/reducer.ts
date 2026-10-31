@@ -254,20 +254,8 @@ export function applyCommand(
         }
       }
 
-      if (targetItem.recommended) {
-        // If target is recommended, remove JUST that item and play it; do NOT push other items to history!
-        nextRoom.queue.splice(idx, 1);
-      } else {
-        // If target is user item: items before target go to history
-        const skippedItems = nextRoom.queue.slice(0, idx);
-        for (const skipped of skippedItems) {
-          nextRoom.history.push(skipped);
-        }
-        if (nextRoom.history.length > MAX_HISTORY_SIZE) {
-          nextRoom.history.splice(0, nextRoom.history.length - MAX_HISTORY_SIZE);
-        }
-        nextRoom.queue = nextRoom.queue.slice(idx + 1);
-      }
+      // Task K2: Remove only the target item from queue (preceding items remain in place)
+      nextRoom.queue.splice(idx, 1);
 
       nextRoom.nowPlaying = {
         item: targetItem,
