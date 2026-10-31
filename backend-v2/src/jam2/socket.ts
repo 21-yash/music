@@ -7,6 +7,8 @@ import {
   joinPayloadSchema,
   roomCodeSchema,
   clientCmdSchema,
+  songSchema,
+  Song,
   serializeRoom,
   Jam2Ack,
 } from './types';
@@ -349,10 +351,27 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
 
       const parsed = clientCmdSchema.safeParse(rawPayload);
       if (!parsed.success) {
+        const firstIssue = parsed.error.issues[0];
+        const field = firstIssue?.path?.join('.') || 'payload';
+        const msg = firstIssue?.message || 'invalid';
+        let valLen: number | undefined;
+        try {
+          let cur: any = rawPayload;
+          for (const p of firstIssue?.path || []) {
+            if (cur == null) break;
+            cur = cur[p];
+          }
+          if (typeof cur === 'string' || Array.isArray(cur)) {
+            valLen = cur.length;
+          }
+        } catch {
+          // ignore
+        }
+        logger.warn({ field, length: valLen }, 'jam2 clientCmd schema violation');
         return safeAck(ack, {
           ok: false,
           code: 'INVALID',
-          message: 'Invalid command: ' + parsed.error.issues[0]?.message,
+          message: `Invalid command: ${field}: ${msg}`,
         });
       }
 
@@ -383,10 +402,26 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         }
         cmd.song = resolved;
       } else if (cmd.type === 'queueAddMany') {
-        const resolvedSongs: typeof cmd.songs = [];
+        const validSongs: Song[] = [];
+        for (const rawSong of cmd.songs) {
+          const parsedSong = songSchema.safeParse(rawSong);
+          if (parsedSong.success) {
+            validSongs.push(parsedSong.data);
+          } else {
+            skippedUnresolved++;
+          }
+        }
+        if (validSongs.length === 0) {
+          return safeAck(ack, {
+            ok: false,
+            code: 'INVALID',
+            message: 'None of the requested songs could be resolved',
+          });
+        }
+        const resolvedSongs: Song[] = [];
         const chunkSize = 5;
-        for (let i = 0; i < cmd.songs.length; i += chunkSize) {
-          const chunk = cmd.songs.slice(i, i + chunkSize);
+        for (let i = 0; i < validSongs.length; i += chunkSize) {
+          const chunk = validSongs.slice(i, i + chunkSize);
           const results = await Promise.all(
             chunk.map((s) => resolveSongOrFallback(s)),
           );
@@ -406,7 +441,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
             message: 'None of the requested songs could be resolved',
           });
         }
-        cmd.songs = resolvedSongs;
+        (cmd as any).songs = resolvedSongs;
       }
 
       const res = await jam2Manager.executeCommand(

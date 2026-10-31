@@ -44,8 +44,11 @@ class JamToastH2Test {
 
         override suspend fun awaitConnected(timeoutMs: Long): Result<Unit> = Result.success(Unit)
         override fun disconnect() { isConnected = false }
-        override suspend fun emit(event: String, data: Any?, ackTimeoutMs: Long): Result<JSONObject> =
-            Result.success(JSONObject().apply {
+        var emitOverride: ((String, Any?) -> Result<JSONObject>)? = null
+
+        override suspend fun emit(event: String, data: Any?, ackTimeoutMs: Long): Result<JSONObject> {
+            emitOverride?.let { return it(event, data) }
+            return Result.success(JSONObject().apply {
                 put("ok", true)
                 put("room", JSONObject().apply {
                     put("code", "ABCD")
@@ -71,6 +74,7 @@ class JamToastH2Test {
                     put("nowPlaying", JSONObject())
                 })
             })
+        }
     }
 
     private class FakeJamPlayerBridge : JamPlayerBridge {
@@ -311,5 +315,73 @@ class JamToastH2Test {
 
         // No uiEvents toast
         assertEquals(0, uiEvents.size)
+    }
+
+    @Test
+    fun testQueueAddFailure_showsServerErrorMessageToast() = runTest {
+        val myUserId = "host_1"
+        val stateStore = JamStateStore(myUserId = myUserId)
+        val clockSync = ClockSync()
+        val transport = FakeJamTransport()
+        val client = JamClient(
+            transport = transport,
+            clockSync = clockSync,
+            stateStore = stateStore,
+            tokenProvider = { "fake-token" },
+            monotonicNowMs = { System.currentTimeMillis() },
+            autoClockSync = false,
+            ioDispatcher = Dispatchers.Unconfined,
+            scope = backgroundScope
+        )
+
+        val toasts = mutableListOf<String>()
+        val sessionManager = JamSessionManager(
+            playerManager = FakeJamPlayerBridge(),
+            jamPreferences = FakeJamPreferences(),
+            coroutineScope = backgroundScope,
+            transportOverride = transport,
+            jamClientOverride = client,
+            clockSyncOverride = clockSync,
+            stateStoreOverride = stateStore,
+            toastEmitter = { toasts.add(it) }
+        )
+
+        sessionManager.joinJam("ABCD", myUserId, "Host 1")
+        runCurrent()
+
+        // Configure transport to return INVALID error for queueAdd
+        transport.emitOverride = { event, data ->
+            val obj = data as? JSONObject
+            if (obj?.optString("type") == "queueAdd") {
+                Result.failure(JamProtocolException("INVALID", "Invalid command: song.artists.0.id: String must contain at most 300 character(s)"))
+            } else {
+                Result.success(JSONObject().apply { put("ok", true) })
+            }
+        }
+
+        val testSong = Song(
+            id = "s1",
+            title = "Special Song",
+            artists = emptyList(),
+            album = null,
+            durationSeconds = 180,
+            imageUrl = null,
+            year = "2024",
+            language = "en",
+            hasLyrics = false,
+            playCount = 0,
+            label = "",
+            streamRef = "",
+            providerId = "jiosaavn"
+        )
+
+        sessionManager.addSongToJam(testSong)
+        runCurrent()
+
+        assertEquals(1, toasts.size)
+        assertEquals(
+            "Couldn't add Special Song: Invalid command: song.artists.0.id: String must contain at most 300 character(s)",
+            toasts[0]
+        )
     }
 }

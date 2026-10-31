@@ -15,7 +15,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.coroutines.resume
 
-class JamProtocolException(val code: String, message: String) : Exception("Jam error [$code]: $message")
+class JamProtocolException(val code: String, val serverMessage: String) : Exception("Jam error [$code]: $serverMessage")
 
 interface JamTransport {
     sealed class Event {

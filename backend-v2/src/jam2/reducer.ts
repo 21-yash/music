@@ -437,7 +437,7 @@ export function applyCommand(
       let skippedDuplicate = 0;
       let skippedFull = 0;
 
-      for (const song of cmd.songs) {
+      for (const song of (cmd.songs as unknown as Song[])) {
         // If the song was queued as a recommendation, remove that recommendation item
         const recIdx = nextRoom.queue.findIndex(
           (q) => q.recommended && isSameSong(q.song, song),

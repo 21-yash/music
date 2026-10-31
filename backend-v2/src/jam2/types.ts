@@ -4,31 +4,31 @@ export const JAM_ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 // ─── Song Schema (mirrors Android SongDto & backend Song) ─────────────
 export const artistCreditSchema = z.object({
-  id: z.string().max(100),
-  name: z.string().max(200),
-  imageUrl: z.string().max(1000).nullable().optional(),
+  id: z.string().max(300),
+  name: z.string().max(300),
+  imageUrl: z.string().max(2048).nullable().optional(),
 }).strip();
 
 export const albumRefSchema = z.object({
-  id: z.string().max(100),
+  id: z.string().max(300),
   title: z.string().max(300),
-  imageUrl: z.string().max(1000).nullable().optional(),
+  imageUrl: z.string().max(2048).nullable().optional(),
 }).strip();
 
 export const songSchema = z.object({
-  id: z.string().min(1).max(100),
+  id: z.string().min(1).max(300),
   title: z.string().min(1).max(300),
-  artists: z.array(artistCreditSchema).max(30).default([]),
+  artists: z.array(artistCreditSchema).max(50).default([]),
   album: albumRefSchema.nullable().optional(),
   duration: z.number().int().min(0).max(86400).default(0), // in seconds
-  imageUrl: z.string().max(1000).nullable().optional(),
-  year: z.string().max(20).optional().default(''),
-  language: z.string().max(50).optional().default(''),
+  imageUrl: z.string().max(2048).nullable().optional(),
+  year: z.string().max(50).optional().default(''),
+  language: z.string().max(100).optional().default(''),
   hasLyrics: z.boolean().optional().default(false),
   playCount: z.number().int().min(0).optional().default(0),
-  label: z.string().max(200).optional().default(''),
-  streamRef: z.string().max(500).optional().default(''),
-  providerId: z.string().max(50).optional().default(''),
+  label: z.string().max(300).optional().default(''),
+  streamRef: z.string().max(2048).optional().default(''),
+  providerId: z.string().max(100).optional().default(''),
 }).strip();
 
 export type Song = z.infer<typeof songSchema>;
@@ -252,7 +252,7 @@ export const queueAddCmdSchema = z.object({
 export const queueAddManyCmdSchema = z.object({
   code: roomCodeField,
   type: z.literal('queueAddMany'),
-  songs: z.array(songSchema).min(1).max(20),
+  songs: z.array(z.unknown()).min(1).max(20),
 });
 
 export const promoteCmdSchema = z.object({

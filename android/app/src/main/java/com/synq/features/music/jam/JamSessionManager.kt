@@ -730,7 +730,9 @@ class JamSessionManager(
                 }
             }
             res.onFailure { err ->
-                showToast(err.message ?: "Failed to add song")
+                val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add song"
+                safeLogW("JamAdd", "queueAdd failed: msg=$serverMsg, titleLen=${song.title.length}, idLen=${song.id.length}, artistsCount=${song.artists.size}")
+                showToast("Couldn't add ${song.title}: $serverMsg")
             }
         }
         return true
@@ -772,7 +774,10 @@ class JamSessionManager(
                     }
                 }
                 res.onFailure { err ->
-                    showToast(err.message ?: "Failed to add songs")
+                    val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add songs"
+                    safeLogW("JamAdd", "queueAddMany failed: msg=$serverMsg, count=${toAdd.size}")
+                    val firstTitle = toAdd.firstOrNull()?.title ?: "songs"
+                    showToast("Couldn't add $firstTitle: $serverMsg")
                 }
             } finally {
                 delay(300L) // debounce

@@ -80,8 +80,8 @@ export function clearSongResolverCache(): void {
  */
 export function mergeResolvedSong(clientSong: Song, resolved: Song): Song {
   const title = (resolved.title && resolved.title.trim().length > 0)
-    ? resolved.title.trim().slice(0, 200)
-    : (clientSong.title || '').trim().slice(0, 200);
+    ? resolved.title.trim().slice(0, 300)
+    : (clientSong.title || '').trim().slice(0, 300);
 
   const rawArtists = (resolved.artists && resolved.artists.length > 0)
     ? resolved.artists
@@ -89,17 +89,18 @@ export function mergeResolvedSong(clientSong: Song, resolved: Song): Song {
 
   const artists = rawArtists
     .map((a) => ({
-      id: (a.id || '').slice(0, 100),
-      name: (a.name || '').trim().slice(0, 100),
+      id: (a.id || '').slice(0, 300),
+      name: (a.name || '').trim().slice(0, 300),
       imageUrl: sanitizeUrl(a.imageUrl),
     }))
-    .filter((a) => a.name.length > 0);
+    .filter((a) => a.name.length > 0)
+    .slice(0, 50);
 
   const rawAlbum = resolved.album || clientSong.album;
   const album = rawAlbum && rawAlbum.title
     ? {
-        id: (rawAlbum.id || '').slice(0, 100),
-        title: (rawAlbum.title || '').trim().slice(0, 200),
+        id: (rawAlbum.id || '').slice(0, 300),
+        title: (rawAlbum.title || '').trim().slice(0, 300),
         imageUrl: sanitizeUrl(rawAlbum.imageUrl),
       }
     : null;
@@ -122,11 +123,11 @@ export function mergeResolvedSong(clientSong: Song, resolved: Song): Song {
     album,
     duration,
     imageUrl,
-    year: (resolved.year || clientSong.year || '').slice(0, 20),
-    language: (resolved.language || clientSong.language || '').slice(0, 50),
+    year: (resolved.year || clientSong.year || '').slice(0, 50),
+    language: (resolved.language || clientSong.language || '').slice(0, 100),
     hasLyrics: resolved.hasLyrics ?? clientSong.hasLyrics ?? false,
     playCount: resolved.playCount ?? clientSong.playCount ?? 0,
-    label: (resolved.label || clientSong.label || '').slice(0, 200),
+    label: (resolved.label || clientSong.label || '').slice(0, 300),
     streamRef: resolved.streamRef || '', // never trust client
     providerId: resolved.providerId || clientSong.providerId || '',
   };
