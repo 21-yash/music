@@ -24,6 +24,14 @@ internal fun safeLogW(tag: String, msg: String, tr: Throwable? = null) {
     }
 }
 
+internal fun safeLogI(tag: String, msg: String) {
+    try {
+        android.util.Log.i(tag, msg)
+    } catch (_: Throwable) {
+        println("INFO: [$tag] $msg")
+    }
+}
+
 class JamDecodeException(message: String) : Exception(message)
 
 fun JSONObject.optStringOrNull(key: String): String? {

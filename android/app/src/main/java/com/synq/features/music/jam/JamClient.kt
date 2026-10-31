@@ -411,7 +411,7 @@ class JamClient(
     }
 
     private fun startReconnectLoop(code: String, resetBackoff: Boolean, trigger: String = "unknown") {
-        android.util.Log.i("JamClient", "Starting reconnect loop for room $code. Trigger: $trigger")
+        safeLogI("JamClient", "Starting reconnect loop for room $code. Trigger: $trigger")
         if (resetBackoff) {
             reconnectAttempt = 1
             reconnectStartedAt = monotonicNowMs()
