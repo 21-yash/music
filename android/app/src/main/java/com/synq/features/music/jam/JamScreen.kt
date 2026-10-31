@@ -433,9 +433,19 @@ fun JamScreen(
                         .padding(horizontal = 20.dp)
                 ) {
                     // Status Pill
+                    var showReconnectingChip by remember { mutableStateOf(false) }
+                    LaunchedEffect(clientState) {
+                        if (clientState is JamClientState.Reconnecting) {
+                            kotlinx.coroutines.delay(4000L)
+                            showReconnectingChip = true
+                        } else {
+                            showReconnectingChip = false
+                        }
+                    }
+
                     val isStepOut = localPlaybackState is LocalPlaybackState.LocalStepOut
                     val isCatchingUp = localPlaybackState is LocalPlaybackState.CatchingUp
-                    val isReconnecting = clientState is JamClientState.Reconnecting
+                    val isReconnecting = showReconnectingChip && (clientState is JamClientState.Reconnecting)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

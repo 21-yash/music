@@ -24,8 +24,9 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
       credentials: true,
     },
     maxHttpBufferSize: 50_000,
-    pingInterval: 10_000,
-    pingTimeout: 8_000,
+    // Task H6: Mobile-friendly heartbeat settings to avoid spurious disconnects
+    pingInterval: 20_000,
+    pingTimeout: 25_000,
   });
   io = server;
 

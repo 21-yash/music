@@ -255,18 +255,6 @@ private fun MainAppContent(
         }
     }
 
-    // D4: Quiet reconnecting & reconnected toasts
-    var prevClientState by remember { mutableStateOf<JamClientState?>(null) }
-    LaunchedEffect(jamClientState) {
-        val prev = prevClientState
-        val curr = jamClientState
-        if (prev is JamClientState.Active && curr is JamClientState.Reconnecting && curr.attempt == 1) {
-            android.widget.Toast.makeText(context, "Reconnecting to Jam…", android.widget.Toast.LENGTH_SHORT).show()
-        } else if (prev is JamClientState.Reconnecting && curr is JamClientState.Active) {
-            android.widget.Toast.makeText(context, "Reconnected to Jam ✓", android.widget.Toast.LENGTH_SHORT).show()
-        }
-        prevClientState = curr
-    }
 
     LaunchedEffect(jamState.error) {
         jamState.error?.let { err ->

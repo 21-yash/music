@@ -553,9 +553,14 @@ class JamSessionManager(
         lastLoadingAbortedToastTrackSeq = null
     }
 
+    private val networkDebouncer = NetworkChangeDebouncer(scope) {
+        if (!_jamState.value.isInJam) return@NetworkChangeDebouncer
+        jamClient.onNetworkRestored()
+    }
+
     fun onNetworkRestored() {
         if (!_jamState.value.isInJam) return
-        jamClient.onNetworkRestored()
+        networkDebouncer.onNetworkChanged()
     }
 
     fun setError(message: String) {

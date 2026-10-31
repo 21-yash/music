@@ -367,6 +367,11 @@ class JamClient(
         _clientState.value = JamClientState.Disconnected
     }
 
+    internal fun setActiveForTesting(code: String, role: JamRole = JamRole.GUEST) {
+        activeRoomCode = code
+        _clientState.value = JamClientState.Active(code, role)
+    }
+
     fun onNetworkRestored() {
         val code = activeRoomCode ?: return
         val current = _clientState.value
@@ -374,25 +379,39 @@ class JamClient(
 
         if (current is JamClientState.Active && transport.isConnected) {
             scope.launch(ioDispatcher) {
-                val ping = transport.emit("jam2:time", null, ackTimeoutMs = 1500L)
-                if (ping.isFailure) {
-                    transport.disconnect()
-                    startReconnectLoop(code, resetBackoff = true)
+                val ping1 = transport.emit("jam2:time", null, ackTimeoutMs = HealthCheckPolicy.PING_TIMEOUT_MS)
+                val action1 = HealthCheckPolicy.onFirstPingResult(ping1.isSuccess)
+                when (action1) {
+                    is HealthCheckAction.DoNothing -> return@launch
+                    is HealthCheckAction.Retry -> {
+                        delay(action1.delayMs)
+                        val ping2 = transport.emit("jam2:time", null, ackTimeoutMs = action1.timeoutMs)
+                        val action2 = HealthCheckPolicy.onRetryPingResult(ping2.isSuccess)
+                        if (action2 is HealthCheckAction.DisconnectAndReconnect) {
+                            transport.disconnect()
+                            startReconnectLoop(code, resetBackoff = true, trigger = "health-check failed")
+                        }
+                    }
+                    is HealthCheckAction.DisconnectAndReconnect -> {
+                        transport.disconnect()
+                        startReconnectLoop(code, resetBackoff = true, trigger = "health-check failed")
+                    }
                 }
             }
             return
         }
 
-        startReconnectLoop(code, resetBackoff = true)
+        startReconnectLoop(code, resetBackoff = true, trigger = "network restored")
     }
 
     private fun handleConnectionLoss() {
         val code = activeRoomCode ?: return
         if (_clientState.value is JamClientState.Closed) return
-        startReconnectLoop(code, resetBackoff = false)
+        startReconnectLoop(code, resetBackoff = false, trigger = "transport connection lost")
     }
 
-    private fun startReconnectLoop(code: String, resetBackoff: Boolean) {
+    private fun startReconnectLoop(code: String, resetBackoff: Boolean, trigger: String = "unknown") {
+        android.util.Log.i("JamClient", "Starting reconnect loop for room $code. Trigger: $trigger")
         if (resetBackoff) {
             reconnectAttempt = 1
             reconnectStartedAt = monotonicNowMs()
