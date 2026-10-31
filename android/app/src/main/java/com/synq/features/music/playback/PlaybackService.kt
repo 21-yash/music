@@ -4,7 +4,9 @@ import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -27,6 +29,48 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
+    private var jamAwarePlayer: JamAwarePlayer? = null
+
+    class JamAwarePlayer(
+        player: Player,
+        private val jamSessionManagerProvider: javax.inject.Provider<com.synq.features.music.jam.JamSessionManager>
+    ) : ForwardingPlayer(player) {
+
+        @Volatile
+        var isCurrentSeekExternal: Boolean = false
+
+        override fun seekTo(positionMs: Long) {
+            seekTo(currentMediaItemIndex, positionMs)
+        }
+
+        override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+            val isExternal = isCurrentSeekExternal
+            isCurrentSeekExternal = false
+
+            val jamManager = jamSessionManagerProvider.get()
+            val isInJam = jamManager.jamState.value.isInJam
+            val uiState = jamManager.stateStore.uiState.value
+            val canPlayback = uiState.canControlPlayback || uiState.isHost
+
+            val route = JamSeekRouter.route(
+                isInJam = isInJam,
+                isExternalController = isExternal,
+                canPlayback = canPlayback
+            )
+
+            when (route) {
+                JamSeekRouter.Route.PASS_THROUGH -> {
+                    super.seekTo(mediaItemIndex, positionMs)
+                }
+                JamSeekRouter.Route.ROUTE_TO_JAM -> {
+                    jamManager.seekTo(positionMs)
+                }
+                JamSeekRouter.Route.DROP -> {
+                    // Drop seek from unpermitted external controller
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -110,6 +154,10 @@ class PlaybackService : MediaSessionService() {
                             jamManager.seekTo(minOf(duration, current + 10_000L))
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
+                        PlaybackCommandRouter.Action.SEEK_IN_CURRENT -> {
+                            jamAwarePlayer?.isCurrentSeekExternal = true
+                            return androidx.media3.session.SessionResult.RESULT_SUCCESS
+                        }
                         PlaybackCommandRouter.Action.SKIP_ONLY -> {
                             return androidx.media3.session.SessionResult.RESULT_INFO_SKIPPED
                         }
@@ -128,7 +176,10 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        mediaSession = MediaSession.Builder(this, player!!)
+        val wrappedPlayer = JamAwarePlayer(player!!, jamSessionManagerProvider)
+        jamAwarePlayer = wrappedPlayer
+
+        mediaSession = MediaSession.Builder(this, wrappedPlayer)
             .setCallback(callback)
             .build()
 
@@ -160,6 +211,8 @@ class PlaybackService : MediaSessionService() {
             release()
             mediaSession = null
         }
+        jamAwarePlayer = null
+        player = null
         super.onDestroy()
     }
 }

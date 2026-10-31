@@ -9,6 +9,7 @@ object PlaybackCommandRouter {
         PREV,
         SEEK_BACK,
         SEEK_FWD,
+        SEEK_IN_CURRENT,
         SKIP_ONLY,
         STOP
     }
@@ -50,7 +51,7 @@ object PlaybackCommandRouter {
             Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> Action.PREV
             Player.COMMAND_SEEK_BACK -> if (canPlayback) Action.SEEK_BACK else Action.SKIP_ONLY
             Player.COMMAND_SEEK_FORWARD -> if (canPlayback) Action.SEEK_FWD else Action.SKIP_ONLY
-            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> Action.SKIP_ONLY
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> if (canPlayback) Action.SEEK_IN_CURRENT else Action.SKIP_ONLY
             Player.COMMAND_STOP -> Action.STOP
             else -> null
         }

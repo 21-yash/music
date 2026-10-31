@@ -122,9 +122,9 @@ class PlaybackCommandRouterTest {
     }
 
     @Test
-    fun testSeekInCurrentMapsToSkipOnly() {
+    fun testSeekInCurrentGatedByCanPlayback() {
         val action = PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, canPlayback = true)
-        assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, action)
+        assertEquals(PlaybackCommandRouter.Action.SEEK_IN_CURRENT, action)
 
         val actionNonPermitted = PlaybackCommandRouter.mapJamCommand(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM, canPlayback = false)
         assertEquals(PlaybackCommandRouter.Action.SKIP_ONLY, actionNonPermitted)
