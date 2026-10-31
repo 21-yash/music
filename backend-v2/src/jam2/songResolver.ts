@@ -4,7 +4,7 @@ import * as musicService from '../services/musicService';
 import { logger } from '../utils/logger';
 
 export async function storeStreamTokensFor(song: Song): Promise<void> {
-  return musicService.storeStreamTokensFor(song);
+  return musicService.storeStreamTokensFor(song as any);
 }
 
 export const DEFAULT_ALLOWED_HOST_PATTERNS = [
@@ -143,7 +143,7 @@ export async function resolveSong(id: string, providerId?: string): Promise<Song
     const res = await customResolver(id, providerId);
     if (res) {
       cacheResolvedSong(res);
-      await musicService.storeStreamTokensFor(res);
+      await musicService.storeStreamTokensFor(res as any);
       return res;
     }
   }
@@ -264,7 +264,7 @@ export async function resolveSongOrFallback(clientSong: Song): Promise<Song | nu
     ...clientSong,
     streamRef: clientSong.id,
     providerId,
-  });
+  } as any);
 
   return {
     id: clientSong.id,
