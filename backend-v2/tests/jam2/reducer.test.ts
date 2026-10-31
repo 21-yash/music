@@ -996,6 +996,80 @@ describe('Jam2 Reducer', () => {
         expect(res.room.members.has('guest_1')).toBe(false);
       }
     });
+
+    it('H1.c: setDefaults with applyToExisting=true updates existing non-host members, preserves host, bumps version, emits perm_changed', () => {
+      const room = makeTestRoom();
+      const vBefore = room.version;
+
+      const res = applyCommand(
+        room,
+        {
+          code: 'TEST',
+          type: 'setDefaults',
+          perms: { playback: true, queueAdd: false, queueManage: true },
+          applyToExisting: true,
+        },
+        'host_1',
+        2000,
+      );
+
+      expect('room' in res).toBe(true);
+      if ('room' in res) {
+        expect(res.room.version).toBe(vBefore + 1);
+        expect(res.room.defaults).toEqual({ playback: true, queueAdd: false, queueManage: true });
+
+        // Host perms unchanged
+        const host = res.room.members.get('host_1');
+        expect(host?.perms.playback).toBe(true);
+        expect(host?.perms.queueAdd).toBe(true);
+
+        // Guest perms updated
+        const guest = res.room.members.get('guest_1');
+        expect(guest?.perms.playback).toBe(true);
+        expect(guest?.perms.queueAdd).toBe(false);
+        expect(guest?.perms.queueManage).toBe(true);
+
+        // Events emitted
+        expect(res.events).toEqual([
+          {
+            kind: 'perm_changed',
+            userId: 'guest_1',
+            perms: { playback: true, queueAdd: false, queueManage: true },
+          },
+        ]);
+      }
+    });
+
+    it('H1.c: setDefaults with applyToExisting=false updates defaults but leaves existing members unchanged', () => {
+      const room = makeTestRoom();
+      const vBefore = room.version;
+      const guestPermsBefore = { ...room.members.get('guest_1')!.perms };
+
+      const res = applyCommand(
+        room,
+        {
+          code: 'TEST',
+          type: 'setDefaults',
+          perms: { playback: true, queueAdd: false, queueManage: true },
+          applyToExisting: false,
+        },
+        'host_1',
+        2000,
+      );
+
+      expect('room' in res).toBe(true);
+      if ('room' in res) {
+        expect(res.room.version).toBe(vBefore + 1);
+        expect(res.room.defaults).toEqual({ playback: true, queueAdd: false, queueManage: true });
+
+        // Guest perms unchanged
+        const guest = res.room.members.get('guest_1');
+        expect(guest?.perms).toEqual(guestPermsBefore);
+
+        // No perm_changed events emitted
+        expect(res.events.length).toBe(0);
+      }
+    });
   });
 });
 

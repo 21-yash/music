@@ -347,7 +347,7 @@ class RootViewModel @Inject constructor(
     }
 
     fun setDefaults(perms: com.synq.features.music.jam.JamPermissions) {
-        jamSessionManager.setDefaults(perms)
+        jamSessionManager.setDefaults(perms, applyToExisting = true)
     }
 
     fun kickMember(userId: String) {

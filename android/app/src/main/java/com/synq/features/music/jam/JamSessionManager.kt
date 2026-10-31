@@ -829,16 +829,7 @@ class JamSessionManager(
 
     fun setDefaults(perms: JamPermissions, applyToExisting: Boolean = false) {
         scope.launch {
-            val payload = JSONObject().apply {
-                put("perms", JSONObject().apply {
-                    put("playback", perms.playback)
-                    put("queueAdd", perms.queueAdd)
-                    put("queueManage", perms.queueManage)
-                })
-                if (applyToExisting) {
-                    put("applyToExisting", true)
-                }
-            }
+            val payload = buildSetDefaultsPayload(perms, applyToExisting)
             val res = jamClient.sendCommand("setDefaults", payload)
             res.onFailure { err -> showToast(err.message ?: "Permission denied") }
         }
@@ -1209,6 +1200,19 @@ class JamSessionManager(
             android.util.Log.w(tag, msg)
         } catch (_: Throwable) {
             println("[$tag] $msg")
+        }
+    }
+}
+
+internal fun buildSetDefaultsPayload(perms: JamPermissions, applyToExisting: Boolean = false): JSONObject {
+    return JSONObject().apply {
+        put("perms", JSONObject().apply {
+            put("playback", perms.playback)
+            put("queueAdd", perms.queueAdd)
+            put("queueManage", perms.queueManage)
+        })
+        if (applyToExisting) {
+            put("applyToExisting", true)
         }
     }
 }
