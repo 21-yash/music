@@ -76,5 +76,58 @@ class PlaybackSourcePolicyTest {
         )
         assertEquals(PlaybackSourcePolicy.ErrorAction.GIVE_UP, actionFromNetwork)
     }
+
+    @Test
+    fun testDecideSavedUriReuse_freshSavedUri_notFullyCached_reuses() {
+        val decision = PlaybackSourcePolicy.decideSavedUriReuse(
+            isFullyCached = false,
+            savedUri = "https://rr1---sn-4g5ednss.googlevideo.com/videoplayback?id=123",
+            uriAgeMs = 15 * 60 * 1000L // 15 mins old
+        )
+        assertEquals(PlaybackSourcePolicy.SavedUriDecision.REUSE, decision)
+        assertEquals(true, PlaybackSourcePolicy.shouldReuseSavedUri(false, "https://example.com/stream", 15 * 60 * 1000L))
+    }
+
+    @Test
+    fun testDecideSavedUriReuse_olderThanLimit_extracts() {
+        val decision = PlaybackSourcePolicy.decideSavedUriReuse(
+            isFullyCached = false,
+            savedUri = "https://rr1---sn-4g5ednss.googlevideo.com/videoplayback?id=123",
+            uriAgeMs = 2 * 60 * 60 * 1000L + 1L // 2 hours + 1 ms old
+        )
+        assertEquals(PlaybackSourcePolicy.SavedUriDecision.EXTRACT, decision)
+        assertEquals(false, PlaybackSourcePolicy.shouldReuseSavedUri(false, "https://example.com/stream", 3 * 60 * 60 * 1000L))
+    }
+
+    @Test
+    fun testDecideSavedUriReuse_noSavedUri_extracts() {
+        val decision = PlaybackSourcePolicy.decideSavedUriReuse(
+            isFullyCached = false,
+            savedUri = null,
+            uriAgeMs = null
+        )
+        assertEquals(PlaybackSourcePolicy.SavedUriDecision.EXTRACT, decision)
+        assertEquals(false, PlaybackSourcePolicy.shouldReuseSavedUri(false, null, null))
+    }
+
+    @Test
+    fun testDecideSavedUriReuse_blankSavedUri_extracts() {
+        val decision = PlaybackSourcePolicy.decideSavedUriReuse(
+            isFullyCached = false,
+            savedUri = "   ",
+            uriAgeMs = 1000L
+        )
+        assertEquals(PlaybackSourcePolicy.SavedUriDecision.EXTRACT, decision)
+    }
+
+    @Test
+    fun testDecideSavedUriReuse_negativeAge_extracts() {
+        val decision = PlaybackSourcePolicy.decideSavedUriReuse(
+            isFullyCached = false,
+            savedUri = "https://example.com/stream",
+            uriAgeMs = -100L
+        )
+        assertEquals(PlaybackSourcePolicy.SavedUriDecision.EXTRACT, decision)
+    }
 }
 

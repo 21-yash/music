@@ -14,6 +14,41 @@ object PlaybackSourcePolicy {
         GIVE_UP
     }
 
+    const val PLAY_REUSE_MAX_AGE_MS: Long = 2 * 60 * 60 * 1000L // 2 hours
+
+    enum class SavedUriDecision {
+        REUSE,
+        EXTRACT
+    }
+
+    /**
+     * Decides whether to reuse a previously saved stream URI (e.g. from prefetch or direct extraction)
+     * even when the song is not fully cached, avoiding redundant NewPipe extraction.
+     */
+    fun decideSavedUriReuse(
+        isFullyCached: Boolean,
+        savedUri: String?,
+        uriAgeMs: Long?,
+        maxAgeMs: Long = PLAY_REUSE_MAX_AGE_MS
+    ): SavedUriDecision {
+        if (savedUri.isNullOrBlank()) {
+            return SavedUriDecision.EXTRACT
+        }
+        if (uriAgeMs == null || uriAgeMs < 0L || uriAgeMs > maxAgeMs) {
+            return SavedUriDecision.EXTRACT
+        }
+        return SavedUriDecision.REUSE
+    }
+
+    fun shouldReuseSavedUri(
+        isFullyCached: Boolean,
+        savedUri: String?,
+        uriAgeMs: Long?,
+        maxAgeMs: Long = PLAY_REUSE_MAX_AGE_MS
+    ): Boolean {
+        return decideSavedUriReuse(isFullyCached, savedUri, uriAgeMs, maxAgeMs) == SavedUriDecision.REUSE
+    }
+
     fun chooseSource(fullyCached: Boolean, savedUri: String?): SourceType {
         if (!fullyCached) {
             return SourceType.NETWORK

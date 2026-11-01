@@ -451,7 +451,22 @@ class MusicPlayerManager @Inject constructor(
                 var isDirect = false
 
                 val plan = StreamResolutionPlan.choose(song.providerId, song.id)
-                if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
+
+                // Task M1: Before extracting, use saved stream URI if younger than 2h even when not fully cached
+                val savedStreamUri = streamCacheStorage.getStreamUri(song.id, PlaybackSourcePolicy.PLAY_REUSE_MAX_AGE_MS)
+                val uriAgeMs = streamCacheStorage.getStreamUriAgeMs(song.id)
+                val reuseDecision = PlaybackSourcePolicy.decideSavedUriReuse(
+                    isFullyCached = isCached,
+                    savedUri = savedStreamUri,
+                    uriAgeMs = uriAgeMs,
+                    maxAgeMs = PlaybackSourcePolicy.PLAY_REUSE_MAX_AGE_MS
+                )
+
+                if (reuseDecision == PlaybackSourcePolicy.SavedUriDecision.REUSE && !savedStreamUri.isNullOrBlank()) {
+                    finalUri = savedStreamUri
+                    isDirect = (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE)
+                    safeLogI("PlayTiming", "Reusing saved stream URI (age=${uriAgeMs}ms, direct=$isDirect) for songId=${song.id}")
+                } else if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
                     val directUri = extractYouTubeStream(song.id)
                     if (!directUri.isNullOrBlank()) {
                         finalUri = directUri

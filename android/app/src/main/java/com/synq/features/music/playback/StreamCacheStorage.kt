@@ -46,6 +46,22 @@ class StreamCacheStorage @Inject constructor(
         return entry.substring(delimiter + 1)
     }
 
+    fun getStreamUriAgeMs(songId: String, nowMs: Long = System.currentTimeMillis()): Long? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) return null
+        val timestamp = entry.substring(0, delimiter).toLongOrNull() ?: return null
+        return (nowMs - timestamp).coerceAtLeast(0L)
+    }
+
+    fun getRawStreamUri(songId: String): String? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) return null
+        val uri = entry.substring(delimiter + 1)
+        return uri.takeIf { it.isNotBlank() }
+    }
+
     fun invalidateStreamUri(songId: String) {
         removeStreamUri(songId)
     }
