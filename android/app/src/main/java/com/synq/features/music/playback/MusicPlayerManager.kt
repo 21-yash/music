@@ -157,7 +157,7 @@ class MusicPlayerManager @Inject constructor(
             scope.launch(Dispatchers.IO) {
                 try {
                     val warmStartTime = SystemClock.elapsedRealtime()
-                    extractYouTubeStream("dQw4w9WgXcQ")
+                    extractYouTubeStream("dQw4w9WgXcQ", reason = "warmup")
                     val duration = SystemClock.elapsedRealtime() - warmStartTime
                     safeLogI("PlayTiming", "NewPipe warm-up completed in $duration ms")
                 } catch (e: Exception) {
@@ -165,6 +165,10 @@ class MusicPlayerManager @Inject constructor(
                 }
             }
         }
+    }
+
+    private val singleFlightExtractor = SingleFlightExtractor(scope = scope) { videoId, reason ->
+        rawExtractYouTubeStream(videoId, reason)
     }
 
     private val reResolveGuard = ReResolveGuard()
@@ -467,7 +471,7 @@ class MusicPlayerManager @Inject constructor(
                     isDirect = (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE)
                     safeLogI("PlayTiming", "Reusing saved stream URI (age=${uriAgeMs}ms, direct=$isDirect) for songId=${song.id}")
                 } else if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
-                    val directUri = extractYouTubeStream(song.id)
+                    val directUri = extractYouTubeStream(song.id, reason = "play")
                     if (!directUri.isNullOrBlank()) {
                         finalUri = directUri
                         isDirect = true
@@ -492,7 +496,7 @@ class MusicPlayerManager @Inject constructor(
                                     break
                                 }
                                 is StreamInfo.YouTube -> {
-                                    val ytUri = extractYouTubeStream(info.videoId)
+                                    val ytUri = extractYouTubeStream(info.videoId, reason = "play")
                                     if (ytUri.isNullOrBlank()) {
                                         val err = AppError.Server(StreamRetryPolicy.CODE_YOUTUBE_EXTRACTION_FAILED, "YouTube extraction failed")
                                         lastError = err
@@ -701,7 +705,11 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private suspend fun extractYouTubeStream(videoId: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun extractYouTubeStream(videoId: String, reason: String = "play"): String? {
+        return singleFlightExtractor.extract(videoId, reason)
+    }
+
+    private suspend fun rawExtractYouTubeStream(videoId: String, reason: String): String? = withContext(Dispatchers.IO) {
         val extractStartTime = SystemClock.elapsedRealtime()
         try {
             val url = "https://www.youtube.com/watch?v=$videoId"
@@ -711,11 +719,11 @@ class MusicPlayerManager @Inject constructor(
             val bestAudio = audioStreams.maxByOrNull { it.averageBitrate }
             val result = bestAudio?.content ?: audioStreams.firstOrNull()?.content
             val duration = SystemClock.elapsedRealtime() - extractStartTime
-            safeLogI("PlayTiming", "NewPipe extraction took $duration ms")
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms (reason=$reason, id=${videoId.take(4)})")
             return@withContext result
         } catch (e: Exception) {
             val duration = SystemClock.elapsedRealtime() - extractStartTime
-            safeLogI("PlayTiming", "NewPipe extraction took $duration ms")
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms (reason=$reason, id=${videoId.take(4)})")
             android.util.Log.w("NewPipeExtractor", "Failed to extract YouTube stream: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
@@ -1190,7 +1198,7 @@ class MusicPlayerManager @Inject constructor(
                 } else {
                     val plan = StreamResolutionPlan.choose(song.providerId, song.id)
                     val directUri = if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
-                        extractYouTubeStream(song.id)
+                        extractYouTubeStream(song.id, reason = "prefetch")
                     } else null
 
                     if (!directUri.isNullOrBlank()) {
@@ -1200,7 +1208,7 @@ class MusicPlayerManager @Inject constructor(
                         if (streamResult is AppResult.Success) {
                             when (val info = streamResult.data) {
                                 is StreamInfo.JioSaavn -> info.url
-                                is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
+                                is StreamInfo.YouTube -> extractYouTubeStream(info.videoId, reason = "prefetch")
                                 is StreamInfo.None -> null
                             }
                         } else null
