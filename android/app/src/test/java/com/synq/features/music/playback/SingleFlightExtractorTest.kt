@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -199,6 +201,34 @@ class SingleFlightExtractorTest {
         assertEquals("https://stream.example/songA", prefetchRes)
         assertEquals("https://stream.example/songA", playRes)
         assertEquals(1, callCount.get())
+    }
+
+    @Test
+    fun testInstantCompletion_noUninitializedPropertyException_leavesMapEmpty() = runTest {
+        val testScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val extractor = SingleFlightExtractor(testScope) { videoId, _ ->
+            if (videoId.hashCode() % 2 == 0) {
+                "https://stream.example/$videoId"
+            } else {
+                throw IllegalStateException("Instant failure for $videoId")
+            }
+        }
+
+        coroutineScope {
+            val jobs = (0 until 1000).map { i ->
+                async(Dispatchers.Default) {
+                    val id = "instant_$i"
+                    try {
+                        extractor.extract(id, "play")
+                    } catch (_: IllegalStateException) {
+                        // Expected
+                    }
+                }
+            }
+            jobs.awaitAll()
+        }
+
+        assertEquals(0, extractor.inFlightCount)
     }
 }
 

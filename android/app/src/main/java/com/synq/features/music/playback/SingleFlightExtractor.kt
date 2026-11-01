@@ -1,6 +1,7 @@
 package com.synq.features.music.playback
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,9 @@ class SingleFlightExtractor(
     private val inFlight = ConcurrentHashMap<String, Deferred<String?>>()
     private val prefetchSemaphore = Semaphore(1)
 
+    val inFlightCount: Int
+        get() = inFlight.size
+
     private fun getOrCreateDeferred(videoId: String, reason: String): Deferred<String?> {
         inFlight[videoId]?.let { return it }
 
@@ -34,16 +38,17 @@ class SingleFlightExtractor(
             val existing = inFlight[videoId]
             if (existing != null) return existing
 
-            lateinit var d: Deferred<String?>
-            d = scope.async {
+            lateinit var thatDeferred: Deferred<String?>
+            thatDeferred = scope.async(start = CoroutineStart.LAZY) {
                 try {
                     extractFn(videoId, reason)
                 } finally {
-                    inFlight.remove(videoId, d)
+                    inFlight.remove(videoId, thatDeferred)
                 }
             }
-            inFlight[videoId] = d
-            return d
+            inFlight[videoId] = thatDeferred
+            thatDeferred.start()
+            return thatDeferred
         }
     }
 
