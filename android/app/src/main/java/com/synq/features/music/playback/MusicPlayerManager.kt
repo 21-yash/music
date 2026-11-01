@@ -171,6 +171,8 @@ class MusicPlayerManager @Inject constructor(
         rawExtractYouTubeStream(videoId, reason)
     }
 
+    private var lastPrefetchedNextId: String? = null
+
     private val reResolveGuard = ReResolveGuard()
     private var playingFromFullCache: Boolean = false
     private val autoSkipPolicy = AutoSkipPolicy()
@@ -264,6 +266,7 @@ class MusicPlayerManager @Inject constructor(
         sourcePlaylist = null
         nextSourceIndex = 0
         unshuffledQueue = null
+        lastPrefetchedNextId = null
         _recommendedSongIds.value = emptySet()
         sessionPlayedIds.add(song.id)
         _queue.value = listOf(song)
@@ -278,6 +281,7 @@ class MusicPlayerManager @Inject constructor(
         if (songs.isEmpty()) return
         if (jamInterceptor?.onPlayQueue(songs, startIndex) == true) return
         activeRadioArtist = null
+        lastPrefetchedNextId = null
         _recommendedSongIds.value = emptySet()
         val validIndex = startIndex.coerceIn(0, songs.size - 1)
         unshuffledQueue = songs
@@ -341,6 +345,7 @@ class MusicPlayerManager @Inject constructor(
         if (initialTracks.isNotEmpty()) {
             val seed = initialTracks.first()
             sessionPlayedIds.add(seed.id)
+            lastPrefetchedNextId = null
             _queue.value = initialTracks
             _currentIndex.value = 0
             loadAndPlay(seed)
@@ -384,6 +389,9 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
+        if (_playbackState.value.currentSong?.id != song.id) {
+            lastPrefetchedNextId = null
+        }
         reResolveGuard.onSongStarted(song.id)
 
         // If this song was part of recommended songs, push it above the separator (personal queue only)
@@ -1095,6 +1103,8 @@ class MusicPlayerManager @Inject constructor(
             }
             unshuffledQueue = null
         }
+        lastPrefetchedNextId = null
+        triggerNextTrackPrefetch()
     }
 
     fun setShuffle(enabled: Boolean) {
@@ -1128,6 +1138,7 @@ class MusicPlayerManager @Inject constructor(
             sourcePlaylist = stashed.sourcePlaylist
             nextSourceIndex = stashed.nextSourceIndex
             activeRadioArtist = stashed.activeRadioArtist
+            lastPrefetchedNextId = null
         }
         _jamRecommendedQids.value = emptySet()
         _jamQueueQids.value = emptyList()
@@ -1309,6 +1320,23 @@ class MusicPlayerManager @Inject constructor(
         controller?.removeListener(playerListener)
     }
 
+    private fun triggerNextTrackPrefetch() {
+        val nextSong = QueuePrefetchPolicy.decideNextTrackPrefetch(
+            currentIndex = _currentIndex.value,
+            queue = _queue.value,
+            isRepeatOne = _isRepeatOne.value,
+            lastPrefetchedNextId = lastPrefetchedNextId,
+            isJamActive = jamInterceptor != null,
+            isOnline = networkMonitor.isOnline.value,
+            isFullyCached = { audioCacheProvider.isSongCached(it) }
+        )
+
+        if (nextSong != null) {
+            lastPrefetchedNextId = nextSong.id
+            prefetchTrack(nextSong)
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             jamInterceptor?.onPlayWhenReadyChanged(playWhenReady, reason)
@@ -1318,6 +1346,7 @@ class MusicPlayerManager @Inject constructor(
             _playbackState.update { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
                 startPositionTracking()
+                triggerNextTrackPrefetch()
             } else {
                 stopPositionTracking()
             }
@@ -1334,6 +1363,7 @@ class MusicPlayerManager @Inject constructor(
                     lastPlayMediaUriTimestamp = null
                     safeLogI("PlayTiming", "ExoPlayer STATE_READY reached in $readyDuration ms from playMediaUri")
                 }
+                triggerNextTrackPrefetch()
             }
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener
