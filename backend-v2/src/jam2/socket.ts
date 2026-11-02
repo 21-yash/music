@@ -69,17 +69,8 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         });
       }
 
-      // Enforce ONE active room per user
+      // Track existing room to leave ONLY after successful create (Task B7)
       const existingCode = jam2Manager.getActiveRoomForUser(user.userId);
-      if (existingCode) {
-        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
-        for (const sId of userSockets) {
-          const s = io.sockets.sockets.get(sId);
-          if (s) s.leave(`jam2:${existingCode}`);
-        }
-        jam2Manager.deregisterUserSockets(existingCode, user.userId);
-        await jam2Manager.leaveRoom(existingCode, user.userId);
-      }
 
       const cleanAvatarUrl = sanitizeUrl(parsed.data.avatarUrl) ?? undefined;
       const room = await jam2Manager.createRoom(
@@ -87,6 +78,22 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         user.username,
         cleanAvatarUrl,
       );
+
+      // Enforce ONE active room per user - leave old room after successful create (Task B7)
+      if (existingCode && existingCode !== room.code) {
+        const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
+        for (const sId of userSockets) {
+          const s = io.sockets.sockets.get(sId);
+          if (s) {
+            if (sId !== socket.id) {
+              s.emit('jam2:closed', { reason: 'moved' });
+            }
+            s.leave(`jam2:${existingCode}`);
+          }
+        }
+        jam2Manager.deregisterUserSockets(existingCode, user.userId);
+        await jam2Manager.leaveRoom(existingCode, user.userId);
+      }
 
       socket.join(`jam2:${room.code}`);
       jam2Manager.registerSocket(socket.id, room.code, user.userId, user.username);
@@ -160,12 +167,17 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
         });
       }
 
-      // Enforce ONE active room per user - leave old room after successful join
+      // Enforce ONE active room per user - leave old room after successful join (Task B7)
       if (existingCode && existingCode !== normalizedCode) {
         const userSockets = jam2Manager.getUserSockets(existingCode, user.userId);
         for (const sId of userSockets) {
           const s = io.sockets.sockets.get(sId);
-          if (s) s.leave(`jam2:${existingCode}`);
+          if (s) {
+            if (sId !== socket.id) {
+              s.emit('jam2:closed', { reason: 'moved' });
+            }
+            s.leave(`jam2:${existingCode}`);
+          }
         }
         jam2Manager.deregisterUserSockets(existingCode, user.userId);
         await jam2Manager.leaveRoom(existingCode, user.userId);

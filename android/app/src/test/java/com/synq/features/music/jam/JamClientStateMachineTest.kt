@@ -768,4 +768,28 @@ class JamClientStateMachineTest {
         val syncEmits = transport.emittedEvents.filter { it.first == "jam2:sync" }
         assertEquals(1, syncEmits.size)
     }
+
+    @Test
+    fun `closed event with moved reason sets correct user message and policy toast`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("MOVE1", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        transport.emitEvent(JamTransport.Event.Closed("moved"))
+        runCurrent()
+
+        val state = client.clientState.value
+        assertTrue(state is JamClientState.Closed)
+        val closed = state as JamClientState.Closed
+        assertEquals("moved", closed.reason)
+        assertEquals("You joined another Jam on a different device", closed.message)
+
+        val toastMsg = closedToastFor("moved", alreadyToasted = false)
+        assertEquals("You joined another Jam on a different device", toastMsg)
+    }
 }

@@ -388,6 +388,7 @@ class JamClient(
             "kicked" -> "You were removed from this Jam"
             "ended" -> "The host ended this Jam"
             "expired" -> "This Jam expired"
+            "moved" -> "You joined another Jam on a different device"
             "connection_lost" -> "Connection lost. Please rejoin the Jam."
             else -> "The Jam session was closed ($reason)."
         }
