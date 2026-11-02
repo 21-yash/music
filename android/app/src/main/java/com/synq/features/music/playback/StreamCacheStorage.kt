@@ -17,10 +17,45 @@ class StreamCacheStorage @Inject constructor(
     companion object {
         private const val PREFS_NAME = "stream_cache_urls"
         const val DEFAULT_TTL_MS = 4 * 60 * 60 * 1000L // 4 hours TTL for CDN stream URLs
+        private val hasSwept = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
     private val prefs by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    init {
+        if (hasSwept.compareAndSet(false, true)) {
+            sweepExpired()
+        }
+    }
+
+    /**
+     * Sweeps expired and malformed stream cache URL entries from SharedPreferences.
+     * Runs once automatically on process startup; can also be called explicitly.
+     */
+    fun sweepExpired(nowMs: Long = System.currentTimeMillis(), maxAgeMs: Long = DEFAULT_TTL_MS): Int {
+        val allEntries = prefs.all
+        val editor = prefs.edit()
+        var sweptCount = 0
+        for ((key, value) in allEntries) {
+            val entry = value as? String ?: continue
+            val delimiter = entry.indexOf('|')
+            if (delimiter == -1) {
+                editor.remove(key)
+                sweptCount++
+                continue
+            }
+            val timestamp = entry.substring(0, delimiter).toLongOrNull()
+            if (timestamp == null || nowMs - timestamp > maxAgeMs) {
+                editor.remove(key)
+                sweptCount++
+            }
+        }
+        if (sweptCount > 0) {
+            editor.apply()
+        }
+        return sweptCount
     }
 
     fun saveStreamUri(songId: String, uri: String, timestamp: Long = System.currentTimeMillis()) {

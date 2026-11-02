@@ -147,6 +147,16 @@ class MusicPlayerManager @Inject constructor(
     private var isFetchingRecommendations = false
     private var lastPlayMediaUriTimestamp: Long? = null
 
+    private val singleFlightExtractor = SingleFlightExtractor(scope = scope) { videoId, reason ->
+        rawExtractYouTubeStream(videoId, reason)
+    }
+
+    private var lastPrefetchedNextId: String? = null
+
+    private val reResolveGuard = ReResolveGuard()
+    private var playingFromFullCache: Boolean = false
+    private val autoSkipPolicy = AutoSkipPolicy()
+
     init {
         initializeController()
         warmUpNewPipeAsync()
@@ -166,16 +176,6 @@ class MusicPlayerManager @Inject constructor(
             }
         }
     }
-
-    private val singleFlightExtractor = SingleFlightExtractor(scope = scope) { videoId, reason ->
-        rawExtractYouTubeStream(videoId, reason)
-    }
-
-    private var lastPrefetchedNextId: String? = null
-
-    private val reResolveGuard = ReResolveGuard()
-    private var playingFromFullCache: Boolean = false
-    private val autoSkipPolicy = AutoSkipPolicy()
 
     private fun initializeController() {
         val sessionToken = SessionToken(
