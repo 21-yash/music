@@ -336,13 +336,19 @@ export class Jam2Manager {
       }
 
       const existingMember = room.members.get(userId);
-      if (!existingMember && room.members.size >= MAX_ROOM_MEMBERS) {
-        return {
-          error: {
-            code: 'ROOM_FULL',
-            message: 'This Jam is full (20 people)',
-          },
-        };
+      if (!existingMember) {
+        let onlineCount = 0;
+        for (const m of room.members.values()) {
+          if (m.online) onlineCount++;
+        }
+        if (onlineCount >= MAX_ROOM_MEMBERS) {
+          return {
+            error: {
+              code: 'ROOM_FULL',
+              message: 'This Jam is full (20 people)',
+            },
+          };
+        }
       }
 
       // Resume join for already-online member: do NOT bump version or broadcast

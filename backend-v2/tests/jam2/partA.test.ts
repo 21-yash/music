@@ -947,3 +947,97 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       manager.stop();
     });
   });
+
+  describe('Task R8: Online member count for 20 member room cap', () => {
+    it('1. 20 online members -> 21st new user is rejected with ROOM_FULL', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // Add 19 more online members (total 20 online including host)
+      for (let i = 1; i <= 19; i++) {
+        const joinRes = await manager.joinRoom(room.code, `u_guest_${i}`, `Guest ${i}`);
+        expect('room' in joinRes).toBe(true);
+      }
+
+      const freshRoom = await store.getRoom(room.code);
+      expect(freshRoom?.members.size).toBe(20);
+
+      // 21st new member attempts to join
+      const overflowRes = await manager.joinRoom(room.code, 'u_guest_21', 'Guest 21');
+      expect('error' in overflowRes).toBe(true);
+      if ('error' in overflowRes) {
+        expect(overflowRes.error.code).toBe('ROOM_FULL');
+        expect(overflowRes.error.message).toContain('20 people');
+      }
+      manager.stop();
+    });
+
+    it('2. 19 online members + 5 offline members -> new member CAN join (becomes 20th online)', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // Join 5 members and mark them offline
+      for (let i = 1; i <= 5; i++) {
+        await manager.joinRoom(room.code, `u_offline_${i}`, `Offline Guest ${i}`);
+        const r = await store.getRoom(room.code);
+        const m = r!.members.get(`u_offline_${i}`);
+        if (m) m.online = false;
+      }
+
+      // Now join 18 more online members (1 host + 18 = 19 online members)
+      for (let i = 1; i <= 18; i++) {
+        await manager.joinRoom(room.code, `u_online_${i}`, `Online Guest ${i}`);
+      }
+
+      const freshRoom = await store.getRoom(room.code);
+      let onlineCount = 0;
+      for (const m of freshRoom!.members.values()) {
+        if (m.online) onlineCount++;
+      }
+      expect(onlineCount).toBe(19);
+      expect(freshRoom!.members.size).toBe(24); // 1 host + 5 offline + 18 online
+
+      // A brand new member (u_new) attempts to join -> allowed because onlineCount is 19 (< 20)
+      const joinRes = await manager.joinRoom(room.code, 'u_new', 'New Guest');
+      expect('room' in joinRes).toBe(true);
+      if ('room' in joinRes) {
+        expect(joinRes.room.members.has('u_new')).toBe(true);
+        expect(joinRes.room.members.get('u_new')?.online).toBe(true);
+      }
+      manager.stop();
+    });
+
+    it('3. An existing offline member can always rejoin even if room is at 20 online members', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // u_rejoining joins initially then goes offline
+      await manager.joinRoom(room.code, 'u_rejoining', 'Rejoining Guest');
+      let currentRoom = await store.getRoom(room.code);
+      const rejoiningMember = currentRoom!.members.get('u_rejoining');
+      if (rejoiningMember) rejoiningMember.online = false;
+
+      // Fill up to 20 online members (1 host + 19 other online guests)
+      for (let i = 1; i <= 19; i++) {
+        await manager.joinRoom(room.code, `u_online_${i}`, `Online Guest ${i}`);
+      }
+
+      currentRoom = await store.getRoom(room.code);
+      let onlineCount = 0;
+      for (const m of currentRoom!.members.values()) {
+        if (m.online) onlineCount++;
+      }
+      expect(onlineCount).toBe(20);
+
+      // u_rejoining is an existing offline member. They rejoin!
+      const rejoinRes = await manager.joinRoom(room.code, 'u_rejoining', 'Rejoining Guest');
+      expect('room' in rejoinRes).toBe(true);
+      if ('room' in rejoinRes) {
+        expect(rejoinRes.room.members.get('u_rejoining')?.online).toBe(true);
+      }
+      manager.stop();
+    });
+  });
