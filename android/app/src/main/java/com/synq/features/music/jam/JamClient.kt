@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -62,7 +63,8 @@ class JamClient(
     val closedEvents: SharedFlow<JamClosedEvent> = _closedEvents.asSharedFlow()
 
     private var activeRoomCode: String? = null
-    private var reconnectJob: Job? = null
+    internal var reconnectJob: Job? = null
+    private val skipBackoffChannel = Channel<Unit>(Channel.CONFLATED)
     private var reconnectAttempt = 1
     private var reconnectStartedAt = 0L
     private var clockSyncJob: Job? = null
@@ -438,11 +440,13 @@ class JamClient(
 
         _clientState.value = JamClientState.Reconnecting(code, reconnectAttempt)
 
-        if (reconnectJob?.isActive == true && !resetBackoff) {
+        if (reconnectJob?.isActive == true) {
+            if (resetBackoff) {
+                skipBackoffChannel.trySend(Unit)
+            }
             return
         }
 
-        reconnectJob?.cancel()
         reconnectJob = scope.launch(ioDispatcher) {
             runReconnectLoop(code, immediateFirst = resetBackoff)
         }
@@ -465,7 +469,11 @@ class JamClient(
                 // Exponential backoff with jitter: 1s, 2s, 4s, 8s... cap ~15s
                 val baseDelay = minOf(15000L, 1000L * (1L shl minOf(reconnectAttempt - 1, 4)))
                 val jitter = Random.nextLong(0, 500)
-                delay(baseDelay + jitter)
+                val delayMs = baseDelay + jitter
+                while (skipBackoffChannel.tryReceive().isSuccess) {}
+                withTimeoutOrNull(delayMs) {
+                    skipBackoffChannel.receive()
+                }
             }
             isImmediate = false
 
@@ -595,6 +603,7 @@ class JamClient(
     private fun stopAll() {
         reconnectJob?.cancel()
         reconnectJob = null
+        while (skipBackoffChannel.tryReceive().isSuccess) {}
         reconnectAttempt = 1
         reconnectStartedAt = 0L
         notFoundRetryCount = 0

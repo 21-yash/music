@@ -400,6 +400,56 @@ class JamClientStateMachineTest {
     }
 
     @Test
+    fun `reconnect loop does not restart itself on network restore but skips backoff delay`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_NO_RESTART", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Drop connection
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        val initialJob = client.reconnectJob
+        assertNotNull("Reconnect job should be created", initialJob)
+        assertTrue("Reconnect job should be active", initialJob!!.isActive)
+
+        // Keep socket connection failing on attempt 1 so it enters backoff for attempt 2
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("No network"))
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // It is now waiting in backoff for attempt 2 (e.g. 2s+ delay)
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+        assertEquals("Initial reconnect job should still be the running job", initialJob, client.reconnectJob)
+
+        // Now network restores, socket connect is working, and rejoin will succeed
+        transport.awaitConnectedResult = Result.success(Unit)
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_NO_RESTART", "user_me"))
+
+        // Call onNetworkRestored multiple times rapidly
+        client.onNetworkRestored()
+        client.onNetworkRestored()
+        client.onNetworkRestored()
+
+        // The job should NOT have been cancelled or recreated
+        assertEquals("Reconnect job instance must not change or be cancelled", initialJob, client.reconnectJob)
+        assertTrue("Reconnect job should still be active without being cancelled", initialJob.isActive)
+
+        // Running current immediately processes the skipped backoff without waiting 2000ms+
+        runCurrent()
+
+        // Reconnect succeeded into Active state
+        val finalState = client.clientState.value
+        assertTrue("Client should be active after skipped backoff", finalState is JamClientState.Active)
+        assertEquals("RECONNECT_NO_RESTART", (finalState as JamClientState.Active).code)
+    }
+
+    @Test
     fun `JamSessionManager default JamClient construction forwards TokenRefreshResult Transient from AuthRepository`() = runTest {
         val mockAuthRepo = mockk<AuthRepository>()
         coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Success("valid_token")
