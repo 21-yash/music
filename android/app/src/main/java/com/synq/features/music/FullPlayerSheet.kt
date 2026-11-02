@@ -3,6 +3,7 @@ package com.synq.features.music
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import com.synq.features.music.components.SongOptionsSheet
+import com.synq.features.music.jam.canDismissRecommendation
 import com.synq.features.music.util.SeekHold
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -769,6 +770,7 @@ fun FullPlayerSheet(
 
                                 items(jamUiState.recommendedQueue, key = { it.qid }) { item ->
                                     val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
+                                    val canDismissRec = canDismissRecommendation(jamUiState.isHost, jamUiState.myPerms)
                                     QueueItemRow(
                                         song = item.song,
                                         active = isPlayingThis,
@@ -777,6 +779,7 @@ fun FullPlayerSheet(
                                         isRecommended = true,
                                         canMoveUp = false,
                                         canMoveDown = false,
+                                        canRemove = canDismissRec,
                                         onClick = {
                                             if (canControlPlayback) {
                                                 onPlayItemByQid(item.qid)
@@ -787,11 +790,7 @@ fun FullPlayerSheet(
                                         onMoveUp = {},
                                         onMoveDown = {},
                                         onRemove = {
-                                            if (jamUiState.canManageQueue) {
-                                                onRemoveByQid(item.qid)
-                                            } else {
-                                                Toast.makeText(context, "You do not have permission to manage recommended songs", Toast.LENGTH_SHORT).show()
-                                            }
+                                            onRemoveByQid(item.qid)
                                         },
                                         onOptionsClick = { selectedQueueSongForOptions = item.song }
                                     )
@@ -1561,6 +1560,7 @@ private fun QueueItemRow(
     canMoveDown: Boolean = false,
     showReorderControls: Boolean = true,
     isRecommended: Boolean = false,
+    canRemove: Boolean = true,
     onClick: () -> Unit = {},
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
@@ -1617,7 +1617,7 @@ private fun QueueItemRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         } else if (isRecommended) {
-            // Recommended song controls: Three dots menu + cross to remove (no reorder)
+            // Recommended song controls: Three dots menu + optional cross to remove (no reorder)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { onOptionsClick?.invoke() }, modifier = Modifier.size(28.dp)) {
                     Icon(
@@ -1627,13 +1627,15 @@ private fun QueueItemRow(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Remove from Queue",
-                        tint = textSecondary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                if (canRemove) {
+                    IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remove from Queue",
+                            tint = textSecondary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         } else if (showReorderControls) {

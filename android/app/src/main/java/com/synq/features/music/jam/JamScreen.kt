@@ -1011,7 +1011,7 @@ fun JamScreen(
                                     song = recItem.song,
                                     isDark = isDark,
                                     canAdd = uiState.canAddSongs,
-                                    canDismiss = true,
+                                    canDismiss = canDismissRecommendation(uiState.isHost, uiState.myPerms),
                                     onAdd = {
                                         if (uiState.canAddSongs) {
                                             rootViewModel.promoteRecommended(recItem.qid)
@@ -1020,11 +1020,7 @@ fun JamScreen(
                                         }
                                     },
                                     onDismiss = {
-                                        if (uiState.canManageQueue) {
-                                            rootViewModel.removeByQid(recItem.qid)
-                                        } else {
-                                            Toast.makeText(context, "You do not have permission to manage recommended songs", Toast.LENGTH_SHORT).show()
-                                        }
+                                        rootViewModel.removeByQid(recItem.qid)
                                     }
                                 )
                             }
