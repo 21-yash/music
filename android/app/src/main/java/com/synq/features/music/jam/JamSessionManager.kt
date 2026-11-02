@@ -5,12 +5,14 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import com.synq.core.network.NetworkMonitor
+import com.synq.data.remote.TokenRefreshResult
 import com.synq.data.repository.AuthRepository
 import com.synq.features.music.domain.model.Artist
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.playback.JamPlaybackInterceptor
 import com.synq.features.music.playback.MusicPlayerManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,6 +49,7 @@ class JamSessionManager(
     clockSyncOverride: ClockSync? = null,
     stateStoreOverride: JamStateStore? = null,
     private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val toastEmitter: (String) -> Unit = { msg ->
         try {
             Handler(Looper.getMainLooper()).post {
@@ -85,8 +88,15 @@ class JamSessionManager(
         transport = transport,
         clockSync = clockSync,
         stateStore = stateStore,
+        authRepository = authRepository,
+        tokenResultProvider = {
+            authRepository?.getFreshAccessTokenResult() ?: TokenRefreshResult.Unauthorized
+        },
         tokenProvider = { authRepository?.getFreshAccessToken() },
-        scope = scope
+        scope = scope,
+        ioDispatcher = ioDispatcher,
+        monotonicNowMs = currentTimeProvider,
+        wallClockNowMs = currentTimeProvider
     )
 
     private val _jamState = MutableStateFlow(JamState())

@@ -1,6 +1,9 @@
 package com.synq.features.music.jam
 
 import com.synq.data.remote.TokenRefreshResult
+import com.synq.data.repository.AuthRepository
+import io.mockk.coEvery
+import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
@@ -295,6 +298,105 @@ class JamClientStateMachineTest {
         val state = client.clientState.value
         assertTrue(state is JamClientState.Closed)
         assertEquals("auth_failed", (state as JamClientState.Closed).reason)
+    }
+
+    @Test
+    fun `transient token refresh in reconnect loop keeps retrying and does not close Jam`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("AUTH_TRANSIENT", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+
+        // Disconnect
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        // Transient failure
+        tokenResultToProvide = TokenRefreshResult.Transient(null)
+
+        // Advance through reconnect delay
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // Should STILL be in Reconnecting state, NOT Closed("auth_failed")
+        assertTrue("State should remain Reconnecting on transient error", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance through another backoff
+        advanceTimeBy(4000L)
+        runCurrent()
+        assertTrue("State should still remain Reconnecting", client.clientState.value is JamClientState.Reconnecting)
+
+        // Now auth refresh returns Unauthorized -> immediately closes
+        tokenResultToProvide = TokenRefreshResult.Unauthorized
+        advanceTimeBy(5000L)
+        runCurrent()
+
+        val finalState = client.clientState.value
+        assertTrue("State should be Closed on real Unauthorized", finalState is JamClientState.Closed)
+        assertEquals("auth_failed", (finalState as JamClientState.Closed).reason)
+    }
+
+    @Test
+    fun `JamSessionManager default JamClient construction forwards TokenRefreshResult Transient from AuthRepository`() = runTest {
+        val mockAuthRepo = mockk<AuthRepository>()
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Success("valid_token")
+        coEvery { mockAuthRepo.getFreshAccessToken() } returns "valid_token"
+
+        val fakeTransport = FakeJamTransport()
+        fakeTransport.nextEmitResult = Result.success(makeRoomJson("PROD_WIRING", "user_me"))
+
+        val mockPlayerManager = mockk<JamPlayerBridge>(relaxed = true)
+        io.mockk.every { mockPlayerManager.playbackState } returns kotlinx.coroutines.flow.MutableStateFlow(com.synq.features.music.playback.PlaybackState())
+
+        val jsm = JamSessionManager(
+            playerManager = mockPlayerManager,
+            authRepository = mockAuthRepo,
+            networkMonitorProvider = null,
+            jamPreferences = mockk<JamPreferencesBridge>(relaxed = true),
+            context = null,
+            coroutineScope = backgroundScope,
+            transportOverride = fakeTransport,
+            jamClientOverride = null,
+            clockSyncOverride = ClockSync(monotonicNowMs = { 1000L }, wallClockNowMs = { 1000L }),
+            stateStoreOverride = JamStateStore("user_me"),
+            currentTimeProvider = { 1000L },
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        // Create room to get into Active state
+        jsm.jamClient.createRoom()
+        runCurrent()
+        assertTrue(jsm.jamClient.clientState.value is JamClientState.Active)
+
+        // Now token refresh returns Transient
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Transient(null)
+        coEvery { mockAuthRepo.getFreshAccessToken() } returns null
+
+        // Disconnect transport
+        fakeTransport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(jsm.jamClient.clientState.value is JamClientState.Reconnecting)
+
+        // Advance time during reconnect loop
+        advanceTimeBy(2500L)
+        runCurrent()
+
+        assertTrue("Client must remain Reconnecting on Transient result", jsm.jamClient.clientState.value is JamClientState.Reconnecting)
+
+        // Now mock returns Unauthorized
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Unauthorized
+        advanceTimeBy(10000L)
+        runCurrent()
+
+        assertFalse("Jam session must be torn down on Unauthorized", jsm.jamState.value.isInJam)
+        assertTrue(
+            "Client must transition to Closed/Disconnected on Unauthorized",
+            jsm.jamClient.clientState.value is JamClientState.Closed || jsm.jamClient.clientState.value is JamClientState.Disconnected
+        )
     }
 
     @Test

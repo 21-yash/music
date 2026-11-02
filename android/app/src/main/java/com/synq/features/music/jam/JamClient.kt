@@ -462,7 +462,13 @@ class JamClient(
                     return
                 }
                 is TokenRefreshResult.Transient -> {
-                    tokenRes.fallbackToken
+                    if (tokenRes.fallbackToken != null) {
+                        tokenRes.fallbackToken
+                    } else {
+                        safeLogW("JamClient", "Token refresh transient failure, retrying...")
+                        reconnectAttempt++
+                        continue
+                    }
                 }
                 is TokenRefreshResult.Success -> {
                     tokenRes.token
