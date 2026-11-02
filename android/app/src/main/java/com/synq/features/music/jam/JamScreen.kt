@@ -693,13 +693,27 @@ fun JamScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
 
                                 // Progress Slider
+                                var dragProgressRatio by remember { mutableStateOf<Float?>(null) }
+                                LaunchedEffect(nowPlayingItem.song.id) {
+                                    dragProgressRatio = null
+                                }
+
                                 Slider(
-                                    value = progress,
+                                    value = dragProgressRatio ?: progress,
                                     onValueChange = { targetRatio ->
                                         if (!uiState.canControlPlayback) {
                                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
                                         } else if (jamProgress.canSeek) {
-                                            val targetMs = (targetRatio * durationMs).toLong()
+                                            dragProgressRatio = targetRatio
+                                        }
+                                    },
+                                    onValueChangeFinished = {
+                                        val target = dragProgressRatio
+                                        dragProgressRatio = null
+                                        if (!uiState.canControlPlayback) {
+                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                        } else if (jamProgress.canSeek && target != null) {
+                                            val targetMs = (target * durationMs).toLong()
                                             rootViewModel.jamSeekTo(targetMs)
                                         }
                                     },
@@ -714,12 +728,13 @@ fun JamScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 )
 
+                                val displayPos = dragProgressRatio?.let { (it * durationMs).toLong() } ?: liveExpectedPos
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = formatTime(liveExpectedPos),
+                                        text = formatTime(displayPos),
                                         fontSize = 11.sp,
                                         color = textSecondary
                                     )

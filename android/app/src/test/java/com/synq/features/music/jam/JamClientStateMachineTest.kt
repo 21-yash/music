@@ -2,6 +2,9 @@ package com.synq.features.music.jam
 
 import com.synq.data.remote.TokenRefreshResult
 import com.synq.data.repository.AuthRepository
+import com.synq.features.music.domain.model.Song
+import com.synq.features.music.playback.JamPlaybackInterceptor
+import com.synq.features.music.playback.PlaybackState
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +67,35 @@ class JamClientStateMachineTest {
             emittedEvents.add(event to data)
             return nextEmitResult
         }
+    }
+
+    private class FakeJamPlayerBridge : JamPlayerBridge {
+        override val playbackState = kotlinx.coroutines.flow.MutableStateFlow(PlaybackState())
+        override var jamInterceptor: JamPlaybackInterceptor? = null
+        override fun getPlayerCurrentPosition(): Long = 0L
+        override fun getPlayerPlayWhenReady(): Boolean = false
+        override fun getPlayerPlaybackState(): Int = 1
+        override fun getPlaybackSpeed(): Float = 1.0f
+        override fun getPlayerDuration(): Long = 100000L
+        override fun playJamSyncSong(song: Song, initialPositionMs: Long, playWhenReady: Boolean, targetQid: String?, forceRefresh: Boolean) {}
+        override fun prefetchTrack(song: Song) {}
+        override fun stop() {}
+        override fun applyJamPlay() {}
+        override fun applyJamPause() {}
+        override fun applyJamSeek(positionMs: Long) {}
+        override fun applyJamSpeed(factor: Float) {}
+        override fun setJamQueue(jamQueue: List<Song>, targetSong: Song?, targetQid: String?, queueQids: List<String>, recommendedQids: Set<String>) {}
+        override fun stashPersonalQueue() {}
+        override fun restorePersonalQueue() {}
+        override fun setPlaybackSpeed(speed: Float) {}
+        override fun invalidateStreamCache(songId: String) {}
+    }
+
+    private class FakeJamPreferencesBridge : JamPreferencesBridge {
+        override fun saveLastJam(code: String, avatarUrl: String?) {}
+        override fun clearLastJam() {}
+        override fun rejoinCandidate(): String? = null
+        override fun getLastAvatarUrl(): String? = null
     }
 
     private lateinit var transport: FakeJamTransport
@@ -458,14 +490,14 @@ class JamClientStateMachineTest {
         val fakeTransport = FakeJamTransport()
         fakeTransport.nextEmitResult = Result.success(makeRoomJson("PROD_WIRING", "user_me"))
 
-        val mockPlayerManager = mockk<JamPlayerBridge>(relaxed = true)
-        io.mockk.every { mockPlayerManager.playbackState } returns kotlinx.coroutines.flow.MutableStateFlow(com.synq.features.music.playback.PlaybackState())
+        val fakePlayerManager = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
 
         val jsm = JamSessionManager(
-            playerManager = mockPlayerManager,
+            playerManager = fakePlayerManager,
             authRepository = mockAuthRepo,
             networkMonitorProvider = null,
-            jamPreferences = mockk<JamPreferencesBridge>(relaxed = true),
+            jamPreferences = fakePrefs,
             context = null,
             coroutineScope = backgroundScope,
             transportOverride = fakeTransport,
@@ -791,5 +823,81 @@ class JamClientStateMachineTest {
 
         val toastMsg = closedToastFor("moved", alreadyToasted = false)
         assertEquals("You joined another Jam on a different device", toastMsg)
+    }
+
+    @Test
+    fun `seekTo implements trailing-edge throttling`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK1", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        var testTime = 1000L
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            currentTimeProvider = { testTime },
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // Call 1: seekTo(100) -> should be dispatched immediately
+        sessionManager.seekTo(100L)
+        runCurrent()
+
+        val seeks1 = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeks1.size)
+        assertEquals(100L, (seeks1[0].second as JSONObject).getLong("positionMs"))
+
+        // Rapid seeks within the 250ms window: 200, 300, 400
+        testTime += 50L
+        sessionManager.seekTo(200L)
+        runCurrent()
+
+        testTime += 50L
+        sessionManager.seekTo(300L)
+        runCurrent()
+
+        testTime += 50L
+        sessionManager.seekTo(400L)
+        runCurrent()
+
+        // Still only 1 seek sent because throttle window is open
+        val seeks2 = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeks2.size)
+
+        // Advance time past the 250ms window
+        testTime += 150L
+        advanceTimeBy(250L)
+        runCurrent()
+
+        // Now trailing edge (400L) must have been sent
+        val seeks3 = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(2, seeks3.size)
+        assertEquals(400L, (seeks3[1].second as JSONObject).getLong("positionMs"))
+
+        sessionManager.teardownJam()
     }
 }

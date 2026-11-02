@@ -435,6 +435,9 @@ fun FullPlayerSheet(
                     val canRepeat = !jamState.isInJam
                     val isStepOut = localPlaybackState is com.synq.features.music.jam.LocalPlaybackState.LocalStepOut
 
+                    var dragRatio by remember { mutableStateOf<Float?>(null) }
+                    LaunchedEffect(song.id) { dragRatio = null }
+
                     // Progress bar
                     PlayerProgressBar(
                         progress = playbackState.progress,
@@ -449,15 +452,18 @@ fun FullPlayerSheet(
                         enabled = canControlPlayback,
                         onDisabledClick = {
                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                        }
+                        },
+                        onDragRatioChange = { dragRatio = it }
                     )
                     Spacer(modifier = Modifier.height(2.dp))
+                    val displayPositionMs = dragRatio?.let { (it * song.durationSeconds * 1000L).toLong() }
+                        ?: playbackState.playbackPositionMs
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = formatMs(playbackState.playbackPositionMs),
+                            text = formatMs(displayPositionMs),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = textSecondary,
@@ -1865,9 +1871,11 @@ private fun PlayerProgressBar(
     isDark: Boolean,
     onSeek: (Float) -> Unit,
     enabled: Boolean = true,
-    onDisabledClick: (() -> Unit)? = null
+    onDisabledClick: (() -> Unit)? = null,
+    onDragRatioChange: ((Float?) -> Unit)? = null
 ) {
-    val p = progress.coerceIn(0f, 1f)
+    var localDragProgress by remember { mutableStateOf<Float?>(null) }
+    val displayProgress = (localDragProgress ?: progress).coerceIn(0f, 1f)
     val trackBg = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
 
     Box(
@@ -1878,7 +1886,8 @@ private fun PlayerProgressBar(
             .pointerInput(enabled) {
                 detectTapGestures { offset ->
                     if (enabled) {
-                        onSeek((offset.x / size.width).coerceIn(0f, 1f))
+                        val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                        onSeek(ratio)
                     } else {
                         onDisabledClick?.invoke()
                     }
@@ -1886,9 +1895,29 @@ private fun PlayerProgressBar(
             }
             .pointerInput(enabled) {
                 if (enabled) {
-                    detectHorizontalDragGestures { change, _ ->
-                        onSeek((change.position.x / size.width).coerceIn(0f, 1f))
-                    }
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                            localDragProgress = ratio
+                            onDragRatioChange?.invoke(ratio)
+                        },
+                        onDragEnd = {
+                            val finalRatio = localDragProgress
+                            localDragProgress = null
+                            onDragRatioChange?.invoke(null)
+                            finalRatio?.let { onSeek(it) }
+                        },
+                        onDragCancel = {
+                            localDragProgress = null
+                            onDragRatioChange?.invoke(null)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
+                            localDragProgress = ratio
+                            onDragRatioChange?.invoke(ratio)
+                        }
+                    )
                 }
             },
         contentAlignment = Alignment.CenterStart
@@ -1902,7 +1931,7 @@ private fun PlayerProgressBar(
         )
         Box(
             modifier = Modifier
-                .fillMaxWidth(p)
+                .fillMaxWidth(displayProgress)
                 .height(5.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(Accent)
