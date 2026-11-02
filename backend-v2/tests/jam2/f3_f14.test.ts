@@ -5,7 +5,14 @@ import {
   sanitizeUrl,
   clearSongResolverCache,
   setCustomSongResolver,
+  resolveSong,
+  cacheResolvedSong,
+  MAX_SONG_CACHE_ENTRIES,
+  NEGATIVE_CACHE_TTL_MS,
+  getSongResolverCacheSize,
+  getSongResolverCacheEntry,
 } from '../../src/jam2/songResolver';
+import * as musicService from '../../src/services/musicService';
 import { Song, Room } from '../../src/jam2/types';
 import { registerMusicProvider } from '../../src/services/musicService';
 import { MusicProvider } from '../../src/providers/music/MusicProvider';
@@ -472,5 +479,119 @@ describe('Task F11.d: Recommendation 30s failure backoff', () => {
 
     // fetchCount should STILL be 1 because of 30s failure backoff
     expect(fetchCount).toBe(1);
+  });
+});
+
+describe('Task B8: Resolver hygiene (songResolver.ts)', () => {
+  beforeEach(() => {
+    clearSongResolverCache();
+    setCustomSongResolver(null);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    clearSongResolverCache();
+    setCustomSongResolver(null);
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('caps cache at MAX_SONG_CACHE_ENTRIES and evicts oldest entry', () => {
+    expect(MAX_SONG_CACHE_ENTRIES).toBe(500);
+
+    const makeSongWithId = (id: string): Song => ({
+      id,
+      title: `Song ${id}`,
+      artists: [{ id: 'a1', name: 'Artist', imageUrl: null }],
+      album: null,
+      duration: 120,
+      imageUrl: null,
+      year: '2024',
+      language: 'en',
+      hasLyrics: false,
+      playCount: 0,
+      label: '',
+      streamRef: '',
+      providerId: 'jiosaavn',
+    });
+
+    // Populate exactly 500 entries
+    for (let i = 0; i < 500; i++) {
+      cacheResolvedSong(makeSongWithId(`song_${i}`));
+    }
+    expect(getSongResolverCacheSize()).toBe(500);
+    expect(getSongResolverCacheEntry('jiosaavn:song_0')).toBeDefined();
+
+    // Insert 501st entry -> evicts song_0 (oldest)
+    cacheResolvedSong(makeSongWithId('song_500'));
+    expect(getSongResolverCacheSize()).toBe(500);
+    expect(getSongResolverCacheEntry('jiosaavn:song_0')).toBeUndefined();
+    expect(getSongResolverCacheEntry('jiosaavn:song_1')).toBeDefined();
+    expect(getSongResolverCacheEntry('jiosaavn:song_500')).toBeDefined();
+  });
+
+  it('serves negative cache on resolution failure for ~30s and retries after expiry', async () => {
+    vi.useFakeTimers();
+
+    const getSongSpy = vi.spyOn(musicService, 'getSong');
+    getSongSpy.mockRejectedValue(new Error('Upstream provider timeout'));
+
+    // 1. First resolution fails and enters negative cache
+    const firstRes = await resolveSong('unresolvable_id_1', 'jiosaavn');
+    expect(firstRes).toBeNull();
+    expect(getSongSpy).toHaveBeenCalledTimes(1);
+
+    // Verify negative cache entry exists with ~30s expiry
+    const entry = getSongResolverCacheEntry('jiosaavn:unresolvable_id_1');
+    expect(entry).toBeDefined();
+    expect(entry?.song).toBeNull();
+
+    // 2. Immediate second call should be served by negative cache without calling upstream
+    const secondRes = await resolveSong('unresolvable_id_1', 'jiosaavn');
+    expect(secondRes).toBeNull();
+    expect(getSongSpy).toHaveBeenCalledTimes(1); // still 1!
+
+    // 3. Advance time by 15 seconds: still within 30s negative cache
+    vi.advanceTimersByTime(15_000);
+    const thirdRes = await resolveSong('unresolvable_id_1', 'jiosaavn');
+    expect(thirdRes).toBeNull();
+    expect(getSongSpy).toHaveBeenCalledTimes(1); // still 1!
+
+    // 4. Advance time past 30s (total +31s)
+    vi.advanceTimersByTime(16_000);
+
+    // Mock upstream recovering and returning a valid song
+    const recoveredSong: any = {
+      id: 'unresolvable_id_1',
+      title: 'Recovered Song',
+      artists: [{ id: 'a1', name: 'Artist' }],
+      duration: 180,
+      providerId: 'jiosaavn',
+    };
+    getSongSpy.mockResolvedValueOnce(recoveredSong);
+
+    // 5. Subsequent call retries upstream and succeeds
+    const retriedRes = await resolveSong('unresolvable_id_1', 'jiosaavn');
+    expect(retriedRes).not.toBeNull();
+    expect(retriedRes?.title).toBe('Recovered Song');
+    expect(getSongSpy).toHaveBeenCalledTimes(2);
+
+    // Verify positive cache entry now present
+    const positiveEntry = getSongResolverCacheEntry('jiosaavn:unresolvable_id_1');
+    expect(positiveEntry).toBeDefined();
+    expect(positiveEntry?.song?.title).toBe('Recovered Song');
+  });
+
+  it('serves negative cache when getSong returns null', async () => {
+    const getSongSpy = vi.spyOn(musicService, 'getSong');
+    getSongSpy.mockResolvedValue(null as any);
+
+    const res1 = await resolveSong('nonexistent_song_id', 'jiosaavn');
+    expect(res1).toBeNull();
+    expect(getSongSpy).toHaveBeenCalledTimes(1);
+
+    const res2 = await resolveSong('nonexistent_song_id', 'jiosaavn');
+    expect(res2).toBeNull();
+    expect(getSongSpy).toHaveBeenCalledTimes(1); // cached failure!
   });
 });

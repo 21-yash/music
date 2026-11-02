@@ -46,12 +46,49 @@ export function sanitizeUrl(url?: string | null): string | null {
 }
 
 interface CacheEntry {
-  song: Song;
+  song: Song | null;
   expiresAt: number;
 }
 
+export const MAX_SONG_CACHE_ENTRIES = 500;
+export const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+export const NEGATIVE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+
 const memoryCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+export function getSongResolverCacheSize(): number {
+  return memoryCache.size;
+}
+
+export function getSongResolverCacheEntry(key: string): CacheEntry | undefined {
+  return memoryCache.get(key);
+}
+
+function getFromCache(key: string): { hit: boolean; song: Song | null } {
+  const cached = memoryCache.get(key);
+  if (!cached) return { hit: false, song: null };
+  if (Date.now() > cached.expiresAt) {
+    memoryCache.delete(key);
+    return { hit: false, song: null };
+  }
+  // LRU bump: Move to most recently used (end of map)
+  memoryCache.delete(key);
+  memoryCache.set(key, cached);
+  return { hit: true, song: cached.song };
+}
+
+function setInCache(key: string, song: Song | null, ttlMs: number): void {
+  if (memoryCache.has(key)) {
+    memoryCache.delete(key);
+  } else if (memoryCache.size >= MAX_SONG_CACHE_ENTRIES) {
+    // Evict oldest (least recently used)
+    const oldestKey = memoryCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      memoryCache.delete(oldestKey);
+    }
+  }
+  memoryCache.set(key, { song, expiresAt: Date.now() + ttlMs });
+}
 
 export type SongResolverFn = (id: string, providerId?: string) => Promise<Song | null>;
 
@@ -63,7 +100,7 @@ export function setCustomSongResolver(resolver: SongResolverFn | null): void {
 
 export function cacheResolvedSong(song: Song): void {
   const key = `${song.providerId || 'default'}:${song.id}`;
-  memoryCache.set(key, { song, expiresAt: Date.now() + CACHE_TTL_MS });
+  setInCache(key, song, CACHE_TTL_MS);
 }
 
 export function clearSongResolverCache(): void {
@@ -135,8 +172,8 @@ export function mergeResolvedSong(clientSong: Song, resolved: Song): Song {
 
 export async function resolveSong(id: string, providerId?: string): Promise<Song | null> {
   const key = `${providerId || 'default'}:${id}`;
-  const cached = memoryCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
+  const cached = getFromCache(key);
+  if (cached.hit) {
     return cached.song;
   }
 
@@ -180,12 +217,17 @@ export async function resolveSong(id: string, providerId?: string): Promise<Song
       cacheResolvedSong(normalized);
       await musicService.storeStreamTokensFor(fetched);
       return normalized;
+    } else {
+      // getSong returned null: cache negative result for ~30s
+      setInCache(key, null, NEGATIVE_CACHE_TTL_MS);
+      return null;
     }
   } catch (err) {
     logger.debug({ err, id, providerId }, 'Could not resolve song from musicService');
+    // getSong threw: cache negative result for ~30s
+    setInCache(key, null, NEGATIVE_CACHE_TTL_MS);
+    return null;
   }
-
-  return null;
 }
 
 /**
@@ -194,6 +236,9 @@ export async function resolveSong(id: string, providerId?: string): Promise<Song
  * For reliable providers (e.g. JioSaavn), resolve failure returns null (rejected with INVALID).
  */
 export async function resolveSongOrFallback(clientSong: Song): Promise<Song | null> {
+  // The 'youtube' default here is intentional: songs without an explicit providerId
+  // (e.g. YouTube searches/links or legacy client entries) default to YouTube, which is
+  // treated as an unreliable provider and allows validated client metadata fallback (F14).
   const providerId = clientSong.providerId || 'youtube';
   const resolved = await resolveSong(clientSong.id, providerId);
   if (resolved) {
