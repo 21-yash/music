@@ -296,6 +296,13 @@ export function applyCommand(
             return { room, events: [], applied: false };
           }
         } else {
+          // Task B6: For zero-duration songs, accept client trackEnded only from host or member with playback permission
+          const isHost = nextRoom.hostUserId === actorUserId;
+          const hasPlayback = nextRoom.members.get(actorUserId)?.perms.playback === true;
+          if (!isHost && !hasPlayback) {
+            return { room, events: [], applied: false };
+          }
+
           // Unknown duration (0) -> require at least 15s elapsed
           const elapsed = (now - nextRoom.nowPlaying.anchorServerTs) + nextRoom.nowPlaying.positionMs;
           if (elapsed < 15000) {

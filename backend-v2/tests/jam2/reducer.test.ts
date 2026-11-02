@@ -926,6 +926,81 @@ describe('Jam2 Reducer', () => {
       }
     });
 
+    it('Task B6: zero-duration trackEnded is rejected from guest without playback permission', () => {
+      const room = makeTestRoom();
+      room.nowPlaying = {
+        item: {
+          qid: 'q_curr',
+          song: makeTestSong('zero_dur', 'Zero', 0),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        },
+        status: 'playing',
+        positionMs: 0,
+        anchorServerTs: 1000,
+        trackSeq: 1,
+      };
+
+      const guest = room.members.get('guest_1')!;
+      guest.perms = { queueAdd: true, playback: false, queueManage: false };
+
+      const res = applyCommand(
+        room,
+        { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
+        'guest_1',
+        21000,
+      );
+
+      expect('room' in res).toBe(true);
+      if ('room' in res) {
+        expect(res.applied).toBe(false);
+        expect(res.room.nowPlaying.trackSeq).toBe(1);
+      }
+    });
+
+    it('Task B6: zero-duration trackEnded is accepted from guest with playback permission after 15s', () => {
+      const room = makeTestRoom();
+      room.nowPlaying = {
+        item: {
+          qid: 'q_curr',
+          song: makeTestSong('zero_dur', 'Zero', 0),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        },
+        status: 'playing',
+        positionMs: 0,
+        anchorServerTs: 1000,
+        trackSeq: 1,
+      };
+      room.queue = [
+        {
+          qid: 'q_next',
+          song: makeTestSong('next_song', 'Next', 100),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        },
+      ];
+
+      const guest = room.members.get('guest_1')!;
+      guest.perms = { queueAdd: true, playback: true, queueManage: false };
+
+      const res = applyCommand(
+        room,
+        { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
+        'guest_1',
+        21000,
+      );
+
+      expect('room' in res).toBe(true);
+      if ('room' in res) {
+        expect(res.room.nowPlaying.trackSeq).toBe(2);
+        expect(res.room.nowPlaying.item?.song.id).toBe('next_song');
+      }
+    });
+
     it('prev restarts track if position > 3000ms', () => {
       const room = makeTestRoom();
       room.nowPlaying = {

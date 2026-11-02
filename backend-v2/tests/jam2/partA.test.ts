@@ -123,7 +123,7 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       }
     });
 
-    it('accepts trackEnded for unknown duration (0) only after 15s', () => {
+    it('accepts trackEnded for unknown duration (0) only after 15s and only from host or playback perm holder', () => {
       const room = makeTestRoom();
       room.nowPlaying.item!.song.duration = 0; // Unknown duration
 
@@ -131,19 +131,33 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       const resEarly = applyCommand(
         room,
         { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
-        'guest_1',
+        'host_1',
         room.nowPlaying.anchorServerTs + 5000,
       );
       expect('room' in resEarly).toBe(true);
       if ('room' in resEarly) {
         expect(resEarly.room.nowPlaying.trackSeq).toBe(1);
+        expect(resEarly.applied).toBe(false);
       }
 
-      // At 16s: accepted
-      const resLate = applyCommand(
+      // At 16s by guest without playback permission: rejected (Task B6)
+      const resGuestNoPerm = applyCommand(
         room,
         { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
         'guest_1',
+        room.nowPlaying.anchorServerTs + 16000,
+      );
+      expect('room' in resGuestNoPerm).toBe(true);
+      if ('room' in resGuestNoPerm) {
+        expect(resGuestNoPerm.room.nowPlaying.trackSeq).toBe(1);
+        expect(resGuestNoPerm.applied).toBe(false);
+      }
+
+      // At 16s by host: accepted
+      const resLate = applyCommand(
+        room,
+        { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
+        'host_1',
         room.nowPlaying.anchorServerTs + 16000,
       );
       expect('room' in resLate).toBe(true);
