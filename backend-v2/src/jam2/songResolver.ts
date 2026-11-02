@@ -108,6 +108,26 @@ export function clearSongResolverCache(): void {
 }
 
 /**
+ * Task R7: Sweeps expired entries (both positive and negative) from memoryCache.
+ * Returns the count of deleted entries.
+ */
+export function sweepExpiredSongCache(now: number = Date.now()): number {
+  let evicted = 0;
+  for (const [key, entry] of memoryCache.entries()) {
+    if (now > entry.expiresAt) {
+      memoryCache.delete(key);
+      evicted++;
+    }
+  }
+  return evicted;
+}
+
+const sweepInterval = setInterval(() => {
+  sweepExpiredSongCache();
+}, 60_000);
+sweepInterval.unref();
+
+/**
  * Merges client-provided metadata with resolved server metadata.
  * Task F3:
  * - title/artists/album/imageUrl: resolved value when non-empty else client value (sanitized + length-limited)
