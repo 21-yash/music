@@ -472,7 +472,8 @@ class JamSessionManager(
                 onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
-                showToast("Failed to create Jam: ${err.message}")
+                val displayMsg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Failed to create Jam")
+                showToast(displayMsg)
                 teardownJam()
                 jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))
@@ -511,7 +512,8 @@ class JamSessionManager(
                 onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
-                showToast("Failed to join Jam: ${err.message}")
+                val displayMsg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Failed to join Jam")
+                showToast(displayMsg)
                 teardownJam()
                 jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))

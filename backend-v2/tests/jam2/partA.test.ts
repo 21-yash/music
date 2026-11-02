@@ -546,9 +546,12 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       const store = new Jam2Store();
       const manager = new Jam2Manager(store);
 
-      const joinPromises = Array.from({ length: 20 }, (_, i) =>
-        manager.joinRoom('COLD2', `user_${i}`, `User ${i}`),
-      );
+      const joinPromises = [
+        manager.joinRoom('COLD2', 'u_host', 'Host'),
+        ...Array.from({ length: 19 }, (_, i) =>
+          manager.joinRoom('COLD2', `user_${i}`, `User ${i}`),
+        ),
+      ];
 
       const results = await Promise.all(joinPromises);
       for (const res of results) {
@@ -559,7 +562,8 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       expect(roomGetCalls).toHaveLength(1);
 
       const finalRoom = await store.getRoom('COLD2');
-      for (let i = 0; i < 20; i++) {
+      expect(finalRoom?.members.get('u_host')?.online).toBe(true);
+      for (let i = 0; i < 19; i++) {
         expect(finalRoom?.members.get(`user_${i}`)?.online).toBe(true);
       }
       manager.stop();

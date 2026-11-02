@@ -19,6 +19,7 @@ import {
   DEFAULT_ROOM_PERMS,
   Song,
   Jam2Tick,
+  MAX_ROOM_MEMBERS,
 } from './types';
 
 export function runSafely(label: string, fn: () => void | Promise<void>): void {
@@ -351,8 +352,17 @@ export class Jam2Manager {
         return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
       }
 
-      // Resume join for already-online member: do NOT bump version or broadcast
       const existingMember = room.members.get(userId);
+      if (!existingMember && room.members.size >= MAX_ROOM_MEMBERS) {
+        return {
+          error: {
+            code: 'ROOM_FULL',
+            message: 'This Jam is full (20 people)',
+          },
+        };
+      }
+
+      // Resume join for already-online member: do NOT bump version or broadcast
       if (existingMember && existingMember.online) {
         return { room, events: [] };
       }
