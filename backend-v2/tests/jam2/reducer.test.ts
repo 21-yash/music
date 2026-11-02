@@ -677,6 +677,108 @@ describe('Jam2 Reducer', () => {
       }
     });
 
+    it('Task B5: promote rejects with QUEUE_FULL when user queue already has 50 songs', () => {
+      const room = makeTestRoom();
+      room.nowPlaying = {
+        item: {
+          qid: 'now_q',
+          song: makeTestSong('now_song'),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        },
+        status: 'playing',
+        positionMs: 0,
+        anchorServerTs: 1000,
+        trackSeq: 1,
+      };
+
+      for (let i = 0; i < 50; i++) {
+        room.queue.push({
+          qid: `u_${i}`,
+          song: makeTestSong(`u_${i}`),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        });
+      }
+
+      room.queue.push({
+        qid: 'rec_promo',
+        song: makeTestSong('rec_promo'),
+        addedByUserId: null,
+        addedAt: 1000,
+        recommended: true,
+      });
+
+      const res = applyCommand(
+        room,
+        { code: 'TEST', type: 'promote', qid: 'rec_promo' },
+        'host_1',
+        2000,
+      );
+
+      expect('error' in res).toBe(true);
+      if ('error' in res) {
+        expect(res.error.code).toBe('QUEUE_FULL');
+        expect(res.error.message).toContain('Queue is full');
+      }
+    });
+
+    it('Task B5: prev drops current song instead of dropping last queued song when user queue has 50 songs', () => {
+      const room = makeTestRoom();
+      const histSong = makeTestSong('hist_song');
+      room.history = [
+        {
+          qid: 'hist_q',
+          song: histSong,
+          addedByUserId: 'host_1',
+          addedAt: 500,
+          recommended: false,
+        },
+      ];
+
+      const currentSong = makeTestSong('current_played_song');
+      room.nowPlaying = {
+        item: {
+          qid: 'current_q',
+          song: currentSong,
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        },
+        status: 'playing',
+        positionMs: 1000,
+        anchorServerTs: 1000,
+        trackSeq: 2,
+      };
+
+      for (let i = 0; i < 50; i++) {
+        room.queue.push({
+          qid: `u_${i}`,
+          song: makeTestSong(`u_${i}`),
+          addedByUserId: 'host_1',
+          addedAt: 1000,
+          recommended: false,
+        });
+      }
+
+      const res = applyCommand(
+        room,
+        { code: 'TEST', type: 'prev' },
+        'host_1',
+        2000,
+      );
+
+      expect('room' in res).toBe(true);
+      if ('room' in res) {
+        expect(res.room.nowPlaying.item?.song.id).toBe('hist_song');
+        expect(res.room.queue.length).toBe(50);
+        expect(res.room.queue[49].song.id).toBe('u_49');
+        expect(res.room.queue[0].song.id).toBe('u_0');
+      }
+    });
+
     it('allows dismissal of recommended song by member with queueAdd or queueManage', () => {
       const room = makeTestRoom();
       room.queue = [

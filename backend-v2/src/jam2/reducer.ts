@@ -216,14 +216,22 @@ export function applyCommand(
       const popped = nextRoom.history.pop()!;
       if (nextRoom.nowPlaying.item) {
         if (nextRoom.nowPlaying.item.recommended) {
-          const firstRecIdx = nextRoom.queue.findIndex((q) => q.recommended);
-          if (firstRecIdx === -1) {
-            nextRoom.queue.push(nextRoom.nowPlaying.item);
-          } else {
-            nextRoom.queue.splice(firstRecIdx, 0, nextRoom.nowPlaying.item);
+          const recCount = nextRoom.queue.filter((q) => q.recommended).length;
+          if (recCount < MAX_REC_QUEUE_SIZE) {
+            const firstRecIdx = nextRoom.queue.findIndex((q) => q.recommended);
+            if (firstRecIdx === -1) {
+              nextRoom.queue.push(nextRoom.nowPlaying.item);
+            } else {
+              nextRoom.queue.splice(firstRecIdx, 0, nextRoom.nowPlaying.item);
+            }
           }
         } else {
-          nextRoom.queue.unshift(nextRoom.nowPlaying.item);
+          const userCount = nextRoom.queue.filter((q) => !q.recommended).length;
+          if (userCount < MAX_USER_QUEUE_SIZE) {
+            nextRoom.queue.unshift(nextRoom.nowPlaying.item);
+          }
+          // If queue is already at 50 songs, drop the current (already played) item
+          // to preserve the tail of queued user songs.
         }
       }
 
@@ -513,6 +521,11 @@ export function applyCommand(
       const item = nextRoom.queue[idx];
       if (!item.recommended) {
         return { error: { code: 'INVALID', message: 'Song is already in the user queue.' } };
+      }
+
+      const userCount = nextRoom.queue.filter((q) => !q.recommended).length;
+      if (userCount >= MAX_USER_QUEUE_SIZE) {
+        return { error: { code: 'QUEUE_FULL', message: 'Queue is full (max 50 user songs).' } };
       }
 
       nextRoom.queue.splice(idx, 1);
