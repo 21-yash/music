@@ -625,15 +625,17 @@ fun FullPlayerSheet(
                 }
             }
 
+            val jamFullQueue = listOfNotNull(jamUiState.nowPlaying.item) + jamUiState.queue
+
             // ── Queue panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
             BottomPanel(
                 visible = openPanel == PlayerPanel.Queue,
-                title = if (jamState.isInJam) "Jam Queue (${jamUiState.queue.size} songs)" else "Queue (${queue.size} songs)",
+                title = if (jamState.isInJam) "Jam Queue (${jamFullQueue.size} songs)" else "Queue (${queue.size} songs)",
                 isDark = isDark,
                 onClose = { openPanel = null }
             ) {
                 if (jamState.isInJam) {
-                    if (jamUiState.queue.isEmpty()) {
+                    if (jamFullQueue.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Jam queue is empty", color = textSecondary, fontSize = 15.sp)
                         }
@@ -643,6 +645,31 @@ fun FullPlayerSheet(
                             contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Now-playing row prepended as the active first item
+                            jamUiState.nowPlaying.item?.let { nowPlayingItem ->
+                                item(key = "jam_now_playing_${nowPlayingItem.qid}") {
+                                    QueueItemRow(
+                                        song = nowPlayingItem.song,
+                                        active = true,
+                                        isDark = isDark,
+                                        isPlaying = playbackState.isPlaying,
+                                        isRecommended = nowPlayingItem.recommended,
+                                        canMoveUp = false,
+                                        canMoveDown = false,
+                                        showReorderControls = false,
+                                        onClick = {
+                                            if (canControlPlayback) {
+                                                onSeek(0f)
+                                            }
+                                        },
+                                        onMoveUp = {},
+                                        onMoveDown = {},
+                                        onRemove = {},
+                                        onOptionsClick = { selectedQueueSongForOptions = nowPlayingItem.song }
+                                    )
+                                }
+                            }
+
                             // User queue items
                             itemsIndexed(jamUiState.userQueue, key = { _, item -> item.qid }) { index, item ->
                                 val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
