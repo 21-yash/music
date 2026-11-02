@@ -109,8 +109,8 @@ class JamClient(
 
             is JamTransport.Event.Tick -> {
                 val currentRoom = stateStore.room.value
-                val applied = stateStore.applyTick(event.tick)
-                if (!applied || (currentRoom != null && event.tick.version > 0L && event.tick.version != currentRoom.version)) {
+                stateStore.applyTick(event.tick)
+                if (currentRoom != null && event.tick.code == currentRoom.code && event.tick.version > currentRoom.version) {
                     scope.launch(ioDispatcher) {
                         sync()
                     }

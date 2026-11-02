@@ -700,4 +700,72 @@ class JamClientStateMachineTest {
         // Version should remain 10 because sync uses isEpoch = false
         assertEquals(10L, stateStore.room.value?.version)
     }
+
+    @Test
+    fun `tick with version less than or equal to current room does not call sync`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("TICK1", "user_me").apply {
+            getJSONObject("room").put("version", 5)
+        }
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertEquals(5L, stateStore.room.value?.version)
+        transport.emittedEvents.clear()
+
+        // Tick with lower version (stale)
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK1",
+            version = 4L,
+            serverTime = 2000L,
+            nowPlaying = JamTickNowPlaying(100L, 2000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        // Tick with same version
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK1",
+            version = 5L,
+            serverTime = 3000L,
+            nowPlaying = JamTickNowPlaying(200L, 3000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        val syncEmits = transport.emittedEvents.filter { it.first == "jam2:sync" }
+        assertEquals(0, syncEmits.size)
+    }
+
+    @Test
+    fun `tick with version greater than current room calls sync`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("TICK2", "user_me").apply {
+            getJSONObject("room").put("version", 5)
+        }
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertEquals(5L, stateStore.room.value?.version)
+        transport.emittedEvents.clear()
+
+        // Prepare sync response
+        transport.nextEmitResult = Result.success(makeRoomJson("TICK2", "user_me").apply {
+            getJSONObject("room").put("version", 6)
+        })
+
+        // Tick with higher version (server is ahead)
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK2",
+            version = 6L,
+            serverTime = 4000L,
+            nowPlaying = JamTickNowPlaying(500L, 4000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        val syncEmits = transport.emittedEvents.filter { it.first == "jam2:sync" }
+        assertEquals(1, syncEmits.size)
+    }
 }
