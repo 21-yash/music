@@ -2,7 +2,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { getRedisClient } from '../config/redis';
-import { TooManyRequestsError } from '../utils/errors';
+import { TooManyRequestsError, ServiceUnavailableError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
 interface LazyLimiterOptions {
@@ -23,8 +23,17 @@ const lastLimiterWarnMap = new Map<string, number>();
  * This prevents calling getRedisClient() during module import time before Redis is connected.
  * In test mode (NODE_ENV === 'test'), rate limiting is bypassed unless enableInTest is set.
  *
- * Task H7: Fail-open 750ms timeout guard to ensure an idle/stalled Redis connection cannot
- * block requests indefinitely.
+ * Task H7 / B11:
+ * - 750ms timeout guard to ensure an idle/stalled Redis connection cannot block requests indefinitely.
+ * - On 750ms timeout, auth routes fail closed (503 ServiceUnavailableError) to prevent unthrottled
+ *   brute-force attacks during an outage.
+ * - Non-auth routes (music, stream, sports, global) fail open so user experiences minimal disruption.
+ *
+ * Late 429 limitation:
+ * When Redis is slow (>750ms) but eventually resolves, the in-flight Redis command completes in the
+ * background and increments the count. However, since the HTTP request already timed out and either
+ * failed open or returned 503, the 429 cannot be applied retroactively to that already-handled request.
+ * Subsequent requests within the window will see the incremented count.
  */
 export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
   let limiterInstance: RequestHandler | null = null;
@@ -83,16 +92,28 @@ export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
       called = true;
       const now = Date.now();
       const lastWarn = lastLimiterWarnMap.get(options.keyPrefix) || 0;
+      const isAuthRoute =
+        ['login', 'login_ip', 'register', 'refresh'].includes(options.keyPrefix) ||
+        (req.baseUrl && req.baseUrl.includes('/auth')) ||
+        (req.originalUrl && req.originalUrl.includes('/auth')) ||
+        req.path.startsWith('/auth') ||
+        req.path.startsWith('/api/v1/auth');
+
       if (now - lastWarn >= 60_000) {
         lastLimiterWarnMap.set(options.keyPrefix, now);
         logger.warn(
-          { limiter: options.keyPrefix, path: req.path },
-          `Rate limiter '${options.keyPrefix}' timed out after 750ms; failing open`
+          { limiter: options.keyPrefix, path: req.path, isAuthRoute },
+          `Rate limiter '${options.keyPrefix}' timed out after 750ms; ${isAuthRoute ? 'failing closed (503)' : 'failing open'}`
         );
       }
       const waitMs = now - startMs;
       (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
-      next();
+
+      if (isAuthRoute) {
+        next(new ServiceUnavailableError('Authentication service temporarily unavailable. Please try again.'));
+      } else {
+        next();
+      }
     }, 750);
 
     try {

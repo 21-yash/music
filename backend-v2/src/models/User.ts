@@ -79,8 +79,9 @@ const userSchema = new Schema<IUser>(
 );
 
 // ─── Indexes ──────────────────────────────────────────────────────────
-// unique: true on the schema already creates unique indexes for username and email
-userSchema.index({ 'refreshTokens.tokenHash': 1 });
+// unique: true on the schema already creates unique indexes for username and email.
+// Task B11: Removed unused index on refreshTokens.tokenHash.
+// Note: In an existing deployment, run `db.users.dropIndex('refreshTokens.tokenHash_1')` on MongoDB.
 
 // ─── Pre-save: hash password ──────────────────────────────────────────
 userSchema.pre('save', async function (next) {

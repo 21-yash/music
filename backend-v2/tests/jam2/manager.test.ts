@@ -495,4 +495,37 @@ describe('Jam2Manager', () => {
       }
     });
   });
+
+  describe('Task B11: O(1) userActiveRoom map and code generation', () => {
+    it('getActiveRoomForUser updates on create, join, leave, and destroy', async () => {
+      expect(manager.getActiveRoomForUser('user_x')).toBeNull();
+
+      // Create
+      const room = await manager.createRoom('user_x', 'UserX');
+      expect(manager.getActiveRoomForUser('user_x')).toBe(room.code);
+
+      // Join
+      await manager.joinRoom(room.code, 'user_y', 'UserY');
+      expect(manager.getActiveRoomForUser('user_y')).toBe(room.code);
+
+      // Leave
+      await manager.leaveRoom(room.code, 'user_y');
+      expect(manager.getActiveRoomForUser('user_y')).toBeNull();
+
+      // Destroy
+      await manager.destroyRoom(room.code, 'ended');
+      expect(manager.getActiveRoomForUser('user_x')).toBeNull();
+    });
+
+    it('generateUniqueRoomCode produces only valid JAM_ROOM_CODE_CHARS', async () => {
+      const { JAM_ROOM_CODE_CHARS } = await import('../../src/jam2/types');
+      for (let i = 0; i < 20; i++) {
+        const code = await manager.generateUniqueRoomCode();
+        expect(code.length).toBe(4);
+        for (const char of code) {
+          expect(JAM_ROOM_CODE_CHARS).toContain(char);
+        }
+      }
+    });
+  });
 });
