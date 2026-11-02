@@ -97,12 +97,12 @@ export class Jam2Store {
         nowPlaying: parsed.nowPlaying,
       };
 
-      // Catch-up stale playback if song finished while server was offline
-      this.catchUpStalePlayback(rehydrated, now);
+      // Catch-up stale playback if song finished while server was offline (Task B10)
+      const caughtUp = this.catchUpStalePlayback(rehydrated, now);
 
-      this.rooms.set(normalizedCode, rehydrated);
+      this.rooms.set(normalizedCode, caughtUp);
       logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
-      return rehydrated;
+      return caughtUp;
     } catch (err) {
       logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
       return null;
@@ -321,41 +321,62 @@ export class Jam2Store {
   }
 
   /**
-   * If the room was playing and offline duration exceeded track duration + 5s,
-   * advance track repeatedly (up to 50 times) to bring playback up to present.
+   * Task B10: Advance virtual clock across multiple tracks on cold start / rehydrate.
+   * If the room was playing and offline duration exceeded track duration,
+   * advance track repeatedly across virtual clock to bring playback up to present.
    */
-  private catchUpStalePlayback(room: Room, now: number): void {
-    if (room.nowPlaying.status !== 'playing' || !room.nowPlaying.item) return;
+  catchUpStalePlayback(room: Room, now: number): Room {
+    if (room.nowPlaying.status !== 'playing' || !room.nowPlaying.item) return room;
 
+    let currentRoom = room;
     let advances = 0;
-    while (room.nowPlaying.status === 'playing' && room.nowPlaying.item && advances < 50) {
-      const durationMs =
-        room.nowPlaying.item.song.duration > 0
-          ? room.nowPlaying.item.song.duration * 1000
-          : Number.MAX_SAFE_INTEGER;
-      const elapsed = now - room.nowPlaying.anchorServerTs;
-      const currentExpected = room.nowPlaying.positionMs + elapsed;
 
-      if (currentExpected > durationMs + 5000) {
+    while (
+      currentRoom.nowPlaying.status === 'playing' &&
+      currentRoom.nowPlaying.item &&
+      advances < 50
+    ) {
+      const item = currentRoom.nowPlaying.item;
+      const durationMs =
+        item.song.duration > 0
+          ? item.song.duration * 1000
+          : Number.MAX_SAFE_INTEGER;
+
+      const currentPos = currentRoom.nowPlaying.positionMs;
+      const remainingMs = Math.max(0, durationMs - currentPos);
+      const trackEndTime = currentRoom.nowPlaying.anchorServerTs + remainingMs;
+
+      if (now >= trackEndTime) {
+        // Track finished while offline: advance virtual clock to track's end timestamp
         const res = applyCommand(
-          room,
-          { code: room.code, type: 'trackEnded', trackSeq: room.nowPlaying.trackSeq },
+          currentRoom,
+          { code: currentRoom.code, type: 'trackEnded', trackSeq: currentRoom.nowPlaying.trackSeq },
           'system',
-          now,
+          trackEndTime,
         );
         if ('room' in res) {
-          Object.assign(room, res.room);
+          currentRoom = res.room;
           advances++;
         } else {
           break;
         }
       } else {
-        // Current track is still within bounds; adjust anchor
-        room.nowPlaying.positionMs = Math.min(currentExpected, durationMs);
-        room.nowPlaying.anchorServerTs = now;
+        // Track's remaining duration extends past now: set final position at now
+        const elapsedSinceAnchor = Math.max(0, now - currentRoom.nowPlaying.anchorServerTs);
+        const finalPos = Math.min(durationMs, currentRoom.nowPlaying.positionMs + elapsedSinceAnchor);
+        currentRoom = {
+          ...currentRoom,
+          nowPlaying: {
+            ...currentRoom.nowPlaying,
+            positionMs: finalPos,
+            anchorServerTs: now,
+          },
+        };
         break;
       }
     }
+
+    return currentRoom;
   }
 }
 

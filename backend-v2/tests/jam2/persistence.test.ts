@@ -423,5 +423,94 @@ describe('Jam2 Persistence & Rehydration', () => {
       expect(store.isRoomDirty('MUTE')).toBe(true);
     });
   });
+
+  describe('Task B10: catchUpStalePlayback multi-track advance', () => {
+    it('advances virtual clock across multiple short tracks during long downtime', () => {
+      const song1 = makeTestSong('song_1', 30); // 30s
+      const song2 = makeTestSong('song_2', 40); // 40s
+      const song3 = makeTestSong('song_3', 50); // 50s
+
+      const initialAnchor = 10_000;
+      const room: Room = {
+        code: 'MULT',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: initialAnchor,
+        members: new Map(),
+        defaults: {},
+        queue: [
+          { qid: 'q_2', song: song2, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          { qid: 'q_3', song: song3, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+        ],
+        history: [],
+        nowPlaying: {
+          item: { qid: 'q_1', song: song1, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          status: 'playing',
+          positionMs: 0,
+          anchorServerTs: initialAnchor,
+          trackSeq: 1,
+        },
+      };
+
+      // Server offline from t=10_000 until t=100_000 (90 seconds elapsed)
+      // Track 1 (30s) finishes at 40_000
+      // Track 2 (40s) finishes at 80_000
+      // Track 3 (50s) should be playing at 20s (20_000ms) into the song at now=100_000
+      const now = 100_000;
+      const caughtUp = store.catchUpStalePlayback(room, now);
+
+      expect(caughtUp.nowPlaying.status).toBe('playing');
+      expect(caughtUp.nowPlaying.item?.song.id).toBe('song_3');
+      expect(caughtUp.nowPlaying.positionMs).toBe(20_000);
+      expect(caughtUp.nowPlaying.anchorServerTs).toBe(now);
+      expect(caughtUp.nowPlaying.trackSeq).toBe(3);
+
+      // Queue should have 0 items left (all popped)
+      expect(caughtUp.queue.length).toBe(0);
+
+      // History should contain song_1 and song_2
+      expect(caughtUp.history.length).toBe(2);
+      expect(caughtUp.history[0].song.id).toBe('song_1');
+      expect(caughtUp.history[1].song.id).toBe('song_2');
+    });
+
+    it('transitions to idle when downtime exceeds all queued tracks', () => {
+      const song1 = makeTestSong('song_1', 30); // 30s
+      const song2 = makeTestSong('song_2', 40); // 40s
+
+      const initialAnchor = 10_000;
+      const room: Room = {
+        code: 'IDLE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: initialAnchor,
+        members: new Map(),
+        defaults: {},
+        queue: [
+          { qid: 'q_2', song: song2, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+        ],
+        history: [],
+        nowPlaying: {
+          item: { qid: 'q_1', song: song1, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          status: 'playing',
+          positionMs: 0,
+          anchorServerTs: initialAnchor,
+          trackSeq: 1,
+        },
+      };
+
+      // Total queue duration = 30s + 40s = 70s. Finishes at 80_000.
+      // Rehydrate at now=150_000 (70s after queue ended)
+      const now = 150_000;
+      const caughtUp = store.catchUpStalePlayback(room, now);
+
+      expect(caughtUp.nowPlaying.status).toBe('idle');
+      expect(caughtUp.nowPlaying.item).toBeNull();
+      expect(caughtUp.queue.length).toBe(0);
+      expect(caughtUp.history.length).toBe(2);
+      expect(caughtUp.history[0].song.id).toBe('song_1');
+      expect(caughtUp.history[1].song.id).toBe('song_2');
+    });
+  });
 });
 
