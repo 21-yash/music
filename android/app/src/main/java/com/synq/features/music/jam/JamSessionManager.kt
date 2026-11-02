@@ -866,7 +866,10 @@ class JamSessionManager(
         scope.launch {
             val payload = JSONObject().apply { put("qid", qid) }
             val res = jamClient.sendCommand("queueRemove", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            res.onFailure { err ->
+                val msg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Permission denied")
+                showToast(msg)
+            }
         }
     }
 

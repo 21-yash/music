@@ -747,7 +747,13 @@ fun FullPlayerSheet(
                                         },
                                         onMoveUp = {},
                                         onMoveDown = {},
-                                        onRemove = { onRemoveByQid(item.qid) },
+                                        onRemove = {
+                                            if (jamUiState.canManageQueue) {
+                                                onRemoveByQid(item.qid)
+                                            } else {
+                                                Toast.makeText(context, "You do not have permission to manage recommended songs", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
                                         onOptionsClick = { selectedQueueSongForOptions = item.song }
                                     )
                                 }
