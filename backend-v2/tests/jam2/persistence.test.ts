@@ -252,5 +252,93 @@ describe('Jam2 Persistence & Rehydration', () => {
     // deleteRoom fails open
     await expect(brokenStore.deleteRoom('FAIL')).resolves.not.toThrow();
   });
+
+  describe('Tombstone and Resurrection Prevention (Task B2)', () => {
+    it('interleaved deleteRoom and getRoom prevents resurrection from Redis', async () => {
+      const persistedPayload = {
+        code: 'DEAD',
+        version: 5,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: [{ userId: 'u1', username: 'U1', joinedAt: 1000, online: false, lastSeenAt: 1000, perms: {} }],
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      mockRedis['jam2:room:DEAD'] = JSON.stringify(persistedPayload);
+
+      let resolveRedisGet: (val: string | null) => void;
+      const slowGetPromise = new Promise<string | null>((resolve) => {
+        resolveRedisGet = resolve;
+      });
+
+      const client = redisConfig.getRedisClient();
+      vi.spyOn(client, 'get').mockImplementation(async (key: string) => {
+        if (key === 'jam2:room:DEAD') {
+          return slowGetPromise;
+        }
+        return mockRedis[key] || null;
+      });
+
+      // 1. In-flight getRoom started
+      const getRoomPromise = store.getRoom('DEAD');
+
+      // 2. Interleaved deleteRoom happens before getRoom finishes
+      await store.deleteRoom('DEAD');
+
+      // 3. Redis GET finally resolves with the stale data
+      resolveRedisGet!(JSON.stringify(persistedPayload));
+      const result = await getRoomPromise;
+
+      // Must be null (not resurrected!)
+      expect(result).toBeNull();
+      expect(store.hasRoom('DEAD')).toBe(false);
+    });
+
+    it('tombstone blocks Redis rehydration within 60s window', async () => {
+      const persistedPayload = {
+        code: 'TOMB',
+        version: 2,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: [],
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      mockRedis['jam2:room:TOMB'] = JSON.stringify(persistedPayload);
+
+      // deleteRoom tombstones for 60s
+      await store.deleteRoom('TOMB');
+
+      // Subsequent getRoom within 60s returns null
+      const res = await store.getRoom('TOMB');
+      expect(res).toBeNull();
+      expect(store.hasRoom('TOMB')).toBe(false);
+    });
+
+    it('tombstone only blocks Redis rehydration; rooms in memory are unaffected', async () => {
+      const room: Room = {
+        code: 'ALIVE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+
+      // Put in memory
+      store.setRoom(room);
+
+      // In-memory get returns immediately
+      const inMem = await store.getRoom('ALIVE');
+      expect(inMem).toBe(room);
+    });
+  });
 });
 

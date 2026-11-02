@@ -24,6 +24,17 @@ export class Jam2Store {
   private dirtyRooms = new Set<string>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private inFlightRehydrations = new Map<string, Promise<Room | null>>();
+  private tombstones = new Map<string, number>();
+
+  private isTombstoned(code: string, now = Date.now()): boolean {
+    const expiry = this.tombstones.get(code);
+    if (!expiry) return false;
+    if (now >= expiry) {
+      this.tombstones.delete(code);
+      return false;
+    }
+    return true;
+  }
 
   /**
    * Return room from memory, or rehydrate from Redis if available (single-flight).
@@ -53,9 +64,15 @@ export class Jam2Store {
   }
 
   private async rehydrateFromRedis(normalizedCode: string, now: number): Promise<Room | null> {
+    if (this.isTombstoned(normalizedCode, now)) {
+      return null;
+    }
     try {
       const client = getRedisClient();
       const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
+      if (this.isTombstoned(normalizedCode)) {
+        return null;
+      }
       if (!raw) return null;
 
       const parsed: PersistedRoom = JSON.parse(raw);
@@ -98,6 +115,7 @@ export class Jam2Store {
   async checkRoomExists(code: string): Promise<boolean> {
     const normalizedCode = code.toUpperCase();
     if (this.rooms.has(normalizedCode)) return true;
+    if (this.isTombstoned(normalizedCode)) return false;
     try {
       const client = getRedisClient();
       const exists = await client.exists(`${REDIS_KEY_PREFIX}${normalizedCode}`);
@@ -125,6 +143,7 @@ export class Jam2Store {
    */
   setRoom(room: Room): void {
     const code = room.code.toUpperCase();
+    this.tombstones.delete(code);
     this.rooms.set(code, room);
     this.scheduleDebouncedWrite(code);
   }
@@ -141,6 +160,7 @@ export class Jam2Store {
    */
   async deleteRoom(code: string): Promise<void> {
     const normalizedCode = code.toUpperCase();
+    this.tombstones.set(normalizedCode, Date.now() + 60_000);
     this.rooms.delete(normalizedCode);
     this.dirtyRooms.delete(normalizedCode);
 
