@@ -451,4 +451,48 @@ describe('Jam2Manager', () => {
       expect(threw).toBe(true);
     });
   });
+
+  describe('Kick Ban Asynchronous Write (Task B4)', () => {
+    it('kick command completes without awaiting a pending Redis set write', async () => {
+      const room = await manager.createRoom('host_k', 'HostK');
+      await manager.joinRoom(room.code, 'bad_u', 'BadUser');
+
+      let redisSetCalled = false;
+      const slowSetPromise = new Promise<string>(() => {
+        // Never resolves immediately
+      });
+
+      const redisConfig = await import('../../src/config/redis');
+      vi.spyOn(redisConfig, 'getRedisClient').mockReturnValue({
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockImplementation(async (key: string) => {
+          if (key.includes('bad_u')) {
+            redisSetCalled = true;
+            return slowSetPromise;
+          }
+          return 'OK';
+        }),
+        del: vi.fn().mockResolvedValue(1),
+        scan: vi.fn().mockResolvedValue(['0', []]),
+      } as any);
+
+      // Execute kick
+      const kickRes = await manager.executeCommand(
+        room.code,
+        { type: 'kick', code: room.code, userId: 'bad_u' },
+        'host_k',
+      );
+
+      // executeCommand returns successfully immediately even though Redis write is still pending!
+      expect('room' in kickRes).toBe(true);
+      expect(redisSetCalled).toBe(true);
+
+      // In-memory ban is already effective
+      const rejoinRes = await manager.joinRoom(room.code, 'bad_u', 'BadUser');
+      expect('error' in rejoinRes).toBe(true);
+      if ('error' in rejoinRes) {
+        expect(rejoinRes.error.code).toBe('FORBIDDEN');
+      }
+    });
+  });
 });

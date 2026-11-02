@@ -554,7 +554,7 @@ export class Jam2Manager {
         };
       }
 
-      // Handle kick tracking for 10 minutes (in-memory + Redis)
+      // Handle kick tracking for 10 minutes (in-memory + async Redis write)
       if (cmd.type === 'kick') {
         let kicks = this.kickedUsers.get(normalizedCode);
         if (!kicks) {
@@ -563,12 +563,14 @@ export class Jam2Manager {
         }
         kicks.set(cmd.userId, Date.now() + 10 * 60 * 1000);
 
-        try {
-          const client = getRedisClient();
-          await client.set(`jam2:ban:${normalizedCode}:${cmd.userId}`, '1', 'EX', 600);
-        } catch (err) {
-          logger.warn({ err, code: normalizedCode, userId: cmd.userId }, 'Failed to persist kick ban to Redis');
-        }
+        runSafely(`kickBan:${normalizedCode}:${cmd.userId}`, async () => {
+          try {
+            const client = getRedisClient();
+            await client.set(`jam2:ban:${normalizedCode}:${cmd.userId}`, '1', 'EX', 600);
+          } catch (err) {
+            logger.warn({ err, code: normalizedCode, userId: cmd.userId }, 'Failed to persist kick ban to Redis');
+          }
+        });
       }
 
       this.store.setRoom(nextRoom);
