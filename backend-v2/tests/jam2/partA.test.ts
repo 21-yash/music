@@ -638,7 +638,12 @@ describe('Phase 1 Review Fixes (Part A)', () => {
 
       // Advance to t = baseTime + 25s (> 20s host grace)
       vi.setSystemTime(baseTime + 25000);
+      const setRoomSpy = vi.spyOn(store, 'setRoom');
       await manager.ensureHost('HANDO', baseTime + 25000);
+
+      expect(setRoomSpy).toHaveBeenCalled();
+      const updatedRoomCall = setRoomSpy.mock.calls.find(call => call[0].hostUserId === 'u_guest');
+      expect(updatedRoomCall).toBeDefined();
 
       room = await store.getRoom('HANDO');
       expect(room?.hostUserId).toBe('u_guest'); // Host passed to online guest

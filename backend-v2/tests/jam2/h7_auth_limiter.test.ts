@@ -151,12 +151,13 @@ describe('Task H7 backend auth refresh and limiter fail-open', () => {
     expect(req.limiterWaitMs).toBeGreaterThanOrEqual(700);
   });
 
-  it('Task B11: limiter fail-closed for auth routes on 750ms timeout (503 ServiceUnavailableError)', async () => {
+  it('Task B11 / R9: limiter fail-closed driven by explicit failClosed option on 750ms timeout (503 ServiceUnavailableError)', async () => {
     const hangingAuthLimiter = createLazyLimiter({
       windowMs: 60000,
       limit: 10,
       keyPrefix: 'login',
       enableInTest: true,
+      failClosed: true,
       customStore: {
         init: () => {},
         increment: () => new Promise(() => {}), // never resolves
@@ -166,8 +167,8 @@ describe('Task H7 backend auth refresh and limiter fail-open', () => {
     });
 
     const req: any = {
-      path: '/api/v1/auth/login',
-      originalUrl: '/api/v1/auth/login',
+      path: '/arbitrary/path',
+      originalUrl: '/arbitrary/path',
       ip: '127.0.0.1',
       headers: {},
       app: { get: () => false },

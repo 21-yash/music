@@ -751,11 +751,10 @@ export class Jam2Manager {
             now,
           );
           if ('room' in handoverRes && handoverRes.room.version !== room.version) {
-            Object.assign(room, handoverRes.room);
-            this.store.setRoom(room);
-            this.broadcastState(room);
+            this.store.setRoom(handoverRes.room);
+            this.broadcastState(handoverRes.room);
             for (const ev of handoverRes.events) {
-              this.broadcastEvent(room.code, ev);
+              this.broadcastEvent(handoverRes.room.code, ev);
             }
           }
         }

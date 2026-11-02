@@ -14,6 +14,7 @@ interface LazyLimiterOptions {
   skipSuccessfulRequests?: boolean;
   enableInTest?: boolean;
   customStore?: any;
+  failClosed?: boolean;
 }
 
 const lastLimiterWarnMap = new Map<string, number>();
@@ -92,24 +93,19 @@ export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
       called = true;
       const now = Date.now();
       const lastWarn = lastLimiterWarnMap.get(options.keyPrefix) || 0;
-      const isAuthRoute =
-        ['login', 'login_ip', 'register', 'refresh'].includes(options.keyPrefix) ||
-        (req.baseUrl && req.baseUrl.includes('/auth')) ||
-        (req.originalUrl && req.originalUrl.includes('/auth')) ||
-        req.path.startsWith('/auth') ||
-        req.path.startsWith('/api/v1/auth');
+      const shouldFailClosed = Boolean(options.failClosed);
 
       if (now - lastWarn >= 60_000) {
         lastLimiterWarnMap.set(options.keyPrefix, now);
         logger.warn(
-          { limiter: options.keyPrefix, path: req.path, isAuthRoute },
-          `Rate limiter '${options.keyPrefix}' timed out after 750ms; ${isAuthRoute ? 'failing closed (503)' : 'failing open'}`
+          { limiter: options.keyPrefix, path: req.path, failClosed: shouldFailClosed },
+          `Rate limiter '${options.keyPrefix}' timed out after 750ms; ${shouldFailClosed ? 'failing closed (503)' : 'failing open'}`
         );
       }
       const waitMs = now - startMs;
       (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
 
-      if (isAuthRoute) {
+      if (shouldFailClosed) {
         next(new ServiceUnavailableError('Authentication service temporarily unavailable. Please try again.'));
       } else {
         next();
@@ -167,6 +163,7 @@ export const loginLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   keyPrefix: 'login',
+  failClosed: true,
   keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? 'unknown')}:${String(req.body?.login ?? '').trim().toLowerCase()}`,
   skipSuccessfulRequests: true,
 });
@@ -176,6 +173,7 @@ export const loginIpLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   keyPrefix: 'login_ip',
+  failClosed: true,
 });
 
 /** Auth register: 5 req / 1 hour per IP */
@@ -183,6 +181,7 @@ export const registerLimiter = createLazyLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 5,
   keyPrefix: 'register',
+  failClosed: true,
 });
 
 /** Auth refresh: 30 req / 15 min per IP */
@@ -190,4 +189,5 @@ export const refreshLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   keyPrefix: 'refresh',
+  failClosed: true,
 });
