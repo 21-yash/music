@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -125,11 +126,8 @@ class JamSessionManager(
     private var isSessionOpInFlight: Boolean = false
     private var isAddPlaylistInFlight: Boolean = false
     private var lastPrefetchedHeadQid: String? = null
-    private var pendingSeekJob: Job? = null
-    private var latestSeekPositionMs: Long? = null
-    private var lastDispatchedSeekPositionMs: Long? = null
-    private var lastSeekDispatchTime: Long = 0L
-    private val seekThrottleMs = 250L
+    private var seekChannel = Channel<Long>(Channel.CONFLATED)
+    private var seekConsumerJob: Job? = null
 
     companion object {
         const val MAX_JAM_QUEUE_SIZE = 50
@@ -548,6 +546,10 @@ class JamSessionManager(
     }
 
     internal fun teardownJam() {
+        seekConsumerJob?.cancel()
+        seekConsumerJob = null
+        while (seekChannel.tryReceive().isSuccess) {}
+
         if (isTornDown) return
         isTornDown = true
         isSessionOpInFlight = false
@@ -573,13 +575,7 @@ class JamSessionManager(
         hasShownAudioFocusToastInThisJam = false
         lastLoadingAbortedToastTrackSeq = null
         lastPrefetchedHeadQid = null
-        pendingSeekJob?.cancel()
-        pendingSeekJob = null
-        latestSeekPositionMs = null
-        lastDispatchedSeekPositionMs = null
-        lastSeekDispatchTime = 0L
         isAddPlaylistInFlight = false
-        isSessionOpInFlight = false
         networkMonitorProvider?.get()?.setJamActive(false)
     }
 
@@ -703,23 +699,20 @@ class JamSessionManager(
     }
 
     fun seekTo(positionMs: Long) {
-        latestSeekPositionMs = positionMs
-        if (pendingSeekJob?.isActive == true) {
-            return
+        if (seekConsumerJob?.isActive != true) {
+            startSeekConsumer()
         }
-        pendingSeekJob = scope.launch {
-            while (latestSeekPositionMs != null && latestSeekPositionMs != lastDispatchedSeekPositionMs) {
-                val elapsed = currentTimeProvider() - lastSeekDispatchTime
-                val waitTime = (seekThrottleMs - elapsed).coerceAtLeast(0L)
-                if (waitTime > 0L) {
-                    delay(waitTime)
-                }
-                val target = latestSeekPositionMs ?: break
-                lastDispatchedSeekPositionMs = target
-                lastSeekDispatchTime = currentTimeProvider()
+        seekChannel.trySend(positionMs)
+    }
+
+    private fun startSeekConsumer() {
+        seekConsumerJob?.cancel()
+        seekConsumerJob = scope.launch {
+            for (target in seekChannel) {
                 val payload = JSONObject().apply { put("positionMs", target) }
                 val res = jamClient.sendCommand("seek", payload)
                 res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+                delay(250L)
             }
         }
     }

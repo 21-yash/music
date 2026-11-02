@@ -826,10 +826,10 @@ class JamClientStateMachineTest {
     }
 
     @Test
-    fun `seekTo implements trailing-edge throttling`() = runTest {
+    fun `seekTo burst of 20 seeks sends first immediately and latest after window nothing in between`() = runTest {
         val client = createClient()
         tokenToProvide = "valid_token"
-        val roomJson = makeRoomJson("SEEK1", "user_me")
+        val roomJson = makeRoomJson("SEEK_BURST", "user_me")
         transport.nextEmitResult = Result.success(roomJson)
 
         client.createRoom()
@@ -837,7 +837,6 @@ class JamClientStateMachineTest {
         assertTrue(client.clientState.value is JamClientState.Active)
         transport.emittedEvents.clear()
 
-        var testTime = 1000L
         val fakePlayer = FakeJamPlayerBridge()
         val fakePrefs = FakeJamPreferencesBridge()
 
@@ -848,7 +847,6 @@ class JamClientStateMachineTest {
             jamClientOverride = client,
             stateStoreOverride = stateStore,
             clockSyncOverride = clockSync,
-            currentTimeProvider = { testTime },
             ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
         )
 
@@ -857,47 +855,145 @@ class JamClientStateMachineTest {
             put("room", roomJson.getJSONObject("room"))
         })
 
-        // Call 1: seekTo(100) -> should be dispatched immediately
+        // First seek goes out immediately
         sessionManager.seekTo(100L)
+        runCurrent()
+
+        // Burst of seeks while window is open
+        for (i in 2..20) {
+            sessionManager.seekTo(i * 100L) // 200, 300, ..., 2000
+        }
+        runCurrent()
+
+        // Only first seek (100L) should be sent immediately
+        val seeksBeforeWindow = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeksBeforeWindow.size)
+        assertEquals(100L, (seeksBeforeWindow[0].second as JSONObject).getLong("positionMs"))
+
+        // Advance past the 250ms window
+        advanceTimeBy(250L)
+        runCurrent()
+
+        // Now latest seek (2000L) is sent after window, nothing in between (total 2 seeks)
+        val seeksAfterWindow = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(2, seeksAfterWindow.size)
+        assertEquals(2000L, (seeksAfterWindow[1].second as JSONObject).getLong("positionMs"))
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `seekTo repeated seeks to 0 separated by time sends both`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK_SAME", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // First seek to 0
+        sessionManager.seekTo(0L)
         runCurrent()
 
         val seeks1 = transport.emittedEvents.filter {
             it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
         }
         assertEquals(1, seeks1.size)
-        assertEquals(100L, (seeks1[0].second as JSONObject).getLong("positionMs"))
+        assertEquals(0L, (seeks1[0].second as JSONObject).getLong("positionMs"))
 
-        // Rapid seeks within the 250ms window: 200, 300, 400
-        testTime += 50L
-        sessionManager.seekTo(200L)
+        // Advance 1s
+        advanceTimeBy(1000L)
         runCurrent()
 
-        testTime += 50L
-        sessionManager.seekTo(300L)
+        // Second seek to 0 (same target position)
+        sessionManager.seekTo(0L)
         runCurrent()
 
-        testTime += 50L
-        sessionManager.seekTo(400L)
-        runCurrent()
-
-        // Still only 1 seek sent because throttle window is open
         val seeks2 = transport.emittedEvents.filter {
             it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
         }
-        assertEquals(1, seeks2.size)
-
-        // Advance time past the 250ms window
-        testTime += 150L
-        advanceTimeBy(250L)
-        runCurrent()
-
-        // Now trailing edge (400L) must have been sent
-        val seeks3 = transport.emittedEvents.filter {
-            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
-        }
-        assertEquals(2, seeks3.size)
-        assertEquals(400L, (seeks3[1].second as JSONObject).getLong("positionMs"))
+        assertEquals(2, seeks2.size)
+        assertEquals(0L, (seeks2[1].second as JSONObject).getLong("positionMs"))
 
         sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `seekTo teardown cancels pending work`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK_TEARDOWN", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // Seek 1 sends immediately
+        sessionManager.seekTo(100L)
+        runCurrent()
+
+        // Seek 2 is queued during throttle window
+        sessionManager.seekTo(500L)
+        runCurrent()
+
+        // Teardown before 250ms delay completes
+        sessionManager.teardownJam()
+        runCurrent()
+
+        // Advance time well past the window
+        advanceTimeBy(1000L)
+        runCurrent()
+
+        // Seek 500 should never have been sent
+        val seeks = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeks.size)
+        assertEquals(100L, (seeks[0].second as JSONObject).getLong("positionMs"))
     }
 }
