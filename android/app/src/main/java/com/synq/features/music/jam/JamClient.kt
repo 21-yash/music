@@ -124,12 +124,14 @@ class JamClient(
             }
 
             is JamTransport.Event.ConnectError -> {
-                handleConnectionLoss()
+                safeLogW("JamClient", "Transport ConnectError: ${event.error.message}", event.error)
+                handleConnectionLoss("connect error: ${event.error.message}")
             }
 
             is JamTransport.Event.Disconnected -> {
+                safeLogI("JamClient", "Transport Disconnected: reason=${event.reason}")
                 if (_clientState.value !is JamClientState.Closed && _clientState.value !is JamClientState.Disconnected) {
-                    handleConnectionLoss()
+                    handleConnectionLoss("transport disconnected (${event.reason})")
                 }
             }
 
@@ -404,10 +406,10 @@ class JamClient(
         startReconnectLoop(code, resetBackoff = true, trigger = "network restored")
     }
 
-    private fun handleConnectionLoss() {
+    private fun handleConnectionLoss(trigger: String = "transport connection lost") {
         val code = activeRoomCode ?: return
         if (_clientState.value is JamClientState.Closed) return
-        startReconnectLoop(code, resetBackoff = false, trigger = "transport connection lost")
+        startReconnectLoop(code, resetBackoff = false, trigger = trigger)
     }
 
     private fun startReconnectLoop(code: String, resetBackoff: Boolean, trigger: String = "unknown") {
