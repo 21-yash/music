@@ -9,21 +9,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Task H7 / C6: Pure function to check whether an access token is expired or within skew window.
- * Uses centralized [JwtUtils.getExpirationSeconds] for parsing.
- * Returns true if expired or expiring within [skewMs].
- * Returns false if valid or if the token cannot be parsed (so callers can fall back to standard behavior).
- */
-fun isAccessTokenExpiring(
-    token: String?,
-    nowMs: Long,
-    skewMs: Long = 30_000L
-): Boolean {
-    val expSec = JwtUtils.getExpirationSeconds(token) ?: return false
-    return (expSec * 1000L - nowMs) <= skewMs
-}
-
-/**
  * OkHttp interceptor that attaches:
  * 1. The X-Api-Key header to every request.
  * 2. The Bearer access token to non-public endpoints.
@@ -58,7 +43,7 @@ class AuthInterceptor @Inject constructor(
         val isPublic = PUBLIC_PATHS.any { path.contains(it) }
         if (!isPublic) {
             var token = runBlocking { tokenStorage.getAccessTokenSync() }
-            if (token != null && isAccessTokenExpiring(token, System.currentTimeMillis(), 30_000L)) {
+            if (token != null && JwtUtils.isExpiredOrNearExpiry(token, marginSeconds = 30L)) {
                 val refreshResult = runBlocking { tokenRefresher.refreshResult(token) }
                 if (refreshResult is TokenRefreshResult.Success) {
                     token = refreshResult.token

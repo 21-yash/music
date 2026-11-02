@@ -17,44 +17,43 @@ class AuthTokenExpiryTest {
     fun testIsAccessTokenExpiringTable() {
         val nowMs = 1_000_000_000_000L // arbitrary fixed timestamp
         val nowSec = nowMs / 1000L
-        val skewMs = 30_000L // 30 seconds skew
 
         // 1. Expired: exp is 60 seconds in the past
         val expiredToken = createJwtWithExp(nowSec - 60L)
         assertTrue(
             "Expired token must return true",
-            isAccessTokenExpiring(expiredToken, nowMs, skewMs)
+            JwtUtils.isExpiredOrNearExpiry(expiredToken, marginSeconds = 30L, currentTimeSeconds = nowSec)
         )
 
         // 2. Within skew: exp is 15 seconds in the future (<= 30s)
         val withinSkewToken = createJwtWithExp(nowSec + 15L)
         assertTrue(
             "Token within skew window must return true",
-            isAccessTokenExpiring(withinSkewToken, nowMs, skewMs)
+            JwtUtils.isExpiredOrNearExpiry(withinSkewToken, marginSeconds = 30L, currentTimeSeconds = nowSec)
         )
 
         // 3. Valid: exp is 10 minutes in the future (> 30s)
         val validToken = createJwtWithExp(nowSec + 600L)
         assertFalse(
             "Valid token beyond skew must return false",
-            isAccessTokenExpiring(validToken, nowMs, skewMs)
+            JwtUtils.isExpiredOrNearExpiry(validToken, marginSeconds = 30L, currentTimeSeconds = nowSec)
         )
 
-        // 4. Malformed tokens: must return false (so caller behaves as today)
-        assertFalse(
-            "Malformed token without dots must return false",
-            isAccessTokenExpiring("not-a-jwt", nowMs, skewMs)
+        // 4. Malformed tokens: must return true for isExpiredOrNearExpiry
+        assertTrue(
+            "Malformed token without dots must return true",
+            JwtUtils.isExpiredOrNearExpiry("not-a-jwt", marginSeconds = 30L, currentTimeSeconds = nowSec)
         )
-        assertFalse(
-            "Malformed token with invalid base64 must return false",
-            isAccessTokenExpiring("header.invalid_base64!!!.sig", nowMs, skewMs)
+        assertTrue(
+            "Malformed token with invalid base64 must return true",
+            JwtUtils.isExpiredOrNearExpiry("header.invalid_base64!!!.sig", marginSeconds = 30L, currentTimeSeconds = nowSec)
         )
-        assertFalse(
-            "Malformed token without exp claim must return false",
-            isAccessTokenExpiring(
+        assertTrue(
+            "Malformed token without exp claim must return true",
+            JwtUtils.isExpiredOrNearExpiry(
                 "${Base64.getUrlEncoder().encodeToString("{}".toByteArray())}.${Base64.getUrlEncoder().encodeToString("""{"userId":"123"}""".toByteArray())}.sig",
-                nowMs,
-                skewMs
+                marginSeconds = 30L,
+                currentTimeSeconds = nowSec
             )
         )
     }
