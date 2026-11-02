@@ -6,6 +6,7 @@ import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -204,7 +205,16 @@ class JamClientStateMachineTest {
     }
 
     @Test
-    fun `when not ACTIVE sendCommand fails fast with error Reconnecting try again`() = runTest {
+    fun `when DISCONNECTED or CLOSED sendCommand fails fast with error Reconnecting try again`() = runTest {
+        val client = createClient()
+        // Disconnected
+        val res = client.sendCommand("play")
+        assertTrue(res.isFailure)
+        assertEquals("Reconnecting… try again", res.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `when RECONNECTING sendCommand waits up to 4s and fails after timeout`() = runTest {
         val client = createClient()
         tokenToProvide = "valid_token"
         transport.nextEmitResult = Result.success(makeRoomJson("FAST", "user_me"))
@@ -218,10 +228,59 @@ class JamClientStateMachineTest {
         runCurrent()
         assertTrue(client.clientState.value is JamClientState.Reconnecting)
 
-        // Send command while Reconnecting -> must fail fast with specific message
-        val res = client.sendCommand("play")
-        assertTrue(res.isFailure)
-        assertEquals("Reconnecting… try again", res.exceptionOrNull()?.message)
+        // Keep socket connection failing so reconnect loop stays in Reconnecting
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("No internet"))
+
+        var commandResult: Result<Long>? = null
+        val cmdJob = launch {
+            commandResult = client.sendCommand("play")
+        }
+        runCurrent()
+        assertNull("Command should be waiting, not failed immediately", commandResult)
+
+        // Advance 4001ms to trigger timeout
+        advanceTimeBy(4001L)
+        runCurrent()
+
+        assertTrue(commandResult!!.isFailure)
+        assertEquals("Reconnecting… try again", commandResult!!.exceptionOrNull()?.message)
+        cmdJob.join()
+    }
+
+    @Test
+    fun `when RECONNECTING sendCommand succeeds once active state restored within 4s`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CMD", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Drop connection to enter Reconnecting
+        transport.emitEvent(JamTransport.Event.Disconnected("network drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        transport.emittedEvents.clear()
+        transport.nextEmitResult = Result.success(JSONObject().apply { put("version", 42L) })
+
+        var commandResult: Result<Long>? = null
+        val cmdJob = launch {
+            commandResult = client.sendCommand("play")
+        }
+        runCurrent()
+        assertNull("Command should wait during reconnecting", commandResult)
+
+        // Restore active state within 1s
+        advanceTimeBy(1000L)
+        client.setActiveForTesting("RECONNECT_CMD", JamRole.HOST)
+        runCurrent()
+
+        assertTrue("Command should succeed once Active is restored", commandResult!!.isSuccess)
+        assertEquals(42L, commandResult!!.getOrNull())
+        assertEquals(1, transport.emittedEvents.filter { it.first == "jam2:cmd" }.size)
+        cmdJob.join()
     }
 
     @Test

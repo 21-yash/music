@@ -436,7 +436,7 @@ fun JamScreen(
                     var showReconnectingChip by remember { mutableStateOf(false) }
                     LaunchedEffect(clientState) {
                         if (clientState is JamClientState.Reconnecting) {
-                            kotlinx.coroutines.delay(4000L)
+                            kotlinx.coroutines.delay(2000L)
                             showReconnectingChip = true
                         } else {
                             showReconnectingChip = false

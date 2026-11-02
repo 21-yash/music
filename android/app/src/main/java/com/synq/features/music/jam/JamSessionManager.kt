@@ -564,6 +564,8 @@ class JamSessionManager(
         hasShownAudioFocusToastInThisJam = false
         lastLoadingAbortedToastTrackSeq = null
         lastPrefetchedHeadQid = null
+        isAddPlaylistInFlight = false
+        isSessionOpInFlight = false
     }
 
     private fun maybePrefetchQueueHead(room: RoomSnapshot?) {

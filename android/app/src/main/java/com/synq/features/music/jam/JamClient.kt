@@ -15,8 +15,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.random.Random
 
@@ -285,10 +287,23 @@ class JamClient(
     }
 
     /**
-     * Sends a command to the room. Fails fast if not in Active state.
+     * Sends a command to the room.
+     * When Reconnecting or Connecting, waits up to 4s for Active before sending.
+     * Fails fast if Closed or Disconnected, or after 4s timeout.
      */
     suspend fun sendCommandRaw(type: String, params: JSONObject = JSONObject()): Result<JSONObject> {
-        val currentState = _clientState.value
+        var currentState = _clientState.value
+        if (currentState is JamClientState.Connecting || currentState is JamClientState.Reconnecting) {
+            val resolvedState = withTimeoutOrNull(4000L) {
+                _clientState.first {
+                    it is JamClientState.Active || it is JamClientState.Closed || it is JamClientState.Disconnected
+                }
+            }
+            if (resolvedState != null) {
+                currentState = resolvedState
+            }
+        }
+
         if (currentState !is JamClientState.Active) {
             return Result.failure(IllegalStateException("Reconnecting… try again"))
         }
