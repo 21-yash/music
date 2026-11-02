@@ -19,23 +19,40 @@ import javax.inject.Provider
 import javax.inject.Singleton
 
 @Singleton
-class NetworkMonitor @Inject constructor(
+class NetworkMonitor(
     @ApplicationContext private val context: Context,
-    private val jamSessionManagerProvider: Provider<JamSessionManager>
+    private val jamSessionManagerProvider: Provider<JamSessionManager>,
+    coroutineScope: CoroutineScope? = null
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        jamSessionManagerProvider: Provider<JamSessionManager>
+    ) : this(context, jamSessionManagerProvider, null)
+
+    private val scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
-    private val _isOnline = MutableStateFlow(checkInitialConnectivity())
+    private val _isOnline = MutableStateFlow(hasValidInternetConnection())
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
-    private var wasOffline = false
+    private var wasOffline = !hasValidInternetConnection()
+    private var lastDefaultNetwork: Network? = null
+    private var lastValidated: Boolean = false
+    private var isInitialCallback = true
+
+    @Volatile
+    private var isJamActive: Boolean = false
+
+    fun setJamActive(active: Boolean) {
+        isJamActive = active
+    }
+
+    fun isJamActive(): Boolean = isJamActive
 
     private fun checkInitialConnectivity(): Boolean {
-        val activeNetwork = connectivityManager?.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return hasValidInternetConnection()
     }
 
     private fun hasValidInternetConnection(): Boolean {
@@ -49,27 +66,47 @@ class NetworkMonitor @Inject constructor(
         connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 scope.launch {
-                    val previouslyOffline = !_isOnline.value || wasOffline
-                    _isOnline.value = true
-                    wasOffline = false
-                    if (previouslyOffline) {
-                        // On network restored: trigger library sync
-                        SyncManager.triggerOneTimeSync(context)
+                    val networkChanged = lastDefaultNetwork != null && lastDefaultNetwork != network
+                    lastDefaultNetwork = network
+
+                    if (isInitialCallback) {
+                        return@launch
                     }
-                    // On default-network change/restore (Wi-Fi <-> 4G), force socket to reconnect
-                    jamSessionManagerProvider.get().onNetworkRestored()
+
+                    if (networkChanged || wasOffline) {
+                        if (hasValidInternetConnection()) {
+                            val previouslyOffline = !_isOnline.value || wasOffline
+                            _isOnline.value = true
+                            wasOffline = false
+                            lastValidated = true
+                            if (previouslyOffline) {
+                                SyncManager.triggerOneTimeSync(context)
+                            }
+                            if (isJamActive) {
+                                jamSessionManagerProvider.get().onNetworkRestored()
+                            }
+                        }
+                    }
                 }
             }
 
             override fun onLost(network: Network) {
                 scope.launch {
-                    // Check if another validated network is still available before marking offline
+                    isInitialCallback = false
+                    if (lastDefaultNetwork == network) {
+                        lastDefaultNetwork = null
+                        lastValidated = false
+                    }
                     if (hasValidInternetConnection()) {
                         _isOnline.value = true
                         wasOffline = false
-                        jamSessionManagerProvider.get().onNetworkRestored()
+                        lastValidated = true
+                        if (isJamActive) {
+                            jamSessionManagerProvider.get().onNetworkRestored()
+                        }
                     } else {
                         wasOffline = true
+                        lastValidated = false
                         _isOnline.value = false
                     }
                 }
@@ -80,12 +117,39 @@ class NetworkMonitor @Inject constructor(
                 networkCapabilities: NetworkCapabilities
             ) {
                 val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                val isValidated = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val isOnlineNow = hasInternet && isValidated
+
                 scope.launch {
-                    if (hasInternet && !_isOnline.value) {
+                    val networkChanged = lastDefaultNetwork != null && lastDefaultNetwork != network
+                    lastDefaultNetwork = network
+
+                    if (isInitialCallback) {
+                        isInitialCallback = false
+                        lastValidated = isOnlineNow
+                        _isOnline.value = isOnlineNow
+                        wasOffline = !isOnlineNow
+                        return@launch
+                    }
+
+                    if (isOnlineNow) {
+                        val transitionedToOnline = !_isOnline.value || wasOffline || (!lastValidated && isValidated)
                         _isOnline.value = true
                         wasOffline = false
-                        SyncManager.triggerOneTimeSync(context)
-                        jamSessionManagerProvider.get().onNetworkRestored()
+                        lastValidated = true
+
+                        if (transitionedToOnline || networkChanged) {
+                            if (transitionedToOnline) {
+                                SyncManager.triggerOneTimeSync(context)
+                            }
+                            if (isJamActive) {
+                                jamSessionManagerProvider.get().onNetworkRestored()
+                            }
+                        }
+                    } else if (!hasInternet) {
+                        lastValidated = false
+                        wasOffline = true
+                        _isOnline.value = false
                     }
                 }
             }

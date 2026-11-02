@@ -190,12 +190,14 @@ class JamSessionManager(
         when (state) {
             is JamClientState.Active -> {
                 jamPreferences.saveLastJam(state.code, myAvatarUrl)
+                networkMonitorProvider?.get()?.setJamActive(true)
                 playerManager.jamInterceptor = this
                 updateLegacyState(stateStore.room.value, state)
             }
 
             is JamClientState.Closed -> {
                 jamPreferences.clearLastJam()
+                networkMonitorProvider?.get()?.setJamActive(false)
                 closedToastFor(state.reason, alreadyToasted = false)?.let { showToast(it) }
                 teardownJam()
                 jamClient.resetToDisconnected()
@@ -566,6 +568,7 @@ class JamSessionManager(
         lastPrefetchedHeadQid = null
         isAddPlaylistInFlight = false
         isSessionOpInFlight = false
+        networkMonitorProvider?.get()?.setJamActive(false)
     }
 
     private fun maybePrefetchQueueHead(room: RoomSnapshot?) {
