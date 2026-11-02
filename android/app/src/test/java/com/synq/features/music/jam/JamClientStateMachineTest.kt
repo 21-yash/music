@@ -84,7 +84,7 @@ class JamClientStateMachineTest {
         )
     }
 
-    private fun kotlinx.coroutines.test.TestScope.createClient(): JamClient {
+    private fun kotlinx.coroutines.test.TestScope.createClient(autoClockSync: Boolean = false): JamClient {
         return JamClient(
             transport = transport,
             stateStore = stateStore,
@@ -99,7 +99,7 @@ class JamClientStateMachineTest {
                     TokenRefreshResult.Unauthorized
                 }
             },
-            autoClockSync = false,
+            autoClockSync = autoClockSync,
             monotonicNowMs = { currentTime },
             wallClockNowMs = { currentTime }
         )
@@ -557,6 +557,63 @@ class JamClientStateMachineTest {
         val finalState = client.clientState.value
         assertTrue("Expected Active state after reconnect, but was $finalState", finalState is JamClientState.Active)
         assertEquals("RECN", (finalState as JamClientState.Active).code)
+    }
+
+    @Test
+    fun `when createRoom fails clockSyncJob is cleaned up and not running`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        // awaitConnected succeeds, but create emit fails
+        transport.nextEmitResult = Result.failure(JamProtocolException("INTERNAL", "Server error"))
+
+        val res = client.createRoom()
+        runCurrent()
+
+        assertTrue(res.isFailure)
+        assertFalse("clockSyncJob must not leak on createRoom failure", client.isClockSyncRunning)
+    }
+
+    @Test
+    fun `when joinRoom fails clockSyncJob is cleaned up and not running`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.failure(JamProtocolException("NOT_FOUND", "Room not found"))
+
+        val res = client.joinRoom("TEST99")
+        runCurrent()
+
+        assertTrue(res.isFailure)
+        assertFalse("clockSyncJob must not leak on joinRoom failure", client.isClockSyncRunning)
+    }
+
+    @Test
+    fun `clock sync runs exactly once with 3 samples on reconnect`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CLOCK", "user_me"))
+
+        client.createRoom()
+        advanceTimeBy(500L)
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        transport.emittedEvents.clear()
+
+        // Drop connection
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CLOCK", "user_me"))
+
+        // Reconnect loop runs
+        advanceTimeBy(2500L)
+        runCurrent()
+
+        assertTrue(client.clientState.value is JamClientState.Active)
+        val timePings = transport.emittedEvents.filter { it.first == "jam2:time" }
+        // Exactly 3 pings from a single clock sync run, not 6 or 9!
+        assertEquals("Should perform exactly one 3-sample clock sync", 3, timePings.size)
     }
 
     @Test

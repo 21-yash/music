@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.random.Random
@@ -68,6 +70,8 @@ class JamClient(
     private var reconnectAttempt = 1
     private var reconnectStartedAt = 0L
     private var clockSyncJob: Job? = null
+    internal val isClockSyncRunning: Boolean get() = clockSyncJob?.isActive == true
+    private val clockSyncMutex = Mutex()
     private var eventListenerJob: Job? = null
     private var notFoundRetryCount = 0
     private var closedEmittedForSession = false
@@ -96,13 +100,7 @@ class JamClient(
     private fun handleTransportEvent(event: JamTransport.Event) {
         when (event) {
             is JamTransport.Event.Connected -> {
-                // Connection handled directly inside awaitConnected or join
-                if (autoClockSync) {
-                    scope.launch(ioDispatcher) {
-                        performClockSync()
-                        startClockSyncLoop()
-                    }
-                }
+                // Connection handled directly inside awaitConnected, joinRoom, or createRoom
             }
 
             is JamTransport.Event.State -> {
@@ -176,6 +174,7 @@ class JamClient(
         transport.connect(token)
         val connectRes = transport.awaitConnected(10000L)
         if (connectRes.isFailure) {
+            stopAll()
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
             val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
@@ -194,6 +193,12 @@ class JamClient(
             activeRoomCode = snapshot.code
             stateStore.applySnapshot(snapshot, isEpoch = true)
             _clientState.value = JamClientState.Active(snapshot.code, JamRole.HOST)
+            if (autoClockSync) {
+                scope.launch(ioDispatcher) {
+                    performClockSync()
+                    startClockSyncLoop()
+                }
+            }
             snapshot
         }.onFailure {
             if (res.isSuccess) {
@@ -204,6 +209,7 @@ class JamClient(
                     } catch (_: Exception) {}
                 }
             }
+            stopAll()
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
@@ -239,6 +245,7 @@ class JamClient(
         transport.connect(token)
         val connectRes = transport.awaitConnected(10000L)
         if (connectRes.isFailure) {
+            stopAll()
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
             val msg = connectRes.exceptionOrNull()?.message ?: "Failed to connect to Jam server"
@@ -259,6 +266,12 @@ class JamClient(
             stateStore.applySnapshot(snapshot, isEpoch = true)
             val role = if (snapshot.hostUserId == stateStore.uiState.value.myUserId) JamRole.HOST else JamRole.GUEST
             _clientState.value = JamClientState.Active(snapshot.code, role)
+            if (autoClockSync) {
+                scope.launch(ioDispatcher) {
+                    performClockSync()
+                    startClockSyncLoop()
+                }
+            }
             snapshot
         }.onFailure {
             if (res.isSuccess) {
@@ -266,6 +279,7 @@ class JamClient(
                     transport.emit("jam2:leave", JSONObject().apply { put("code", cleanCode) }, ackTimeoutMs = 1500L)
                 } catch (_: Exception) {}
             }
+            stopAll()
             transport.disconnect()
             _clientState.value = JamClientState.Disconnected
         }
@@ -517,15 +531,13 @@ class JamClient(
                 }
             }
 
-            // Step 3: Clock sync if enabled
-            if (autoClockSync) {
-                performClockSync()
-                startClockSyncLoop()
-            }
-
-            // Step 4: Rejoin the room
+            // Step 3: Rejoin the room
             val rejoinRes = performRejoin(code)
             if (rejoinRes.isSuccess) {
+                if (autoClockSync) {
+                    performClockSync()
+                    startClockSyncLoop()
+                }
                 reconnectAttempt = 1
                 reconnectStartedAt = 0L
                 reconnectJob = null
@@ -564,9 +576,6 @@ class JamClient(
         return res.mapCatching { json ->
             val roomObj = json.getJSONObject("room")
             val snapshot = RoomSnapshot.fromJson(roomObj)
-            if (autoClockSync) {
-                performClockSync()
-            }
             stateStore.applySnapshot(snapshot, isEpoch = true)
             val role = if (snapshot.hostUserId == stateStore.uiState.value.myUserId) JamRole.HOST else JamRole.GUEST
             _clientState.value = JamClientState.Active(code, role)
@@ -576,22 +585,24 @@ class JamClient(
     }
 
     private suspend fun performClockSync() {
-        val samples = mutableListOf<PingSample>()
-        for (i in 0 until 3) {
-            val sendMonotonic = monotonicNowMs()
-            val ackRes = transport.emit("jam2:time", null, ackTimeoutMs = 2000L)
-            val receiveMonotonic = monotonicNowMs()
-            ackRes.onSuccess { json ->
-                val serverNow = json.optLong("serverNow", 0L)
-                if (serverNow > 0L) {
-                    samples.add(PingSample(sendMonotonic, serverNow, receiveMonotonic))
+        clockSyncMutex.withLock {
+            val samples = mutableListOf<PingSample>()
+            for (i in 0 until 3) {
+                val sendMonotonic = monotonicNowMs()
+                val ackRes = transport.emit("jam2:time", null, ackTimeoutMs = 2000L)
+                val receiveMonotonic = monotonicNowMs()
+                ackRes.onSuccess { json ->
+                    val serverNow = json.optLong("serverNow", 0L)
+                    if (serverNow > 0L) {
+                        samples.add(PingSample(sendMonotonic, serverNow, receiveMonotonic))
+                    }
                 }
+                if (i < 2) delay(100)
             }
-            if (i < 2) delay(100)
-        }
 
-        if (samples.isNotEmpty()) {
-            clockSync.updateWithSamples(samples)
+            if (samples.isNotEmpty()) {
+                clockSync.updateWithSamples(samples)
+            }
         }
     }
 
