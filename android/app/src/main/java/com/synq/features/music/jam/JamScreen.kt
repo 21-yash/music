@@ -114,24 +114,6 @@ fun JamScreen(
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
 
-    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-        onResult = { _ -> }
-    )
-    var showNotificationRationaleDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (!hasPermission && !rootViewModel.jamPreferences.hasRequestedNotificationPermission()) {
-                showNotificationRationaleDialog = true
-            }
-        }
-    }
-
     LaunchedEffect(uiState.isInJam, hasSeenBatteryTip) {
         if (uiState.isInJam && !hasSeenBatteryTip && !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
             showBatteryOptimizationDialog = true
@@ -228,51 +210,7 @@ fun JamScreen(
         )
     }
 
-    // Notification Permission Guidance Dialog
-    if (showNotificationRationaleDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                rootViewModel.jamPreferences.setRequestedNotificationPermission(true)
-                showNotificationRationaleDialog = false
-            },
-            title = {
-                Text(
-                    text = "Stay Synced in Jam",
-                    fontWeight = FontWeight.Bold,
-                    color = textPrimary
-                )
-            },
-            text = {
-                Text(
-                    text = "Allow Synq to show notifications so you can control playback and see Jam updates from your lock screen and notification bar.",
-                    color = textSecondary,
-                    fontSize = 14.sp
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        rootViewModel.jamPreferences.setRequestedNotificationPermission(true)
-                        showNotificationRationaleDialog = false
-                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                ) {
-                    Text("Continue", color = Accent, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        rootViewModel.jamPreferences.setRequestedNotificationPermission(true)
-                        showNotificationRationaleDialog = false
-                    }
-                ) {
-                    Text("Not Now", color = textSecondary)
-                }
-            },
-            containerColor = cardBg
-        )
-    }
+
 
     if (showIntroDialog) {
         JamIntroDialog(
