@@ -156,6 +156,13 @@ export class Jam2Store {
   }
 
   /**
+   * Check if a room has pending writes (dirty flag).
+   */
+  isRoomDirty(code: string): boolean {
+    return this.dirtyRooms.has(code.toUpperCase());
+  }
+
+  /**
    * Delete room from memory and Redis.
    */
   async deleteRoom(code: string): Promise<void> {
@@ -204,16 +211,34 @@ export class Jam2Store {
     this.debounceTimers.set(code, timer);
   }
 
+  private scheduleRetryWrite(code: string, attempt: number): void {
+    const existing = this.debounceTimers.get(code);
+    if (existing) {
+      clearTimeout(existing);
+      this.debounceTimers.delete(code);
+    }
+    const delay = Math.min(5000, 500 * Math.pow(2, attempt));
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(code);
+      this.persistRoomToRedis(code, attempt + 1).catch((err) => {
+        logger.warn({ err, code }, 'Retry Redis persist failed');
+      });
+    }, delay);
+    timer.unref();
+    this.debounceTimers.set(code, timer);
+  }
+
   /**
    * Persist a single room to Redis immediately.
    */
-  async persistRoomToRedis(code: string): Promise<void> {
+  async persistRoomToRedis(code: string, attempt: number = 0): Promise<void> {
     const room = this.rooms.get(code);
     if (!room) {
       this.dirtyRooms.delete(code);
       return;
     }
 
+    const snapshotVersion = room.version;
     try {
       const client = getRedisClient();
       const payload: PersistedRoom = {
@@ -237,9 +262,17 @@ export class Jam2Store {
         'EX',
         ROOM_TTL_SECONDS,
       );
-      this.dirtyRooms.delete(code);
+
+      // Only clear dirty flag if room version hasn't changed during in-flight write
+      const currentRoom = this.rooms.get(code);
+      if (!currentRoom || currentRoom.version === snapshotVersion) {
+        this.dirtyRooms.delete(code);
+      }
     } catch (err) {
-      logger.warn({ err, code }, 'Failed to write jam2 room to Redis (failing open)');
+      logger.warn({ err, code, attempt }, 'Failed to write jam2 room to Redis (rescheduling with backoff)');
+      if (attempt < 3) {
+        this.scheduleRetryWrite(code, attempt);
+      }
     }
   }
 

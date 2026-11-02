@@ -340,5 +340,88 @@ describe('Jam2 Persistence & Rehydration', () => {
       expect(inMem).toBe(room);
     });
   });
+
+  describe('Persistence Correctness & Retries (Task B3)', () => {
+    it('retries failed persistRoomToRedis with backoff', async () => {
+      const room: Room = {
+        code: 'RTRY',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      store.setRoom(room);
+      expect(store.isRoomDirty('RTRY')).toBe(true);
+
+      const client = redisConfig.getRedisClient();
+      let callCount = 0;
+      vi.spyOn(client, 'set').mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Redis write failure 1');
+        }
+        return 'OK';
+      });
+
+      // Initial write
+      await store.persistRoomToRedis('RTRY', 0);
+      expect(callCount).toBe(1);
+      // Room must still be dirty because write failed
+      expect(store.isRoomDirty('RTRY')).toBe(true);
+
+      // Advance timers by backoff delay (500ms)
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Retry should have executed and succeeded
+      expect(callCount).toBe(2);
+      expect(store.isRoomDirty('RTRY')).toBe(false);
+    });
+
+    it('preserves dirty flag if room version is mutated during in-flight write', async () => {
+      const room: Room = {
+        code: 'MUTE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      store.setRoom(room);
+      expect(store.isRoomDirty('MUTE')).toBe(true);
+
+      let resolveWrite: (val: string) => void;
+      const slowWritePromise = new Promise<string>((resolve) => {
+        resolveWrite = resolve;
+      });
+
+      const client = redisConfig.getRedisClient();
+      vi.spyOn(client, 'set').mockImplementation(async (key: string) => {
+        if (key.includes('MUTE')) {
+          return slowWritePromise;
+        }
+        return 'OK';
+      });
+
+      // Start in-flight write with version 1
+      const writePromise = store.persistRoomToRedis('MUTE');
+
+      // While in flight, room is mutated to version 2
+      room.version = 2;
+
+      // In-flight write completes
+      resolveWrite!('OK');
+      await writePromise;
+
+      // Dirty flag MUST be preserved because version was bumped during write!
+      expect(store.isRoomDirty('MUTE')).toBe(true);
+    });
+  });
 });
 
