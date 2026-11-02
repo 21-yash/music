@@ -140,7 +140,8 @@ export type Jam2ErrorCode =
   | 'QUEUE_FULL'
   | 'RATE_LIMITED'
   | 'ROOM_FULL'
-  | 'PROTOCOL';
+  | 'PROTOCOL'
+  | 'INTERNAL';
 
 export interface Jam2Error {
   code: Jam2ErrorCode;

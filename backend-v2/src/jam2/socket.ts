@@ -102,7 +102,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true, room: snapshot });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:create');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error creating room' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error creating room' });
     }
   });
 
@@ -190,7 +190,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true, room: snapshot });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:join');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error joining room' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error joining room' });
     }
   });
 
@@ -235,7 +235,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:leave');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error leaving room' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error leaving room' });
     }
   });
 
@@ -273,7 +273,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:end');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error ending room' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error ending room' });
     }
   });
 
@@ -291,7 +291,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true, serverNow: Date.now() });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:time');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error' });
     }
   });
 
@@ -337,7 +337,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       safeAck(ack, { ok: true, room: snapshot });
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:sync');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error syncing room' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error syncing room' });
     }
   });
 
@@ -492,7 +492,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       } else if (cmd.type === 'queueAddMany') {
         safeAck(ack, {
           ok: true,
-          added: res.added ?? 1,
+          added: res.added ?? 0,
           skipped: (res.skipped ?? 0) + (skippedUnresolved ?? 0),
           skippedDuplicate: res.skippedDuplicate ?? 0,
           skippedFull: res.skippedFull ?? 0,
@@ -513,7 +513,7 @@ export function registerJam2Handlers(io: Server, socket: Socket): void {
       }
     } catch (err) {
       logger.error({ err, socketId: socket.id }, 'Error in jam2:cmd');
-      safeAck(ack, { ok: false, code: 'INVALID', message: 'Internal server error processing command' });
+      safeAck(ack, { ok: false, code: 'INTERNAL', message: 'Internal server error processing command' });
     }
   });
 

@@ -701,5 +701,47 @@ describe('Jam 2.0 WebSocket Integration', () => {
       host2Socket.disconnect();
     }
   });
+
+  it('B9: returns INTERNAL error code on unexpected catch in jam2:create', async () => {
+    const createSpy = vi.spyOn(jam2Manager, 'createRoom').mockRejectedValueOnce(new Error('Unexpected DB breakdown'));
+
+    const ack: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+
+    expect(ack.ok).toBe(false);
+    if (!ack.ok) {
+      expect(ack.code).toBe('INTERNAL');
+      expect(ack.message).toContain('Internal server error creating room');
+    }
+
+    createSpy.mockRestore();
+  });
+
+  it('B9: queueAddMany ack returns added: 0 when added songs are 0', async () => {
+    // 1. Host creates room
+    const createRes: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createRes.ok).toBe(true);
+    const code = (createRes as any).room.code;
+
+    // 2. Add song once
+    const song = makeTestSong('song_single_add');
+    const firstAdd: Jam2Ack<any> = await new Promise((res) => {
+      hostSocket.emit('jam2:cmd', { code, type: 'queueAdd', song }, res);
+    });
+    expect(firstAdd.ok).toBe(true);
+
+    // 3. Try queueAddMany with that same duplicate song
+    const duplicateBatchAck: Jam2Ack<any> = await new Promise((res) => {
+      hostSocket.emit('jam2:cmd', { code, type: 'queueAddMany', songs: [song] }, res);
+    });
+    expect(duplicateBatchAck.ok).toBe(true);
+    if (duplicateBatchAck.ok) {
+      expect(duplicateBatchAck.added).toBe(0);
+      expect(duplicateBatchAck.skippedDuplicate).toBe(1);
+    }
+  });
 });
 

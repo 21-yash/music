@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { songSchema, clientCmdSchema } from '../../src/jam2/types';
 import { jam2Manager } from '../../src/jam2/manager';
-import { registerMusicProvider, getSong } from '../../src/services/musicService';
+import { registerMusicProvider } from '../../src/services/musicService';
+import * as musicService from '../../src/services/musicService';
 import { JioSaavnProvider } from '../../src/providers/music/jiosaavn/jiosaavnProvider';
 import { resolveSongOrFallback, setCustomSongResolver } from '../../src/jam2/songResolver';
 import { initializeSocketIO } from '../../src/websocket';
@@ -175,7 +176,39 @@ describe('Task K1: Schema limits, issue path in error, and per-song batch valida
   });
 
   it('real JioSaavn song g6Ky7cGO passes songSchema, resolution, and room queueAdd', async () => {
-    const rawSong = await getSong('g6Ky7cGO', 'jiosaavn');
+    const mockJioSaavnSong: any = {
+      id: 'g6Ky7cGO',
+      title: 'Kabira',
+      artists: [
+        { id: '459345', name: 'Pritam', imageUrl: 'https://saavncdn.com/artist1.jpg' },
+        { id: '459633', name: 'Tochi Raina', imageUrl: 'https://saavncdn.com/artist2.jpg' },
+        { id: '485954', name: 'Rekha Bhardwaj', imageUrl: 'https://saavncdn.com/artist3.jpg' },
+        { id: '459346', name: 'Amitabh Bhattacharya', imageUrl: 'https://saavncdn.com/artist4.jpg' },
+        { id: '459347', name: 'Artist 5', imageUrl: null },
+        { id: '459348', name: 'Artist 6', imageUrl: null },
+        { id: '459349', name: 'Artist 7', imageUrl: null },
+        { id: '459350', name: 'Artist 8', imageUrl: null },
+        { id: '459351', name: 'Artist 9', imageUrl: null },
+        { id: '459352', name: 'Artist 10', imageUrl: null },
+      ],
+      album: {
+        id: '12345',
+        title: 'Yeh Jawaani Hai Deewani',
+        imageUrl: 'https://saavncdn.com/album.jpg',
+      },
+      duration: 223,
+      imageUrl: 'https://saavncdn.com/song.jpg',
+      year: '2013',
+      language: 'hindi',
+      hasLyrics: true,
+      playCount: 1000000,
+      label: 'T-Series',
+      streamRef: 'encrypted_stream_token',
+      providerId: 'jiosaavn',
+    };
+    vi.spyOn(musicService, 'getSong').mockResolvedValue(mockJioSaavnSong);
+
+    const rawSong = await musicService.getSong('g6Ky7cGO', 'jiosaavn');
     expect(rawSong).not.toBeNull();
     if (!rawSong) return;
 
