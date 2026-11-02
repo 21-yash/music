@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.Sync
+import com.synq.features.music.util.SeekHold
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1818,17 +1819,40 @@ private fun JamTrackProgressBar(
     )
     val durationMs = jamProgress.durationMs
     val progress = jamProgress.fraction
+    val trackKey = "${nowPlayingItem.song.id}_${nowPlaying?.trackSeq ?: 0L}"
 
     var dragProgressRatio by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(nowPlayingItem.song.id) {
+    var seekHold by remember { mutableStateOf<SeekHold?>(null) }
+
+    LaunchedEffect(trackKey) {
         dragProgressRatio = null
+        seekHold = null
+    }
+
+    LaunchedEffect(seekHold) {
+        val hold = seekHold ?: return@LaunchedEffect
+        val remaining = hold.timeoutMs - (android.os.SystemClock.elapsedRealtime() - hold.releasedAtMs)
+        if (remaining > 0) {
+            delay(remaining)
+        }
+        seekHold = null
+    }
+
+    val nowRealtime = android.os.SystemClock.elapsedRealtime()
+    if (seekHold != null && seekHold!!.shouldRelease(liveExpectedPos, nowRealtime, trackKey)) {
+        seekHold = null
+    }
+
+    val heldRatio = seekHold?.let {
+        if (durationMs > 0L) (it.targetMs.toFloat() / durationMs).coerceIn(0f, 1f) else null
     }
 
     Slider(
-        value = dragProgressRatio ?: progress,
+        value = (dragProgressRatio ?: heldRatio ?: progress).coerceIn(0f, 1f),
         onValueChange = { targetRatio ->
             if (canControlPlayback && jamProgress.canSeek) {
                 dragProgressRatio = targetRatio
+                seekHold = null
             }
         },
         onValueChangeFinished = {
@@ -1838,6 +1862,11 @@ private fun JamTrackProgressBar(
                 Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
             } else if (jamProgress.canSeek && target != null) {
                 val targetMs = (target * durationMs).toLong()
+                seekHold = SeekHold(
+                    targetMs = targetMs,
+                    releasedAtMs = android.os.SystemClock.elapsedRealtime(),
+                    trackKey = trackKey
+                )
                 onSeekTo(targetMs)
             }
         },
@@ -1852,7 +1881,9 @@ private fun JamTrackProgressBar(
         modifier = Modifier.fillMaxWidth()
     )
 
-    val displayPos = dragProgressRatio?.let { (it * durationMs).toLong() } ?: liveExpectedPos
+    val displayPos = dragProgressRatio?.let { (it * durationMs).toLong() }
+        ?: seekHold?.targetMs
+        ?: liveExpectedPos
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween

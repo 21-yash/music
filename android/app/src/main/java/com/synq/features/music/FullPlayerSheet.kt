@@ -3,6 +3,7 @@ package com.synq.features.music
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import com.synq.features.music.components.SongOptionsSheet
+import com.synq.features.music.util.SeekHold
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -434,17 +435,49 @@ fun FullPlayerSheet(
                     val canShuffle = !jamState.isInJam
                     val canRepeat = !jamState.isInJam
                     val isStepOut = localPlaybackState is com.synq.features.music.jam.LocalPlaybackState.LocalStepOut
+                    val trackKey = "${song.id}_${jamUiState.nowPlaying.trackSeq}"
+                    val totalDurationMs = (song.durationSeconds * 1000L).coerceAtLeast(0L)
 
                     var dragRatio by remember { mutableStateOf<Float?>(null) }
-                    LaunchedEffect(song.id) { dragRatio = null }
+                    var seekHold by remember { mutableStateOf<SeekHold?>(null) }
+
+                    LaunchedEffect(trackKey) {
+                        dragRatio = null
+                        seekHold = null
+                    }
+
+                    LaunchedEffect(seekHold) {
+                        val hold = seekHold ?: return@LaunchedEffect
+                        val remaining = hold.timeoutMs - (android.os.SystemClock.elapsedRealtime() - hold.releasedAtMs)
+                        if (remaining > 0) {
+                            delay(remaining)
+                        }
+                        seekHold = null
+                    }
+
+                    val nowRealtime = android.os.SystemClock.elapsedRealtime()
+                    if (seekHold != null && seekHold!!.shouldRelease(playbackState.playbackPositionMs, nowRealtime, trackKey)) {
+                        seekHold = null
+                    }
+
+                    val heldRatio = seekHold?.let {
+                        if (totalDurationMs > 0L) (it.targetMs.toFloat() / totalDurationMs).coerceIn(0f, 1f) else null
+                    }
+                    val effectiveProgress = (dragRatio ?: heldRatio ?: playbackState.progress).coerceIn(0f, 1f)
 
                     // Progress bar
                     PlayerProgressBar(
-                        progress = playbackState.progress,
+                        progress = effectiveProgress,
                         onSeek = { ratio ->
                             if (!canControlPlayback) {
                                 Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
                             } else {
+                                val targetMs = (ratio * totalDurationMs).toLong()
+                                seekHold = SeekHold(
+                                    targetMs = targetMs,
+                                    releasedAtMs = android.os.SystemClock.elapsedRealtime(),
+                                    trackKey = trackKey
+                                )
                                 onSeek(ratio)
                             }
                         },
@@ -453,10 +486,16 @@ fun FullPlayerSheet(
                         onDisabledClick = {
                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
                         },
-                        onDragRatioChange = { dragRatio = it }
+                        onDragRatioChange = {
+                            dragRatio = it
+                            if (it != null) {
+                                seekHold = null
+                            }
+                        }
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    val displayPositionMs = dragRatio?.let { (it * song.durationSeconds * 1000L).toLong() }
+                    val displayPositionMs = dragRatio?.let { (it * totalDurationMs).toLong() }
+                        ?: seekHold?.targetMs
                         ?: playbackState.playbackPositionMs
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1907,8 +1946,7 @@ private fun PlayerProgressBar(
     onDisabledClick: (() -> Unit)? = null,
     onDragRatioChange: ((Float?) -> Unit)? = null
 ) {
-    var localDragProgress by remember { mutableStateOf<Float?>(null) }
-    val displayProgress = (localDragProgress ?: progress).coerceIn(0f, 1f)
+    val displayProgress = progress.coerceIn(0f, 1f)
     val trackBg = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
 
     Box(
@@ -1928,26 +1966,27 @@ private fun PlayerProgressBar(
             }
             .pointerInput(enabled) {
                 if (enabled) {
+                    var currentDrag: Float? = null
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
                             val ratio = (offset.x / size.width).coerceIn(0f, 1f)
-                            localDragProgress = ratio
+                            currentDrag = ratio
                             onDragRatioChange?.invoke(ratio)
                         },
                         onDragEnd = {
-                            val finalRatio = localDragProgress
-                            localDragProgress = null
+                            val finalRatio = currentDrag
+                            currentDrag = null
                             onDragRatioChange?.invoke(null)
                             finalRatio?.let { onSeek(it) }
                         },
                         onDragCancel = {
-                            localDragProgress = null
+                            currentDrag = null
                             onDragRatioChange?.invoke(null)
                         },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
                             val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
-                            localDragProgress = ratio
+                            currentDrag = ratio
                             onDragRatioChange?.invoke(ratio)
                         }
                     )
