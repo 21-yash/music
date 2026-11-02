@@ -391,6 +391,13 @@ class JamClient(
         _clientState.value = JamClientState.Active(code, role)
     }
 
+    private fun isPingAlive(res: Result<JSONObject>): Boolean {
+        if (res.isSuccess) return true
+        val err = res.exceptionOrNull()
+        // A server ack with ok:false (e.g. RATE_LIMITED, JamProtocolException) proves the link is alive
+        return err is JamProtocolException
+    }
+
     fun onNetworkRestored() {
         val code = activeRoomCode ?: return
         val current = _clientState.value
@@ -399,13 +406,13 @@ class JamClient(
         if (current is JamClientState.Active && transport.isConnected) {
             scope.launch(ioDispatcher) {
                 val ping1 = transport.emit("jam2:time", null, ackTimeoutMs = HealthCheckPolicy.PING_TIMEOUT_MS)
-                val action1 = HealthCheckPolicy.onFirstPingResult(ping1.isSuccess)
+                val action1 = HealthCheckPolicy.onFirstPingResult(isPingAlive(ping1))
                 when (action1) {
                     is HealthCheckAction.DoNothing -> return@launch
                     is HealthCheckAction.Retry -> {
                         delay(action1.delayMs)
                         val ping2 = transport.emit("jam2:time", null, ackTimeoutMs = action1.timeoutMs)
-                        val action2 = HealthCheckPolicy.onRetryPingResult(ping2.isSuccess)
+                        val action2 = HealthCheckPolicy.onRetryPingResult(isPingAlive(ping2))
                         if (action2 is HealthCheckAction.DisconnectAndReconnect) {
                             transport.disconnect()
                             startReconnectLoop(code, resetBackoff = true, trigger = "health-check failed")
