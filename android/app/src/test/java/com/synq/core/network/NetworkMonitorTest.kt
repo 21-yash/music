@@ -12,6 +12,7 @@ import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -147,6 +148,143 @@ class NetworkMonitorTest {
 
         assertTrue("Provider must not be called when Jam is inactive", providerGetCallCount == 0)
         verify(exactly = 0) { mockJamSessionManager.onNetworkRestored() }
+    }
+
+    @Test
+    fun testWifiToCellularWithNoOnLostNotifiesOnce() = runTest {
+        val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+        every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+        val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+        monitor.startMonitoring()
+
+        val wifiNet = mockk<Network>()
+        val cellNet = mockk<Network>()
+        val wifiCaps = createCapabilities(internet = true, validated = true)
+        val cellCaps = createCapabilities(internet = true, validated = true)
+
+        every { connectivityManager.getNetworkCapabilities(wifiNet) } returns wifiCaps
+        every { connectivityManager.getNetworkCapabilities(cellNet) } returns cellCaps
+
+        // Initial setup on Wi-Fi
+        callbackSlot.captured.onAvailable(wifiNet)
+        callbackSlot.captured.onCapabilitiesChanged(wifiNet, wifiCaps)
+        runCurrent()
+
+        monitor.setJamActive(true)
+
+        // Handover to Cellular without any onLost call for wifiNet
+        callbackSlot.captured.onAvailable(cellNet)
+        callbackSlot.captured.onCapabilitiesChanged(cellNet, cellCaps)
+        runCurrent()
+
+        assertEquals(1, providerGetCallCount)
+        verify(exactly = 1) { mockJamSessionManager.onNetworkRestored() }
+    }
+
+    @Test
+    fun testOnLostArrivingAfterOnAvailableDoesNotNotifySecondTime() = runTest {
+        val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+        every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+        val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+        monitor.startMonitoring()
+
+        val wifiNet = mockk<Network>()
+        val cellNet = mockk<Network>()
+        val wifiCaps = createCapabilities(internet = true, validated = true)
+        val cellCaps = createCapabilities(internet = true, validated = true)
+
+        every { connectivityManager.getNetworkCapabilities(wifiNet) } returns wifiCaps
+        every { connectivityManager.getNetworkCapabilities(cellNet) } returns cellCaps
+
+        // Initial setup on Wi-Fi
+        callbackSlot.captured.onAvailable(wifiNet)
+        callbackSlot.captured.onCapabilitiesChanged(wifiNet, wifiCaps)
+        runCurrent()
+
+        monitor.setJamActive(true)
+
+        // Handover: cell arrives first
+        callbackSlot.captured.onAvailable(cellNet)
+        callbackSlot.captured.onCapabilitiesChanged(cellNet, cellCaps)
+        runCurrent()
+
+        verify(exactly = 1) { mockJamSessionManager.onNetworkRestored() }
+
+        // Delayed onLost for old Wi-Fi arrives AFTER cellular was already established
+        callbackSlot.captured.onLost(wifiNet)
+        runCurrent()
+
+        // Must still be exactly 1, not 2
+        verify(exactly = 1) { mockJamSessionManager.onNetworkRestored() }
+        assertTrue("Should still be online via cellular", monitor.isOnline.value)
+    }
+
+    @Test
+    fun testCapabilityFlappingOnSameNetworkDoesNotNotify() = runTest {
+        val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+        every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+        val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+        monitor.startMonitoring()
+
+        val net = mockk<Network>()
+        val caps1 = createCapabilities(internet = true, validated = true)
+        val caps2 = createCapabilities(internet = true, validated = true)
+        val caps3 = createCapabilities(internet = true, validated = true)
+
+        every { connectivityManager.getNetworkCapabilities(net) } returns caps1
+
+        // Initial setup
+        callbackSlot.captured.onAvailable(net)
+        callbackSlot.captured.onCapabilitiesChanged(net, caps1)
+        runCurrent()
+
+        monitor.setJamActive(true)
+
+        // Signal strength / flapping on the SAME network
+        callbackSlot.captured.onCapabilitiesChanged(net, caps2)
+        runCurrent()
+        callbackSlot.captured.onCapabilitiesChanged(net, caps3)
+        runCurrent()
+
+        verify(exactly = 0) { mockJamSessionManager.onNetworkRestored() }
+    }
+
+    @Test
+    fun testBurstOfEventsProcessedInStrictArrivalOrder() = runTest {
+        val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+        every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+        val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+        monitor.startMonitoring()
+
+        val net1 = mockk<Network>()
+        val net2 = mockk<Network>()
+        val caps1 = createCapabilities(internet = true, validated = true)
+        val caps2 = createCapabilities(internet = true, validated = true)
+
+        every { connectivityManager.getNetworkCapabilities(net1) } returns caps1
+        every { connectivityManager.getNetworkCapabilities(net2) } returns caps2
+
+        // Initial setup on net1
+        callbackSlot.captured.onAvailable(net1)
+        callbackSlot.captured.onCapabilitiesChanged(net1, caps1)
+        runCurrent()
+
+        monitor.setJamActive(true)
+
+        // Rapid burst: net1 lost, then net2 available, then net2 capabilities changed
+        callbackSlot.captured.onLost(net1)
+        callbackSlot.captured.onAvailable(net2)
+        callbackSlot.captured.onCapabilitiesChanged(net2, caps2)
+
+        // Run all coroutine tasks
+        runCurrent()
+
+        assertTrue("Final state must be online after net2 arrived", monitor.isOnline.value)
+        verify(exactly = 1) { mockJamSessionManager.onNetworkRestored() }
     }
 }
 

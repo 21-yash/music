@@ -10,10 +10,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -37,10 +39,13 @@ class NetworkMonitor(
     private val _isOnline = MutableStateFlow(hasValidInternetConnection())
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
-    private var wasOffline = !hasValidInternetConnection()
-    private var lastDefaultNetwork: Network? = null
-    private var lastValidated: Boolean = false
+    private val eventChannel = Channel<NetworkEvent>(Channel.UNLIMITED)
+    private val isDraining = AtomicBoolean(false)
+
+    internal var lastNotifiedValidatedNetwork: Network? = null
+    private var currentNetwork: Network? = null
     private var isInitialCallback = true
+    internal var isMonitoring = false
 
     @Volatile
     private var isJamActive: Boolean = false
@@ -51,10 +56,6 @@ class NetworkMonitor(
 
     fun isJamActive(): Boolean = isJamActive
 
-    private fun checkInitialConnectivity(): Boolean {
-        return hasValidInternetConnection()
-    }
-
     private fun hasValidInternetConnection(): Boolean {
         val activeNetwork = connectivityManager?.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
@@ -63,96 +64,122 @@ class NetworkMonitor(
     }
 
     fun startMonitoring() {
+        if (isMonitoring) return
+        isMonitoring = true
+
         connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                scope.launch {
-                    val networkChanged = lastDefaultNetwork != null && lastDefaultNetwork != network
-                    lastDefaultNetwork = network
-
-                    if (isInitialCallback) {
-                        return@launch
-                    }
-
-                    if (networkChanged || wasOffline) {
-                        if (hasValidInternetConnection()) {
-                            val previouslyOffline = !_isOnline.value || wasOffline
-                            _isOnline.value = true
-                            wasOffline = false
-                            lastValidated = true
-                            if (previouslyOffline) {
-                                SyncManager.triggerOneTimeSync(context)
-                            }
-                            if (isJamActive) {
-                                jamSessionManagerProvider.get().onNetworkRestored()
-                            }
-                        }
-                    }
-                }
+                enqueueEvent(NetworkEvent.Available(network))
             }
 
             override fun onLost(network: Network) {
-                scope.launch {
-                    isInitialCallback = false
-                    if (lastDefaultNetwork == network) {
-                        lastDefaultNetwork = null
-                        lastValidated = false
-                    }
-                    if (hasValidInternetConnection()) {
-                        _isOnline.value = true
-                        wasOffline = false
-                        lastValidated = true
-                        if (isJamActive) {
-                            jamSessionManagerProvider.get().onNetworkRestored()
-                        }
-                    } else {
-                        wasOffline = true
-                        lastValidated = false
-                        _isOnline.value = false
-                    }
-                }
+                enqueueEvent(NetworkEvent.Lost(network))
             }
 
             override fun onCapabilitiesChanged(
                 network: Network,
                 networkCapabilities: NetworkCapabilities
             ) {
-                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                val isValidated = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                enqueueEvent(NetworkEvent.CapabilitiesChanged(network, networkCapabilities))
+            }
+        })
+    }
+
+    private fun enqueueEvent(event: NetworkEvent) {
+        eventChannel.trySend(event)
+        drainEvents()
+    }
+
+    private fun drainEvents() {
+        if (!isDraining.compareAndSet(false, true)) return
+        scope.launch {
+            try {
+                while (true) {
+                    val event = eventChannel.tryReceive().getOrNull() ?: break
+                    processEvent(event)
+                }
+            } finally {
+                isDraining.set(false)
+                if (!eventChannel.isEmpty) {
+                    drainEvents()
+                }
+            }
+        }
+    }
+
+    private fun processEvent(event: NetworkEvent) {
+        when (event) {
+            is NetworkEvent.Available -> {
+                val caps = connectivityManager?.getNetworkCapabilities(event.network)
+                val isValidated = caps != null &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (isValidated) {
+                    handleValidatedNetwork(event.network)
+                } else {
+                    currentNetwork = event.network
+                }
+            }
+            is NetworkEvent.CapabilitiesChanged -> {
+                val hasInternet = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                val isValidated = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 val isOnlineNow = hasInternet && isValidated
-
-                scope.launch {
-                    val networkChanged = lastDefaultNetwork != null && lastDefaultNetwork != network
-                    lastDefaultNetwork = network
-
-                    if (isInitialCallback) {
-                        isInitialCallback = false
-                        lastValidated = isOnlineNow
-                        _isOnline.value = isOnlineNow
-                        wasOffline = !isOnlineNow
-                        return@launch
-                    }
-
-                    if (isOnlineNow) {
-                        val transitionedToOnline = !_isOnline.value || wasOffline || (!lastValidated && isValidated)
-                        _isOnline.value = true
-                        wasOffline = false
-                        lastValidated = true
-
-                        if (transitionedToOnline || networkChanged) {
-                            if (transitionedToOnline) {
-                                SyncManager.triggerOneTimeSync(context)
-                            }
-                            if (isJamActive) {
-                                jamSessionManagerProvider.get().onNetworkRestored()
-                            }
-                        }
-                    } else if (!hasInternet) {
-                        lastValidated = false
-                        wasOffline = true
+                if (isOnlineNow) {
+                    handleValidatedNetwork(event.network)
+                } else {
+                    if (currentNetwork == event.network || lastNotifiedValidatedNetwork == event.network) {
                         _isOnline.value = false
+                        lastNotifiedValidatedNetwork = null
                     }
                 }
             }
-        })
+            is NetworkEvent.Lost -> {
+                handleNetworkLost(event.network)
+            }
+        }
+    }
+
+    private fun handleValidatedNetwork(network: Network) {
+        currentNetwork = network
+        val wasOffline = !_isOnline.value
+        _isOnline.value = true
+
+        if (isInitialCallback) {
+            isInitialCallback = false
+            lastNotifiedValidatedNetwork = network
+            return
+        }
+
+        val networkChanged = network != lastNotifiedValidatedNetwork
+        if (networkChanged || wasOffline) {
+            lastNotifiedValidatedNetwork = network
+            if (wasOffline) {
+                try {
+                    SyncManager.triggerOneTimeSync(context)
+                } catch (_: Throwable) {}
+            }
+            if (isJamActive) {
+                jamSessionManagerProvider.get().onNetworkRestored()
+            }
+        }
+    }
+
+    private fun handleNetworkLost(network: Network) {
+        if (isInitialCallback) {
+            isInitialCallback = false
+        }
+        if (lastNotifiedValidatedNetwork == network) {
+            lastNotifiedValidatedNetwork = null
+        }
+        if (currentNetwork == network) {
+            currentNetwork = null
+        }
+        _isOnline.value = (lastNotifiedValidatedNetwork != null) || hasValidInternetConnection()
+    }
+
+    private sealed interface NetworkEvent {
+        data class Available(val network: Network) : NetworkEvent
+        data class Lost(val network: Network) : NetworkEvent
+        data class CapabilitiesChanged(val network: Network, val capabilities: NetworkCapabilities) : NetworkEvent
     }
 }
