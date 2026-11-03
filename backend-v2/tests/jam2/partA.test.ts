@@ -882,6 +882,59 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       }
       manager.stop();
     });
+
+    it('B4 / R10: executeCommand kick resolves immediately while Redis set is pending, and swallows Redis rejection', async () => {
+      let redisResolve: () => void = () => {};
+      let redisReject: (err: any) => void = () => {};
+      let redisCallStarted = false;
+
+      const mockRedisClient = {
+        get: vi.fn(async () => null),
+        set: vi.fn((...args: any[]) => {
+          redisCallStarted = true;
+          return new Promise<any>((resolve, reject) => {
+            redisResolve = () => resolve('OK');
+            redisReject = reject;
+          });
+        }),
+        del: vi.fn(),
+        scan: vi.fn(async () => ['0', []]),
+      };
+
+      vi.spyOn(redisConfig, 'getRedisClient').mockReturnValue(mockRedisClient as any);
+
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+      await manager.joinRoom(room.code, 'u_kicked', 'KickedUser');
+
+      // Execute kick
+      const kickPromise = manager.executeCommand(
+        room.code,
+        { code: room.code, type: 'kick', userId: 'u_kicked' },
+        'u_host',
+      );
+
+      // Assert kickPromise resolves to success WITHOUT waiting for Redis to resolve
+      const kickRes = await kickPromise;
+      expect('room' in kickRes).toBe(true);
+      if ('room' in kickRes) {
+        expect(kickRes.room.members.has('u_kicked')).toBe(false);
+      }
+
+      // Redis call was started in background
+      expect(redisCallStarted).toBe(true);
+
+      // Now reject the pending Redis set promise: it must be swallowed without throwing
+      redisReject(new Error('Redis connection severed'));
+      await new Promise((r) => setTimeout(r, 20));
+
+      // In-memory ban is still active
+      const kicks = (manager as any).kickedUsers.get(room.code);
+      expect(kicks?.has('u_kicked')).toBe(true);
+
+      manager.stop();
+    });
   });
 
   describe('Item 11: KeyedMutex cleanup & Prune loop re-fetch', () => {

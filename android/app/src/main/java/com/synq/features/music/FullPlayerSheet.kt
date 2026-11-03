@@ -665,17 +665,20 @@ fun FullPlayerSheet(
                 }
             }
 
-            val jamFullQueue = listOfNotNull(jamUiState.nowPlaying.item) + jamUiState.queue
+            val jamQueueRows = com.synq.features.music.jam.JamQueueRowBuilder.buildJamQueueRows(
+                jamUiState.nowPlaying.item,
+                jamUiState.queue
+            )
 
             // ── Queue panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
             BottomPanel(
                 visible = openPanel == PlayerPanel.Queue,
-                title = if (jamState.isInJam) "Jam Queue (${jamFullQueue.size} songs)" else "Queue (${queue.size} songs)",
+                title = if (jamState.isInJam) com.synq.features.music.jam.JamQueueRowBuilder.formatJamQueueTitle(jamQueueRows.size) else "Queue (${queue.size} songs)",
                 isDark = isDark,
                 onClose = { openPanel = null }
             ) {
                 if (jamState.isInJam) {
-                    if (jamFullQueue.isEmpty()) {
+                    if (jamQueueRows.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Jam queue is empty", color = textSecondary, fontSize = 15.sp)
                         }
