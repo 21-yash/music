@@ -62,10 +62,18 @@ All entries in the "Files Changed" columns are generated directly from `git log 
 | **R11** | Serialize network monitor events and decouple handover from onLost | Fixed | `android/app/src/main/java/com/synq/core/network/NetworkMonitor.kt`<br>`android/app/src/test/java/com/synq/core/network/NetworkMonitorTest.kt` | `NetworkMonitorTest.kt` (`testWifiToCellularWithNoOnLostNotifiesOnce`, `testOnLostArrivingAfterOnAvailableDoesNotNotifySecondTime`, `testCapabilityFlappingOnSameNetworkDoesNotNotify`, `testBurstOfEventsProcessedInStrictArrivalOrder`) |
 | **R12** | Update report with review findings and actual git stats | Fixed | `docs/JAMPLAN_FIXES.md` | Accurate status report generated directly from git diff/log stats; manual test script updated |
 
+### Reconnect Feedback & Diagnostics Tasks (D1 – D4)
+| Task ID | Task Title | Status | Files Changed (`git show --stat`) | Tests Added / Modified |
+| :--- | :--- | :--- | :--- | :--- |
+| **D1** | Reconnect feedback and command tap deduplication | Fixed | `android/app/src/main/java/com/synq/RootViewModel.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamClient.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamScreen.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamSessionManager.kt`<br>`android/app/src/test/java/com/synq/features/music/jam/JamClientStateMachineTest.kt` | `JamClientStateMachineTest.kt` (`command while reconnecting shows toast once not once per tap`, `three taps of next during reconnect result in one next command sent after active`, `second different command during reconnect is not dropped`, `key is released and toast shown after reconnect timeout failure`, `teardown clears pending command keys and resets hasPendingCommand`) |
+| **D2** | Make network changes visible in logs & diagnostic documentation | Fixed | `android/app/src/main/java/com/synq/core/network/NetworkMonitor.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamClient.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamSessionManager.kt`<br>`android/app/src/test/java/com/synq/core/network/NetworkMonitorTest.kt`<br>`docs/JAM_DEBUGGING.md` | `NetworkMonitorTest.kt` (verified relaxed capability mocking & transport resolution across all tests) |
+| **D3** | Trigger sync on first validated network after offline startup | Fixed | `android/app/src/main/java/com/synq/core/network/NetworkMonitor.kt`<br>`android/app/src/test/java/com/synq/core/network/NetworkMonitorTest.kt` | `NetworkMonitorTest.kt` (`testStartOfflineThenValidatedNetworkTriggersOneTimeSyncOnce`, verified `testInitialRegistrationDoesNotCallJamSessionManager` still passes) |
+| **D4** | Move seek hold release check outside composition body | Fixed | `android/app/src/main/java/com/synq/features/music/FullPlayerSheet.kt`<br>`android/app/src/main/java/com/synq/features/music/jam/JamScreen.kt` | `SeekHoldTest.kt` + verified complete 233-test Android suite with zero side-effects |
+
 ---
 
 ## 2. Other Changes
-- `android/app/build.gradle.kts`: Configured `tasks.withType<Test> { it.maxHeapSize = "1024m" }` under `testOptions`. This is an accepted and harmless memory configuration that prevents JVM Metaspace/Heap exhaustion when executing the complete 227-test Android suite with MockK.
+- `android/app/build.gradle.kts`: Configured `tasks.withType<Test> { it.maxHeapSize = "1024m" }` under `testOptions`. This is an accepted and harmless memory configuration that prevents JVM Metaspace/Heap exhaustion when executing the complete 233-test Android suite with MockK.
 
 ---
 
@@ -84,8 +92,8 @@ All entries in the "Files Changed" columns are generated directly from `git log 
 - **Baseline**:
   - `./gradlew testDebugUnitTest`: **186 passed**, 0 failed
 - **Final**:
-  - `./gradlew testDebugUnitTest`: **227 passed**, 0 failed
-  - **Net Change**: +41 passing unit tests, 0 regressions, 0 failures.
+  - `./gradlew testDebugUnitTest`: **233 passed**, 0 failed
+  - **Net Change**: +47 passing unit tests, 0 regressions, 0 failures.
 
 ---
 
@@ -143,13 +151,16 @@ Run this test script using two physical Android devices (Device A and Device B) 
 
 ---
 
-### Step 6: 10-Second Airplane Mode Recovery
+### Step 6: 10-Second Airplane Mode Recovery & Command Tap Deduplication
 1. While music is actively playing in the Jam on **Device B**, turn ON **Airplane Mode** on Device B.
    - *Expected*: Audio continues playing from ExoPlayer cache or finishes buffer. Device B displays a subtle "Reconnecting…" chip after ~2s.
-2. While Airplane Mode is still active on Device B, tap **Add Song** to add a song from search.
-   - *Expected*: Device B does not instantly fail with an error; it buffers the command waiting up to 4s for active connection.
+2. While Airplane Mode is still active on Device B (reconnecting for ~5s):
+   - Tap **Next Track** three times rapidly in succession.
+   - *Expected*: Exactly ONE toast is shown: `"Reconnecting… your action will go through once connected"`. Subsequent rapid taps do NOT spam additional toasts or queue duplicate commands. The "Reconnecting…" status pill appears immediately on `JamScreen` without waiting for the 2s delay because an action is pending.
 3. Within 10 seconds, turn OFF **Airplane Mode**.
-   - *Expected*: Device B's network monitor detects the validated network, signals the reconnect loop to skip backoff delay, reconnects immediately without restarting the loop, and dispatches the buffered add-song command cleanly.
+   - *Expected*: Device B's network monitor detects the validated network, signals the reconnect loop to skip backoff delay, and reconnects immediately. Exactly ONE track skip occurs once reconnected. Audio resumes seamlessly in sync with Device A.
+4. If an action is attempted and reconnect fails after 4s:
+   - *Expected*: A clear toast is shown: `"Couldn't reach the Jam. Check your connection and try again."` The pending command key is cleanly released.
 
 ---
 
@@ -212,3 +223,15 @@ Run this test script using two physical Android devices (Device A and Device B) 
 
 6. **OkHttp Timeout Verification (Task A9)**:
    - *Verification*: Confirmed `NetworkModuleTest.kt` exists in `android/app/src/test/java/com/synq/di/NetworkModuleTest.kt` and verifies that OkHttp connect timeout is set to 30 seconds.
+
+7. **One-Shot Command Deduplication & Reconnect Toast Rate Limiting (Task D1)**:
+   - *Decision*: Centralized one-shot jam actions (`play`, `pause`, `next`, `prev`, `queueAdd`, `queueRemove`, `queueMove`, `promote`, permissions, member kick, host transfer) in `JamSessionManager.executeOneShotCommand`. Reconnect toast is rate-limited to once per 3s. Duplicate concurrent taps are dropped. Pending command state immediately surfaces the Reconnecting chip on `JamScreen`.
+
+8. **Network Monitor Logging & Diagnostics (Task D2)**:
+   - *Decision*: Added structured `safeLogI` entries with short network id, validation status, transport type (`WIFI` / `CELLULAR` / `VPN` / `OTHER`), and transition decision (`new active network` / `queued` / `ignored` / `handover started`). Correlated with `JamClient` disconnect logs to differentiate between OS network interface drops and silent middlebox/carrier CGNAT timeouts (e.g. Jio vs Airtel vs Wi-Fi).
+
+9. **Offline Startup First Sync (Task D3)**:
+   - *Decision*: Gated `isInitialCallback` in `NetworkMonitor` by `_isOnline.value`. When the app starts offline and later gains its first validated connection, `SyncManager.triggerOneTimeSync` is triggered cleanly without false suppression.
+
+10. **Seek Hold Mutation Outside Composition (Task D4)**:
+    - *Decision*: Moved `if (seekHold.shouldRelease(...)) seekHold = null` out of the Composable body into `LaunchedEffect(seekHold, currentPositionMs)` in both `FullPlayerSheet.kt` and `JamScreen.kt`, avoiding mutable state updates during Compose recomposition.
