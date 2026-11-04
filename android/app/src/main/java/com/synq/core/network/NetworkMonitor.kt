@@ -103,6 +103,7 @@ class NetworkMonitor(
     fun startMonitoring() {
         if (isMonitoring) return
         isMonitoring = true
+        isInitialCallback = _isOnline.value
 
         connectivityManager?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {

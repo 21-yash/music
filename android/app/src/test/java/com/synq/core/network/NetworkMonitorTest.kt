@@ -41,6 +41,10 @@ class NetworkMonitorTest {
         }
 
         every { context.getSystemService(Context.CONNECTIVITY_SERVICE) } returns connectivityManager
+        val defaultNet = mockk<Network>()
+        val defaultCaps = createCapabilities(internet = true, validated = true)
+        every { connectivityManager.activeNetwork } returns defaultNet
+        every { connectivityManager.getNetworkCapabilities(defaultNet) } returns defaultCaps
     }
 
     private fun createCapabilities(internet: Boolean, validated: Boolean): NetworkCapabilities {
@@ -285,6 +289,37 @@ class NetworkMonitorTest {
 
         assertTrue("Final state must be online after net2 arrived", monitor.isOnline.value)
         verify(exactly = 1) { mockJamSessionManager.onNetworkRestored() }
+    }
+
+    @Test
+    fun testStartOfflineThenValidatedNetworkTriggersOneTimeSyncOnce() = runTest {
+        io.mockk.mockkObject(com.synq.workers.SyncManager)
+        try {
+            every { com.synq.workers.SyncManager.triggerOneTimeSync(any()) } returns Unit
+
+            val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+            every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+            every { connectivityManager.activeNetwork } returns null
+
+            // Start monitor offline
+            val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+            assertFalse(monitor.isOnline.value)
+            monitor.startMonitoring()
+
+            val net = mockk<Network>()
+            val caps = createCapabilities(internet = true, validated = true)
+            every { connectivityManager.getNetworkCapabilities(net) } returns caps
+
+            // First validated network callback arrives
+            callbackSlot.captured.onAvailable(net)
+            callbackSlot.captured.onCapabilitiesChanged(net, caps)
+            runCurrent()
+
+            assertTrue(monitor.isOnline.value)
+            verify(exactly = 1) { com.synq.workers.SyncManager.triggerOneTimeSync(context) }
+        } finally {
+            io.mockk.unmockkObject(com.synq.workers.SyncManager)
+        }
     }
 }
 
