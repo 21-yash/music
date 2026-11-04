@@ -25,6 +25,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.random.Random
 
+class ReconnectTimeoutException(message: String = "Reconnecting… try again") : IllegalStateException(message)
+
 data class JamClosedEvent(val reason: String, val message: String, val initiatedByMe: Boolean = false)
 
 class JamClient(
@@ -323,7 +325,7 @@ class JamClient(
         }
 
         if (currentState !is JamClientState.Active) {
-            return Result.failure(IllegalStateException("Reconnecting… try again"))
+            return Result.failure(ReconnectTimeoutException("Reconnecting… try again"))
         }
 
         val code = activeRoomCode ?: return Result.failure(IllegalStateException("Not in a room"))

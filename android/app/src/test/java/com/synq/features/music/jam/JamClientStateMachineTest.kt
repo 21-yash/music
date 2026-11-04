@@ -1215,4 +1215,120 @@ class JamClientStateMachineTest {
         }
         assertFalse(sessionManager.hasPendingCommand.value)
     }
+
+    private fun makeSong(id: String, title: String = "Test Song"): Song {
+        return Song(
+            id = id,
+            title = title,
+            artists = emptyList(),
+            album = null,
+            durationSeconds = 180,
+            imageUrl = null,
+            year = "2024",
+            language = "en",
+            hasLyrics = false,
+            playCount = 0,
+            label = "",
+            streamRef = "",
+            providerId = "jiosaavn"
+        )
+    }
+
+    @Test
+    fun `two taps of next while active both execute without dropping or showing reconnect toast`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+        val toasts = mutableListOf<String>()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setActiveForTesting("ROOM_ACTIVE", JamRole.HOST)
+        runCurrent()
+
+        // Two rapid next taps while connected
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // Both next commands must reach the transport
+        val nextCmds = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(2, nextCmds.size)
+
+        // Neither tap was dropped, and no "Still reconnecting" or "Reconnecting" toast was emitted
+        assertTrue(toasts.none { it.contains("reconnecting", ignoreCase = true) })
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `queueAdd returns true when accepted and false when dropped as duplicate during reconnect`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_QUEUE")
+        runCurrent()
+
+        val song = makeSong("song_1")
+
+        // First add while reconnecting: accepted
+        val firstResult = sessionManager.addSongToJam(song, playNext = false)
+        assertTrue("First queueAdd must return true", firstResult)
+
+        // Immediate duplicate tap for same song during reconnect: dropped
+        val secondResult = sessionManager.addSongToJam(song, playNext = false)
+        assertFalse("Duplicate queueAdd during reconnect must return false", secondResult)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `reconnect timeout failure surfaces typed ReconnectTimeoutException`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        client.setReconnectingForTesting("ROOM_TIMEOUT")
+        runCurrent()
+
+        var caughtException: Throwable? = null
+        val job = backgroundScope.launch {
+            val res = client.sendCommandRaw("next")
+            caughtException = res.exceptionOrNull()
+        }
+
+        advanceTimeBy(4500L)
+        runCurrent()
+        job.join()
+
+        assertNotNull(caughtException)
+        assertTrue("Expected ReconnectTimeoutException, got: $caughtException", caughtException is ReconnectTimeoutException)
+    }
 }

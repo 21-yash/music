@@ -139,24 +139,24 @@ class JamSessionManager(
         key: String,
         onFailure: ((Throwable) -> Unit)? = null,
         action: suspend () -> Result<*>
-    ) {
+    ): Boolean {
         val now = currentTimeProvider()
         val isConnectingOrReconnecting = jamClient.clientState.value is JamClientState.Connecting ||
                 jamClient.clientState.value is JamClientState.Reconnecting
 
-        synchronized(pendingCommandKeys) {
-            if (pendingCommandKeys.contains(key)) {
-                if (now - lastReconnectToastTs >= 3000L) {
-                    lastReconnectToastTs = now
-                    showToast("Still reconnecting…")
-                }
-                return
-            }
-            pendingCommandKeys.add(key)
-            _hasPendingCommand.value = true
-        }
-
         if (isConnectingOrReconnecting) {
+            synchronized(pendingCommandKeys) {
+                if (pendingCommandKeys.contains(key)) {
+                    if (now - lastReconnectToastTs >= 3000L) {
+                        lastReconnectToastTs = now
+                        showToast("Still reconnecting…")
+                    }
+                    return false
+                }
+                pendingCommandKeys.add(key)
+                _hasPendingCommand.value = true
+            }
+
             if (now - lastReconnectToastTs >= 3000L) {
                 lastReconnectToastTs = now
                 showToast("Reconnecting… your action will go through once connected")
@@ -167,7 +167,7 @@ class JamSessionManager(
             try {
                 val res = action()
                 res.onFailure { err ->
-                    if (err is IllegalStateException && (err.message == "Reconnecting… try again" || err.message?.contains("Reconnecting") == true)) {
+                    if (err is ReconnectTimeoutException) {
                         showToast("Couldn't reach the Jam. Check your connection and try again.")
                     } else if (onFailure != null) {
                         onFailure(err)
@@ -177,12 +177,15 @@ class JamSessionManager(
                     }
                 }
             } finally {
-                synchronized(pendingCommandKeys) {
-                    pendingCommandKeys.remove(key)
-                    _hasPendingCommand.value = pendingCommandKeys.isNotEmpty()
+                if (isConnectingOrReconnecting) {
+                    synchronized(pendingCommandKeys) {
+                        pendingCommandKeys.remove(key)
+                        _hasPendingCommand.value = pendingCommandKeys.isNotEmpty()
+                    }
                 }
             }
         }
+        return true
     }
 
     companion object {
@@ -815,7 +818,7 @@ class JamSessionManager(
             showToast("Queue is full (50 songs)")
             return false
         }
-        executeOneShotCommand(
+        return executeOneShotCommand(
             key = "queueAdd:${song.id}:$playNext",
             onFailure = { err ->
                 val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add song"
@@ -842,7 +845,6 @@ class JamSessionManager(
             }
             res
         }
-        return true
     }
 
     fun addSongsToJam(songs: List<Song>, limit: Int = 20): Int {
@@ -858,7 +860,7 @@ class JamSessionManager(
             return 0
         }
 
-        executeOneShotCommand(
+        val accepted = executeOneShotCommand(
             key = "queueAddMany",
             onFailure = { err ->
                 val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add songs"
@@ -893,6 +895,10 @@ class JamSessionManager(
                 delay(300L) // debounce
                 isAddPlaylistInFlight = false
             }
+        }
+        if (!accepted) {
+            isAddPlaylistInFlight = false
+            return 0
         }
         return toAdd.size
     }
