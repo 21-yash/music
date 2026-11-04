@@ -94,11 +94,13 @@ class SocketIoTransport(
         s.on(Socket.EVENT_CONNECT_ERROR) { args ->
             val err = args.firstOrNull() as? Throwable ?: Exception(args.firstOrNull()?.toString() ?: "Connect error")
             deferred.completeExceptionally(err)
+            safeLogW("SocketIoTransport", "Connect error: ${err.message}", err)
             _events.tryEmit(JamTransport.Event.ConnectError(err))
         }
 
         s.on(Socket.EVENT_DISCONNECT) { args ->
             val reason = args.firstOrNull()?.toString() ?: "unknown"
+            safeLogI("SocketIoTransport", "Disconnected from server, reason: $reason")
             _events.tryEmit(JamTransport.Event.Disconnected(reason))
         }
 

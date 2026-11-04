@@ -19,6 +19,7 @@ import {
   DEFAULT_ROOM_PERMS,
   Song,
   Jam2Tick,
+  MAX_ROOM_MEMBERS,
 } from './types';
 
 export function runSafely(label: string, fn: () => void | Promise<void>): void {
@@ -83,6 +84,7 @@ export class Jam2Manager {
   // Socket tracking
   private socketMeta = new Map<string, SocketMetadata>();
   private roomUserSockets = new Map<string, Map<string, Set<string>>>();
+  private userActiveRoom = new Map<string, string>(); // userId -> active roomCode (Task B11: O(1) room lookup)
 
   // Timers
   private trackFallbackTimers = new Map<string, NodeJS.Timeout>();
@@ -152,12 +154,7 @@ export class Jam2Manager {
   }
 
   getActiveRoomForUser(userId: string): string | null {
-    for (const [code, roomMap] of this.roomUserSockets.entries()) {
-      if (roomMap.has(userId) && (roomMap.get(userId)?.size ?? 0) > 0) {
-        return code;
-      }
-    }
-    return null;
+    return this.userActiveRoom.get(userId) || null;
   }
 
   getUserSockets(code: string, userId: string): string[] {
@@ -201,22 +198,7 @@ export class Jam2Manager {
     return true;
   }
 
-  // ─── Room Code Generation ────────────────────────────────────────────
-
-  generateRoomCode(): string {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      let code = '';
-      for (let i = 0; i < 4; i++) {
-        code += JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
-      }
-      if (!this.store.hasRoom(code)) {
-        return code;
-      }
-    }
-    const ts = Date.now().toString(36).slice(-3).toUpperCase();
-    const letter = JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
-    return `${letter}${ts}`.slice(0, 4);
-  }
+  // ─── Room Code Generation (Task B11: async only, strict JAM_ROOM_CODE_CHARS) ────
 
   async generateUniqueRoomCode(): Promise<string> {
     for (let attempt = 0; attempt < 150; attempt++) {
@@ -229,11 +211,12 @@ export class Jam2Manager {
         return code;
       }
     }
-    // Fallback: guaranteed unique 4-character code check loop
+    // Fallback: guaranteed unique 4-character code check loop using only JAM_ROOM_CODE_CHARS
     for (let attempt = 0; attempt < 50; attempt++) {
-      const ts = Date.now().toString(36).slice(-3).toUpperCase();
-      const letter = JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
-      const fallbackCode = `${letter}${ts}`.slice(0, 4);
+      let fallbackCode = '';
+      for (let i = 0; i < 4; i++) {
+        fallbackCode += JAM_ROOM_CODE_CHARS[randomInt(0, JAM_ROOM_CODE_CHARS.length)];
+      }
       const exists = await this.store.checkRoomExists(fallbackCode);
       if (!exists) {
         return fallbackCode;
@@ -298,6 +281,7 @@ export class Jam2Manager {
       });
 
       if (created) {
+        this.userActiveRoom.set(hostUserId, created.code);
         return created;
       }
     }
@@ -351,8 +335,23 @@ export class Jam2Manager {
         return { error: { code: 'NOT_FOUND', message: 'Room not found' } };
       }
 
-      // Resume join for already-online member: do NOT bump version or broadcast
       const existingMember = room.members.get(userId);
+      if (!existingMember) {
+        let onlineCount = 0;
+        for (const m of room.members.values()) {
+          if (m.online) onlineCount++;
+        }
+        if (onlineCount >= MAX_ROOM_MEMBERS) {
+          return {
+            error: {
+              code: 'ROOM_FULL',
+              message: 'This Jam is full (20 people)',
+            },
+          };
+        }
+      }
+
+      // Resume join for already-online member: do NOT bump version or broadcast
       if (existingMember && existingMember.online) {
         return { room, events: [] };
       }
@@ -382,6 +381,7 @@ export class Jam2Manager {
       // Call ensureHost right after every successful join
       this.ensureHostLocked(res.room, now);
 
+      this.userActiveRoom.set(userId, res.room.code);
       this.store.setRoom(res.room);
 
       // Arm track-fallback timer if playing and not armed
@@ -443,6 +443,10 @@ export class Jam2Manager {
       if (updatedRoom.members.size === 0) {
         await this.destroyRoomLocked(normalizedCode, 'expired');
         return { success: true };
+      }
+
+      if (this.userActiveRoom.get(userId) === normalizedCode) {
+        this.userActiveRoom.delete(userId);
       }
 
       this.store.setRoom(updatedRoom);
@@ -544,7 +548,7 @@ export class Jam2Manager {
         };
       }
 
-      // Handle kick tracking for 10 minutes (in-memory + Redis)
+      // Handle kick tracking for 10 minutes (in-memory + async Redis write)
       if (cmd.type === 'kick') {
         let kicks = this.kickedUsers.get(normalizedCode);
         if (!kicks) {
@@ -553,12 +557,14 @@ export class Jam2Manager {
         }
         kicks.set(cmd.userId, Date.now() + 10 * 60 * 1000);
 
-        try {
-          const client = getRedisClient();
-          await client.set(`jam2:ban:${normalizedCode}:${cmd.userId}`, '1', 'EX', 600);
-        } catch (err) {
-          logger.warn({ err, code: normalizedCode, userId: cmd.userId }, 'Failed to persist kick ban to Redis');
-        }
+        runSafely(`kickBan:${normalizedCode}:${cmd.userId}`, async () => {
+          try {
+            const client = getRedisClient();
+            await client.set(`jam2:ban:${normalizedCode}:${cmd.userId}`, '1', 'EX', 600);
+          } catch (err) {
+            logger.warn({ err, code: normalizedCode, userId: cmd.userId }, 'Failed to persist kick ban to Redis');
+          }
+        });
       }
 
       this.store.setRoom(nextRoom);
@@ -592,6 +598,7 @@ export class Jam2Manager {
   registerSocket(socketId: string, code: string, userId: string, username: string): void {
     const normalizedCode = code.toUpperCase();
     this.socketMeta.set(socketId, { code: normalizedCode, userId, username });
+    this.userActiveRoom.set(userId, normalizedCode);
 
     let roomMap = this.roomUserSockets.get(normalizedCode);
     if (!roomMap) {
@@ -627,6 +634,9 @@ export class Jam2Manager {
         }
         roomMap.delete(userId);
       }
+      if (this.userActiveRoom.get(userId) === normalizedCode) {
+        this.userActiveRoom.delete(userId);
+      }
       if (roomMap.size === 0) {
         this.roomUserSockets.delete(normalizedCode);
       }
@@ -652,6 +662,10 @@ export class Jam2Manager {
     userSockets.delete(socketId);
     if (userSockets.size > 0) {
       return;
+    }
+
+    if (this.userActiveRoom.get(userId) === code) {
+      this.userActiveRoom.delete(userId);
     }
 
     roomMap.delete(userId);
@@ -737,11 +751,10 @@ export class Jam2Manager {
             now,
           );
           if ('room' in handoverRes && handoverRes.room.version !== room.version) {
-            Object.assign(room, handoverRes.room);
-            this.store.setRoom(room);
-            this.broadcastState(room);
+            this.store.setRoom(handoverRes.room);
+            this.broadcastState(handoverRes.room);
             for (const ev of handoverRes.events) {
-              this.broadcastEvent(room.code, ev);
+              this.broadcastEvent(handoverRes.room.code, ev);
             }
           }
         }
@@ -925,9 +938,11 @@ export class Jam2Manager {
             now,
           );
           if ('room' in res) {
-            Object.assign(room, res.room);
-            this.store.setRoom(room);
-            this.broadcastState(room);
+            if (this.userActiveRoom.get(m.userId) === room.code) {
+              this.userActiveRoom.delete(m.userId);
+            }
+            this.store.setRoom(res.room);
+            this.broadcastState(res.room);
             for (const ev of res.events) {
               this.broadcastEvent(room.code, ev);
             }
@@ -1077,6 +1092,11 @@ export class Jam2Manager {
     }
 
     this.roomUserSockets.delete(normalizedCode);
+    for (const [uId, rCode] of this.userActiveRoom.entries()) {
+      if (rCode === normalizedCode) {
+        this.userActiveRoom.delete(uId);
+      }
+    }
     this.recsSeededForTrackSeq.delete(normalizedCode);
     this.recsFailedAt.delete(normalizedCode);
     this.inflightRecs.delete(normalizedCode);

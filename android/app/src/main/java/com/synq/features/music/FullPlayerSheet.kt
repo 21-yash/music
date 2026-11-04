@@ -3,6 +3,8 @@ package com.synq.features.music
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import com.synq.features.music.components.SongOptionsSheet
+import com.synq.features.music.jam.canDismissRecommendation
+import com.synq.features.music.util.SeekHold
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -434,14 +436,52 @@ fun FullPlayerSheet(
                     val canShuffle = !jamState.isInJam
                     val canRepeat = !jamState.isInJam
                     val isStepOut = localPlaybackState is com.synq.features.music.jam.LocalPlaybackState.LocalStepOut
+                    val trackKey = "${song.id}_${jamUiState.nowPlaying.trackSeq}"
+                    val totalDurationMs = (song.durationSeconds * 1000L).coerceAtLeast(0L)
+
+                    var dragRatio by remember { mutableStateOf<Float?>(null) }
+                    var seekHold by remember { mutableStateOf<SeekHold?>(null) }
+
+                    LaunchedEffect(trackKey) {
+                        dragRatio = null
+                        seekHold = null
+                    }
+
+                    LaunchedEffect(seekHold) {
+                        val hold = seekHold ?: return@LaunchedEffect
+                        val remaining = hold.timeoutMs - (android.os.SystemClock.elapsedRealtime() - hold.releasedAtMs)
+                        if (remaining > 0) {
+                            delay(remaining)
+                        }
+                        seekHold = null
+                    }
+
+                    LaunchedEffect(seekHold, playbackState.playbackPositionMs) {
+                        val hold = seekHold ?: return@LaunchedEffect
+                        val nowRealtime = android.os.SystemClock.elapsedRealtime()
+                        if (hold.shouldRelease(playbackState.playbackPositionMs, nowRealtime, trackKey)) {
+                            seekHold = null
+                        }
+                    }
+
+                    val heldRatio = seekHold?.let {
+                        if (totalDurationMs > 0L) (it.targetMs.toFloat() / totalDurationMs).coerceIn(0f, 1f) else null
+                    }
+                    val effectiveProgress = (dragRatio ?: heldRatio ?: playbackState.progress).coerceIn(0f, 1f)
 
                     // Progress bar
                     PlayerProgressBar(
-                        progress = playbackState.progress,
+                        progress = effectiveProgress,
                         onSeek = { ratio ->
                             if (!canControlPlayback) {
                                 Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
                             } else {
+                                val targetMs = (ratio * totalDurationMs).toLong()
+                                seekHold = SeekHold(
+                                    targetMs = targetMs,
+                                    releasedAtMs = android.os.SystemClock.elapsedRealtime(),
+                                    trackKey = trackKey
+                                )
                                 onSeek(ratio)
                             }
                         },
@@ -449,15 +489,24 @@ fun FullPlayerSheet(
                         enabled = canControlPlayback,
                         onDisabledClick = {
                             Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                        },
+                        onDragRatioChange = {
+                            dragRatio = it
+                            if (it != null) {
+                                seekHold = null
+                            }
                         }
                     )
                     Spacer(modifier = Modifier.height(2.dp))
+                    val displayPositionMs = dragRatio?.let { (it * totalDurationMs).toLong() }
+                        ?: seekHold?.targetMs
+                        ?: playbackState.playbackPositionMs
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = formatMs(playbackState.playbackPositionMs),
+                            text = formatMs(displayPositionMs),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = textSecondary,
@@ -619,15 +668,20 @@ fun FullPlayerSheet(
                 }
             }
 
+            val jamQueueRows = com.synq.features.music.jam.JamQueueRowBuilder.buildJamQueueRows(
+                jamUiState.nowPlaying.item,
+                jamUiState.queue
+            )
+
             // ── Queue panel (Glassmorphic, Swipeable Downwards & Light/Dark) ──
             BottomPanel(
                 visible = openPanel == PlayerPanel.Queue,
-                title = if (jamState.isInJam) "Jam Queue (${jamUiState.queue.size} songs)" else "Queue (${queue.size} songs)",
+                title = if (jamState.isInJam) com.synq.features.music.jam.JamQueueRowBuilder.formatJamQueueTitle(jamQueueRows.size) else "Queue (${queue.size} songs)",
                 isDark = isDark,
                 onClose = { openPanel = null }
             ) {
                 if (jamState.isInJam) {
-                    if (jamUiState.queue.isEmpty()) {
+                    if (jamQueueRows.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Jam queue is empty", color = textSecondary, fontSize = 15.sp)
                         }
@@ -637,6 +691,31 @@ fun FullPlayerSheet(
                             contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Now-playing row prepended as the active first item
+                            jamUiState.nowPlaying.item?.let { nowPlayingItem ->
+                                item(key = "jam_now_playing_${nowPlayingItem.qid}") {
+                                    QueueItemRow(
+                                        song = nowPlayingItem.song,
+                                        active = true,
+                                        isDark = isDark,
+                                        isPlaying = playbackState.isPlaying,
+                                        isRecommended = nowPlayingItem.recommended,
+                                        canMoveUp = false,
+                                        canMoveDown = false,
+                                        showReorderControls = false,
+                                        onClick = {
+                                            if (canControlPlayback) {
+                                                onSeek(0f)
+                                            }
+                                        },
+                                        onMoveUp = {},
+                                        onMoveDown = {},
+                                        onRemove = {},
+                                        onOptionsClick = { selectedQueueSongForOptions = nowPlayingItem.song }
+                                    )
+                                }
+                            }
+
                             // User queue items
                             itemsIndexed(jamUiState.userQueue, key = { _, item -> item.qid }) { index, item ->
                                 val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
@@ -697,6 +776,7 @@ fun FullPlayerSheet(
 
                                 items(jamUiState.recommendedQueue, key = { it.qid }) { item ->
                                     val isPlayingThis = item.qid == jamUiState.nowPlaying.item?.qid
+                                    val canDismissRec = canDismissRecommendation(jamUiState.isHost, jamUiState.myPerms)
                                     QueueItemRow(
                                         song = item.song,
                                         active = isPlayingThis,
@@ -705,6 +785,7 @@ fun FullPlayerSheet(
                                         isRecommended = true,
                                         canMoveUp = false,
                                         canMoveDown = false,
+                                        canRemove = canDismissRec,
                                         onClick = {
                                             if (canControlPlayback) {
                                                 onPlayItemByQid(item.qid)
@@ -714,7 +795,9 @@ fun FullPlayerSheet(
                                         },
                                         onMoveUp = {},
                                         onMoveDown = {},
-                                        onRemove = { onRemoveByQid(item.qid) },
+                                        onRemove = {
+                                            onRemoveByQid(item.qid)
+                                        },
                                         onOptionsClick = { selectedQueueSongForOptions = item.song }
                                     )
                                 }
@@ -1483,6 +1566,7 @@ private fun QueueItemRow(
     canMoveDown: Boolean = false,
     showReorderControls: Boolean = true,
     isRecommended: Boolean = false,
+    canRemove: Boolean = true,
     onClick: () -> Unit = {},
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
@@ -1539,7 +1623,7 @@ private fun QueueItemRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         } else if (isRecommended) {
-            // Recommended song controls: Three dots menu + cross to remove (no reorder)
+            // Recommended song controls: Three dots menu + optional cross to remove (no reorder)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { onOptionsClick?.invoke() }, modifier = Modifier.size(28.dp)) {
                     Icon(
@@ -1549,13 +1633,15 @@ private fun QueueItemRow(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Remove from Queue",
-                        tint = textSecondary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                if (canRemove) {
+                    IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remove from Queue",
+                            tint = textSecondary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         } else if (showReorderControls) {
@@ -1865,9 +1951,10 @@ private fun PlayerProgressBar(
     isDark: Boolean,
     onSeek: (Float) -> Unit,
     enabled: Boolean = true,
-    onDisabledClick: (() -> Unit)? = null
+    onDisabledClick: (() -> Unit)? = null,
+    onDragRatioChange: ((Float?) -> Unit)? = null
 ) {
-    val p = progress.coerceIn(0f, 1f)
+    val displayProgress = progress.coerceIn(0f, 1f)
     val trackBg = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
 
     Box(
@@ -1878,7 +1965,8 @@ private fun PlayerProgressBar(
             .pointerInput(enabled) {
                 detectTapGestures { offset ->
                     if (enabled) {
-                        onSeek((offset.x / size.width).coerceIn(0f, 1f))
+                        val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                        onSeek(ratio)
                     } else {
                         onDisabledClick?.invoke()
                     }
@@ -1886,9 +1974,30 @@ private fun PlayerProgressBar(
             }
             .pointerInput(enabled) {
                 if (enabled) {
-                    detectHorizontalDragGestures { change, _ ->
-                        onSeek((change.position.x / size.width).coerceIn(0f, 1f))
-                    }
+                    var currentDrag: Float? = null
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            val ratio = (offset.x / size.width).coerceIn(0f, 1f)
+                            currentDrag = ratio
+                            onDragRatioChange?.invoke(ratio)
+                        },
+                        onDragEnd = {
+                            val finalRatio = currentDrag
+                            currentDrag = null
+                            onDragRatioChange?.invoke(null)
+                            finalRatio?.let { onSeek(it) }
+                        },
+                        onDragCancel = {
+                            currentDrag = null
+                            onDragRatioChange?.invoke(null)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            val ratio = (change.position.x / size.width).coerceIn(0f, 1f)
+                            currentDrag = ratio
+                            onDragRatioChange?.invoke(ratio)
+                        }
+                    )
                 }
             },
         contentAlignment = Alignment.CenterStart
@@ -1902,7 +2011,7 @@ private fun PlayerProgressBar(
         )
         Box(
             modifier = Modifier
-                .fillMaxWidth(p)
+                .fillMaxWidth(displayProgress)
                 .height(5.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(Accent)

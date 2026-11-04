@@ -5,16 +5,19 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import com.synq.core.network.NetworkMonitor
+import com.synq.data.remote.TokenRefreshResult
 import com.synq.data.repository.AuthRepository
 import com.synq.features.music.domain.model.Artist
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.playback.JamPlaybackInterceptor
 import com.synq.features.music.playback.MusicPlayerManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +50,7 @@ class JamSessionManager(
     clockSyncOverride: ClockSync? = null,
     stateStoreOverride: JamStateStore? = null,
     private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val toastEmitter: (String) -> Unit = { msg ->
         try {
             Handler(Looper.getMainLooper()).post {
@@ -85,8 +89,16 @@ class JamSessionManager(
         transport = transport,
         clockSync = clockSync,
         stateStore = stateStore,
+        authRepository = authRepository,
+        tokenResultProvider = {
+            authRepository?.getFreshAccessTokenResult() ?: TokenRefreshResult.Unauthorized
+        },
         tokenProvider = { authRepository?.getFreshAccessToken() },
-        scope = scope
+        scope = scope,
+        ioDispatcher = ioDispatcher,
+        monotonicNowMs = currentTimeProvider,
+        wallClockNowMs = currentTimeProvider,
+        activeTransportProvider = { networkMonitorProvider?.get()?.describeActiveNetwork() ?: "UNKNOWN" }
     )
 
     private val _jamState = MutableStateFlow(JamState())
@@ -115,6 +127,66 @@ class JamSessionManager(
     private var isSessionOpInFlight: Boolean = false
     private var isAddPlaylistInFlight: Boolean = false
     private var lastPrefetchedHeadQid: String? = null
+    private var seekChannel = Channel<Long>(Channel.CONFLATED)
+    private var seekConsumerJob: Job? = null
+
+    internal val pendingCommandKeys = mutableSetOf<String>()
+    private val _hasPendingCommand = MutableStateFlow(false)
+    val hasPendingCommand: StateFlow<Boolean> = _hasPendingCommand.asStateFlow()
+    private var lastReconnectToastTs: Long = 0L
+
+    internal fun executeOneShotCommand(
+        key: String,
+        onFailure: ((Throwable) -> Unit)? = null,
+        action: suspend () -> Result<*>
+    ): Boolean {
+        val now = currentTimeProvider()
+        val isConnectingOrReconnecting = jamClient.clientState.value is JamClientState.Connecting ||
+                jamClient.clientState.value is JamClientState.Reconnecting
+
+        if (isConnectingOrReconnecting) {
+            synchronized(pendingCommandKeys) {
+                if (pendingCommandKeys.contains(key)) {
+                    if (now - lastReconnectToastTs >= 3000L) {
+                        lastReconnectToastTs = now
+                        showToast("Still reconnecting…")
+                    }
+                    return false
+                }
+                pendingCommandKeys.add(key)
+                _hasPendingCommand.value = true
+            }
+
+            if (now - lastReconnectToastTs >= 3000L) {
+                lastReconnectToastTs = now
+                showToast("Reconnecting… your action will go through once connected")
+            }
+        }
+
+        scope.launch {
+            try {
+                val res = action()
+                res.onFailure { err ->
+                    if (err is ReconnectTimeoutException) {
+                        showToast("Couldn't reach the Jam. Check your connection and try again.")
+                    } else if (onFailure != null) {
+                        onFailure(err)
+                    } else {
+                        val msg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Permission denied"
+                        showToast(msg)
+                    }
+                }
+            } finally {
+                if (isConnectingOrReconnecting) {
+                    synchronized(pendingCommandKeys) {
+                        pendingCommandKeys.remove(key)
+                        _hasPendingCommand.value = pendingCommandKeys.isNotEmpty()
+                    }
+                }
+            }
+        }
+        return true
+    }
 
     companion object {
         const val MAX_JAM_QUEUE_SIZE = 50
@@ -180,12 +252,14 @@ class JamSessionManager(
         when (state) {
             is JamClientState.Active -> {
                 jamPreferences.saveLastJam(state.code, myAvatarUrl)
+                networkMonitorProvider?.get()?.setJamActive(true)
                 playerManager.jamInterceptor = this
                 updateLegacyState(stateStore.room.value, state)
             }
 
             is JamClientState.Closed -> {
                 jamPreferences.clearLastJam()
+                networkMonitorProvider?.get()?.setJamActive(false)
                 closedToastFor(state.reason, alreadyToasted = false)?.let { showToast(it) }
                 teardownJam()
                 jamClient.resetToDisconnected()
@@ -460,7 +534,8 @@ class JamSessionManager(
                 onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
-                showToast("Failed to create Jam: ${err.message}")
+                val displayMsg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Failed to create Jam")
+                showToast(displayMsg)
                 teardownJam()
                 jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))
@@ -499,7 +574,8 @@ class JamSessionManager(
                 onComplete?.invoke(Result.success(snapshot))
             }
             res.onFailure { err ->
-                showToast("Failed to join Jam: ${err.message}")
+                val displayMsg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Failed to join Jam")
+                showToast(displayMsg)
                 teardownJam()
                 jamClient.resetToDisconnected()
                 onComplete?.invoke(Result.failure(err))
@@ -528,7 +604,17 @@ class JamSessionManager(
         }
     }
 
-    private fun teardownJam() {
+    internal fun teardownJam() {
+        seekConsumerJob?.cancel()
+        seekConsumerJob = null
+        while (seekChannel.tryReceive().isSuccess) {}
+
+        synchronized(pendingCommandKeys) {
+            pendingCommandKeys.clear()
+            _hasPendingCommand.value = false
+        }
+        lastReconnectToastTs = 0L
+
         if (isTornDown) return
         isTornDown = true
         isSessionOpInFlight = false
@@ -554,6 +640,8 @@ class JamSessionManager(
         hasShownAudioFocusToastInThisJam = false
         lastLoadingAbortedToastTrackSeq = null
         lastPrefetchedHeadQid = null
+        isAddPlaylistInFlight = false
+        networkMonitorProvider?.get()?.setJamActive(false)
     }
 
     private fun maybePrefetchQueueHead(room: RoomSnapshot?) {
@@ -640,12 +728,14 @@ class JamSessionManager(
             return
         }
         val isPlaying = room.nowPlaying.status == JamPlaybackStatus.PLAYING
-        scope.launch {
-            val cmd = if (isPlaying) "pause" else "play"
-            val res = jamClient.sendCommand(cmd)
-            res.onFailure { err ->
+        val cmd = if (isPlaying) "pause" else "play"
+        executeOneShotCommand(
+            key = cmd,
+            onFailure = { err ->
                 showToast(err.message ?: "Failed to change playback state")
             }
+        ) {
+            jamClient.sendCommand(cmd)
         }
     }
 
@@ -658,9 +748,8 @@ class JamSessionManager(
             showToast("You don't have permission to control playback")
             return
         }
-        scope.launch {
-            val res = jamClient.sendCommand("play")
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        executeOneShotCommand("play") {
+            jamClient.sendCommand("play")
         }
     }
 
@@ -668,32 +757,40 @@ class JamSessionManager(
         if (!canControlPlayback()) {
             stepOutLocally()
         } else {
-            scope.launch {
-                val res = jamClient.sendCommand("pause")
-                res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            executeOneShotCommand("pause") {
+                jamClient.sendCommand("pause")
             }
         }
     }
 
     fun seekTo(positionMs: Long) {
-        scope.launch {
-            val payload = JSONObject().apply { put("positionMs", positionMs) }
-            val res = jamClient.sendCommand("seek", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        if (seekConsumerJob?.isActive != true) {
+            startSeekConsumer()
+        }
+        seekChannel.trySend(positionMs)
+    }
+
+    private fun startSeekConsumer() {
+        seekConsumerJob?.cancel()
+        seekConsumerJob = scope.launch {
+            for (target in seekChannel) {
+                val payload = JSONObject().apply { put("positionMs", target) }
+                val res = jamClient.sendCommand("seek", payload)
+                res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+                delay(250L)
+            }
         }
     }
 
     fun nextTrack() {
-        scope.launch {
-            val res = jamClient.sendCommand("next")
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        executeOneShotCommand("next") {
+            jamClient.sendCommand("next")
         }
     }
 
     fun previousTrack() {
-        scope.launch {
-            val res = jamClient.sendCommand("prev")
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+        executeOneShotCommand("prev") {
+            jamClient.sendCommand("prev")
         }
     }
 
@@ -709,10 +806,9 @@ class JamSessionManager(
     }
 
     fun playItemByQid(qid: String) {
-        scope.launch {
+        executeOneShotCommand("playItem:$qid") {
             val payload = JSONObject().apply { put("qid", qid) }
-            val res = jamClient.sendCommand("playItem", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("playItem", payload)
         }
     }
 
@@ -722,7 +818,14 @@ class JamSessionManager(
             showToast("Queue is full (50 songs)")
             return false
         }
-        scope.launch {
+        return executeOneShotCommand(
+            key = "queueAdd:${song.id}:$playNext",
+            onFailure = { err ->
+                val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add song"
+                safeLogW("JamAdd", "queueAdd failed: msg=$serverMsg, titleLen=${song.title.length}, idLen=${song.id.length}, artistsCount=${song.artists.size}")
+                showToast("Couldn't add ${song.title}: $serverMsg")
+            }
+        ) {
             val payload = JSONObject().apply {
                 put("song", song.toJsonObject())
                 if (playNext) put("playNext", true)
@@ -740,13 +843,8 @@ class JamSessionManager(
                     showToast("Added to Jam: ${song.title}")
                 }
             }
-            res.onFailure { err ->
-                val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add song"
-                safeLogW("JamAdd", "queueAdd failed: msg=$serverMsg, titleLen=${song.title.length}, idLen=${song.id.length}, artistsCount=${song.artists.size}")
-                showToast("Couldn't add ${song.title}: $serverMsg")
-            }
+            res
         }
-        return true
     }
 
     fun addSongsToJam(songs: List<Song>, limit: Int = 20): Int {
@@ -762,7 +860,15 @@ class JamSessionManager(
             return 0
         }
 
-        scope.launch {
+        val accepted = executeOneShotCommand(
+            key = "queueAddMany",
+            onFailure = { err ->
+                val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add songs"
+                safeLogW("JamAdd", "queueAddMany failed: msg=$serverMsg, count=${toAdd.size}")
+                val firstTitle = toAdd.firstOrNull()?.title ?: "songs"
+                showToast("Couldn't add $firstTitle: $serverMsg")
+            }
+        ) {
             try {
                 val array = JSONArray()
                 toAdd.forEach { array.put(it.toJsonObject()) }
@@ -784,16 +890,15 @@ class JamSessionManager(
                         showToast("Queue is full (50 songs)")
                     }
                 }
-                res.onFailure { err ->
-                    val serverMsg = (err as? JamProtocolException)?.serverMessage ?: err.message ?: "Failed to add songs"
-                    safeLogW("JamAdd", "queueAddMany failed: msg=$serverMsg, count=${toAdd.size}")
-                    val firstTitle = toAdd.firstOrNull()?.title ?: "songs"
-                    showToast("Couldn't add $firstTitle: $serverMsg")
-                }
+                res
             } finally {
                 delay(300L) // debounce
                 isAddPlaylistInFlight = false
             }
+        }
+        if (!accepted) {
+            isAddPlaylistInFlight = false
+            return 0
         }
         return toAdd.size
     }
@@ -822,10 +927,15 @@ class JamSessionManager(
                 return
             }
         }
-        scope.launch {
+        executeOneShotCommand(
+            key = "queueRemove:$qid",
+            onFailure = { err ->
+                val msg = if (err is JamProtocolException) err.serverMessage else (err.message ?: "Permission denied")
+                showToast(msg)
+            }
+        ) {
             val payload = JSONObject().apply { put("qid", qid) }
-            val res = jamClient.sendCommand("queueRemove", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("queueRemove", payload)
         }
     }
 
@@ -843,47 +953,43 @@ class JamSessionManager(
     }
 
     fun moveByQid(qid: String, toQueueIndex: Int) {
-        scope.launch {
+        executeOneShotCommand("queueMove:$qid") {
             val payload = JSONObject().apply {
                 put("qid", qid)
                 put("toIndex", toQueueIndex)
             }
-            val res = jamClient.sendCommand("queueMove", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("queueMove", payload)
         }
     }
 
     fun promoteRecommended(qid: String) {
-        scope.launch {
+        executeOneShotCommand("promote:$qid") {
             val payload = JSONObject().apply { put("qid", qid) }
-            val res = jamClient.sendCommand("promote", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("promote", payload)
         }
     }
 
     fun setDefaults(perms: JamPermissions, applyToExisting: Boolean = false) {
-        scope.launch {
+        executeOneShotCommand("setDefaults") {
             val payload = buildSetDefaultsPayload(perms, applyToExisting)
-            val res = jamClient.sendCommand("setDefaults", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("setDefaults", payload)
         }
     }
 
     fun setAttendeeReorderPermission(allow: Boolean) {
-        scope.launch {
+        executeOneShotCommand("setAttendeeReorderPermission") {
             val payload = JSONObject().apply {
                 put("perms", JSONObject().apply {
                     put("queueManage", allow)
                 })
                 put("applyToExisting", true)
             }
-            val res = jamClient.sendCommand("setDefaults", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("setDefaults", payload)
         }
     }
 
     fun setMemberPerms(targetUserId: String, perms: JamPermissions) {
-        scope.launch {
+        executeOneShotCommand("setMemberPerms:$targetUserId") {
             val payload = JSONObject().apply {
                 put("userId", targetUserId)
                 put("perms", JSONObject().apply {
@@ -892,24 +998,21 @@ class JamSessionManager(
                     put("queueManage", perms.queueManage)
                 })
             }
-            val res = jamClient.sendCommand("setMemberPerms", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("setMemberPerms", payload)
         }
     }
 
     fun kickMember(targetUserId: String) {
-        scope.launch {
+        executeOneShotCommand("kick:$targetUserId") {
             val payload = JSONObject().apply { put("userId", targetUserId) }
-            val res = jamClient.sendCommand("kick", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("kick", payload)
         }
     }
 
     fun transferHost(targetUserId: String) {
-        scope.launch {
+        executeOneShotCommand("transferHost:$targetUserId") {
             val payload = JSONObject().apply { put("userId", targetUserId) }
-            val res = jamClient.sendCommand("transferHost", payload)
-            res.onFailure { err -> showToast(err.message ?: "Permission denied") }
+            jamClient.sendCommand("transferHost", payload)
         }
     }
 

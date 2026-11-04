@@ -53,6 +53,8 @@ Ack signatures return a union of success or failure:
 - `INVALID`: Malformed payload or validation error.
 - `QUEUE_FULL`: Queue reached user capacity (50 user-added songs).
 - `RATE_LIMITED`: Too many commands, failed joins, or time requests.
+- `ROOM_FULL`: Room reached maximum capacity (20 online members).
+- `INTERNAL`: Unexpected internal server error.
 
 ---
 

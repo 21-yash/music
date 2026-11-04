@@ -24,6 +24,17 @@ export class Jam2Store {
   private dirtyRooms = new Set<string>();
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private inFlightRehydrations = new Map<string, Promise<Room | null>>();
+  private tombstones = new Map<string, number>();
+
+  private isTombstoned(code: string, now = Date.now()): boolean {
+    const expiry = this.tombstones.get(code);
+    if (!expiry) return false;
+    if (now >= expiry) {
+      this.tombstones.delete(code);
+      return false;
+    }
+    return true;
+  }
 
   /**
    * Return room from memory, or rehydrate from Redis if available (single-flight).
@@ -53,9 +64,15 @@ export class Jam2Store {
   }
 
   private async rehydrateFromRedis(normalizedCode: string, now: number): Promise<Room | null> {
+    if (this.isTombstoned(normalizedCode, now)) {
+      return null;
+    }
     try {
       const client = getRedisClient();
       const raw = await client.get(`${REDIS_KEY_PREFIX}${normalizedCode}`);
+      if (this.isTombstoned(normalizedCode)) {
+        return null;
+      }
       if (!raw) return null;
 
       const parsed: PersistedRoom = JSON.parse(raw);
@@ -80,12 +97,12 @@ export class Jam2Store {
         nowPlaying: parsed.nowPlaying,
       };
 
-      // Catch-up stale playback if song finished while server was offline
-      this.catchUpStalePlayback(rehydrated, now);
+      // Catch-up stale playback if song finished while server was offline (Task B10)
+      const caughtUp = this.catchUpStalePlayback(rehydrated, now);
 
-      this.rooms.set(normalizedCode, rehydrated);
+      this.rooms.set(normalizedCode, caughtUp);
       logger.info({ code: normalizedCode }, 'Rehydrated jam2 room from Redis');
-      return rehydrated;
+      return caughtUp;
     } catch (err) {
       logger.warn({ err, code: normalizedCode }, 'Failed to rehydrate jam2 room from Redis (failing open)');
       return null;
@@ -98,6 +115,7 @@ export class Jam2Store {
   async checkRoomExists(code: string): Promise<boolean> {
     const normalizedCode = code.toUpperCase();
     if (this.rooms.has(normalizedCode)) return true;
+    if (this.isTombstoned(normalizedCode)) return false;
     try {
       const client = getRedisClient();
       const exists = await client.exists(`${REDIS_KEY_PREFIX}${normalizedCode}`);
@@ -125,6 +143,7 @@ export class Jam2Store {
    */
   setRoom(room: Room): void {
     const code = room.code.toUpperCase();
+    this.tombstones.delete(code);
     this.rooms.set(code, room);
     this.scheduleDebouncedWrite(code);
   }
@@ -137,10 +156,18 @@ export class Jam2Store {
   }
 
   /**
+   * Check if a room has pending writes (dirty flag).
+   */
+  isRoomDirty(code: string): boolean {
+    return this.dirtyRooms.has(code.toUpperCase());
+  }
+
+  /**
    * Delete room from memory and Redis.
    */
   async deleteRoom(code: string): Promise<void> {
     const normalizedCode = code.toUpperCase();
+    this.tombstones.set(normalizedCode, Date.now() + 60_000);
     this.rooms.delete(normalizedCode);
     this.dirtyRooms.delete(normalizedCode);
 
@@ -184,16 +211,34 @@ export class Jam2Store {
     this.debounceTimers.set(code, timer);
   }
 
+  private scheduleRetryWrite(code: string, attempt: number): void {
+    const existing = this.debounceTimers.get(code);
+    if (existing) {
+      clearTimeout(existing);
+      this.debounceTimers.delete(code);
+    }
+    const delay = Math.min(5000, 500 * Math.pow(2, attempt));
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(code);
+      this.persistRoomToRedis(code, attempt + 1).catch((err) => {
+        logger.warn({ err, code }, 'Retry Redis persist failed');
+      });
+    }, delay);
+    timer.unref();
+    this.debounceTimers.set(code, timer);
+  }
+
   /**
    * Persist a single room to Redis immediately.
    */
-  async persistRoomToRedis(code: string): Promise<void> {
+  async persistRoomToRedis(code: string, attempt: number = 0): Promise<void> {
     const room = this.rooms.get(code);
     if (!room) {
       this.dirtyRooms.delete(code);
       return;
     }
 
+    const snapshotVersion = room.version;
     try {
       const client = getRedisClient();
       const payload: PersistedRoom = {
@@ -217,9 +262,17 @@ export class Jam2Store {
         'EX',
         ROOM_TTL_SECONDS,
       );
-      this.dirtyRooms.delete(code);
+
+      // Only clear dirty flag if room version hasn't changed during in-flight write
+      const currentRoom = this.rooms.get(code);
+      if (!currentRoom || currentRoom.version === snapshotVersion) {
+        this.dirtyRooms.delete(code);
+      }
     } catch (err) {
-      logger.warn({ err, code }, 'Failed to write jam2 room to Redis (failing open)');
+      logger.warn({ err, code, attempt }, 'Failed to write jam2 room to Redis (rescheduling with backoff)');
+      if (attempt < 3) {
+        this.scheduleRetryWrite(code, attempt);
+      }
     }
   }
 
@@ -268,41 +321,62 @@ export class Jam2Store {
   }
 
   /**
-   * If the room was playing and offline duration exceeded track duration + 5s,
-   * advance track repeatedly (up to 50 times) to bring playback up to present.
+   * Task B10: Advance virtual clock across multiple tracks on cold start / rehydrate.
+   * If the room was playing and offline duration exceeded track duration,
+   * advance track repeatedly across virtual clock to bring playback up to present.
    */
-  private catchUpStalePlayback(room: Room, now: number): void {
-    if (room.nowPlaying.status !== 'playing' || !room.nowPlaying.item) return;
+  catchUpStalePlayback(room: Room, now: number): Room {
+    if (room.nowPlaying.status !== 'playing' || !room.nowPlaying.item) return room;
 
+    let currentRoom = room;
     let advances = 0;
-    while (room.nowPlaying.status === 'playing' && room.nowPlaying.item && advances < 50) {
-      const durationMs =
-        room.nowPlaying.item.song.duration > 0
-          ? room.nowPlaying.item.song.duration * 1000
-          : Number.MAX_SAFE_INTEGER;
-      const elapsed = now - room.nowPlaying.anchorServerTs;
-      const currentExpected = room.nowPlaying.positionMs + elapsed;
 
-      if (currentExpected > durationMs + 5000) {
+    while (
+      currentRoom.nowPlaying.status === 'playing' &&
+      currentRoom.nowPlaying.item &&
+      advances < 50
+    ) {
+      const item = currentRoom.nowPlaying.item;
+      const durationMs =
+        item.song.duration > 0
+          ? item.song.duration * 1000
+          : Number.MAX_SAFE_INTEGER;
+
+      const currentPos = currentRoom.nowPlaying.positionMs;
+      const remainingMs = Math.max(0, durationMs - currentPos);
+      const trackEndTime = currentRoom.nowPlaying.anchorServerTs + remainingMs;
+
+      if (now >= trackEndTime) {
+        // Track finished while offline: advance virtual clock to track's end timestamp
         const res = applyCommand(
-          room,
-          { code: room.code, type: 'trackEnded', trackSeq: room.nowPlaying.trackSeq },
+          currentRoom,
+          { code: currentRoom.code, type: 'trackEnded', trackSeq: currentRoom.nowPlaying.trackSeq },
           'system',
-          now,
+          trackEndTime,
         );
         if ('room' in res) {
-          Object.assign(room, res.room);
+          currentRoom = res.room;
           advances++;
         } else {
           break;
         }
       } else {
-        // Current track is still within bounds; adjust anchor
-        room.nowPlaying.positionMs = Math.min(currentExpected, durationMs);
-        room.nowPlaying.anchorServerTs = now;
+        // Track's remaining duration extends past now: set final position at now
+        const elapsedSinceAnchor = Math.max(0, now - currentRoom.nowPlaying.anchorServerTs);
+        const finalPos = Math.min(durationMs, currentRoom.nowPlaying.positionMs + elapsedSinceAnchor);
+        currentRoom = {
+          ...currentRoom,
+          nowPlaying: {
+            ...currentRoom.nowPlaying,
+            positionMs: finalPos,
+            anchorServerTs: now,
+          },
+        };
         break;
       }
     }
+
+    return currentRoom;
   }
 }
 

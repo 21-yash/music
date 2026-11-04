@@ -13,6 +13,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.HttpException
@@ -112,6 +113,18 @@ class TokenRefresherTest {
 
         assertEquals("new_access_token", result)
         coVerify(exactly = 1) { tokenStorage.saveTokens("new_access_token", "new_refresh_token", "user_123") }
+        coVerify(exactly = 0) { tokenStorage.clearTokens() }
+    }
+
+    @Test
+    fun testHttp503FromRateLimiterReturnsTransientAndDoesNotClearTokens() = runTest {
+        coEvery { authApi.refreshToken(any()) } throws createHttpException(503)
+
+        val result = tokenRefresher.refreshResult("old_access_token")
+
+        assertTrue("HTTP 503 must produce Transient result", result is TokenRefreshResult.Transient)
+        val transient = result as TokenRefreshResult.Transient
+        assertEquals("old_access_token", transient.fallbackToken)
         coVerify(exactly = 0) { tokenStorage.clearTokens() }
     }
 }

@@ -252,5 +252,265 @@ describe('Jam2 Persistence & Rehydration', () => {
     // deleteRoom fails open
     await expect(brokenStore.deleteRoom('FAIL')).resolves.not.toThrow();
   });
+
+  describe('Tombstone and Resurrection Prevention (Task B2)', () => {
+    it('interleaved deleteRoom and getRoom prevents resurrection from Redis', async () => {
+      const persistedPayload = {
+        code: 'DEAD',
+        version: 5,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: [{ userId: 'u1', username: 'U1', joinedAt: 1000, online: false, lastSeenAt: 1000, perms: {} }],
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      mockRedis['jam2:room:DEAD'] = JSON.stringify(persistedPayload);
+
+      let resolveRedisGet: (val: string | null) => void;
+      const slowGetPromise = new Promise<string | null>((resolve) => {
+        resolveRedisGet = resolve;
+      });
+
+      const client = redisConfig.getRedisClient();
+      vi.spyOn(client, 'get').mockImplementation(async (key: string) => {
+        if (key === 'jam2:room:DEAD') {
+          return slowGetPromise;
+        }
+        return mockRedis[key] || null;
+      });
+
+      // 1. In-flight getRoom started
+      const getRoomPromise = store.getRoom('DEAD');
+
+      // 2. Interleaved deleteRoom happens before getRoom finishes
+      await store.deleteRoom('DEAD');
+
+      // 3. Redis GET finally resolves with the stale data
+      resolveRedisGet!(JSON.stringify(persistedPayload));
+      const result = await getRoomPromise;
+
+      // Must be null (not resurrected!)
+      expect(result).toBeNull();
+      expect(store.hasRoom('DEAD')).toBe(false);
+    });
+
+    it('tombstone blocks Redis rehydration within 60s window', async () => {
+      const persistedPayload = {
+        code: 'TOMB',
+        version: 2,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: [],
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      mockRedis['jam2:room:TOMB'] = JSON.stringify(persistedPayload);
+
+      // deleteRoom tombstones for 60s
+      await store.deleteRoom('TOMB');
+
+      // Subsequent getRoom within 60s returns null
+      const res = await store.getRoom('TOMB');
+      expect(res).toBeNull();
+      expect(store.hasRoom('TOMB')).toBe(false);
+    });
+
+    it('tombstone only blocks Redis rehydration; rooms in memory are unaffected', async () => {
+      const room: Room = {
+        code: 'ALIVE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+
+      // Put in memory
+      store.setRoom(room);
+
+      // In-memory get returns immediately
+      const inMem = await store.getRoom('ALIVE');
+      expect(inMem).toBe(room);
+    });
+  });
+
+  describe('Persistence Correctness & Retries (Task B3)', () => {
+    it('retries failed persistRoomToRedis with backoff', async () => {
+      const room: Room = {
+        code: 'RTRY',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      store.setRoom(room);
+      expect(store.isRoomDirty('RTRY')).toBe(true);
+
+      const client = redisConfig.getRedisClient();
+      let callCount = 0;
+      vi.spyOn(client, 'set').mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Redis write failure 1');
+        }
+        return 'OK';
+      });
+
+      // Initial write
+      await store.persistRoomToRedis('RTRY', 0);
+      expect(callCount).toBe(1);
+      // Room must still be dirty because write failed
+      expect(store.isRoomDirty('RTRY')).toBe(true);
+
+      // Advance timers by backoff delay (500ms)
+      await vi.advanceTimersByTimeAsync(500);
+
+      // Retry should have executed and succeeded
+      expect(callCount).toBe(2);
+      expect(store.isRoomDirty('RTRY')).toBe(false);
+    });
+
+    it('preserves dirty flag if room version is mutated during in-flight write', async () => {
+      const room: Room = {
+        code: 'MUTE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: 1000,
+        members: new Map(),
+        defaults: {},
+        queue: [],
+        history: [],
+        nowPlaying: { item: null, status: 'idle', positionMs: 0, anchorServerTs: 1000, trackSeq: 0 },
+      };
+      store.setRoom(room);
+      expect(store.isRoomDirty('MUTE')).toBe(true);
+
+      let resolveWrite: (val: string) => void;
+      const slowWritePromise = new Promise<string>((resolve) => {
+        resolveWrite = resolve;
+      });
+
+      const client = redisConfig.getRedisClient();
+      vi.spyOn(client, 'set').mockImplementation(async (key: string) => {
+        if (key.includes('MUTE')) {
+          return slowWritePromise;
+        }
+        return 'OK';
+      });
+
+      // Start in-flight write with version 1
+      const writePromise = store.persistRoomToRedis('MUTE');
+
+      // While in flight, room is mutated to version 2
+      room.version = 2;
+
+      // In-flight write completes
+      resolveWrite!('OK');
+      await writePromise;
+
+      // Dirty flag MUST be preserved because version was bumped during write!
+      expect(store.isRoomDirty('MUTE')).toBe(true);
+    });
+  });
+
+  describe('Task B10: catchUpStalePlayback multi-track advance', () => {
+    it('advances virtual clock across multiple short tracks during long downtime', () => {
+      const song1 = makeTestSong('song_1', 30); // 30s
+      const song2 = makeTestSong('song_2', 40); // 40s
+      const song3 = makeTestSong('song_3', 50); // 50s
+
+      const initialAnchor = 10_000;
+      const room: Room = {
+        code: 'MULT',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: initialAnchor,
+        members: new Map(),
+        defaults: {},
+        queue: [
+          { qid: 'q_2', song: song2, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          { qid: 'q_3', song: song3, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+        ],
+        history: [],
+        nowPlaying: {
+          item: { qid: 'q_1', song: song1, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          status: 'playing',
+          positionMs: 0,
+          anchorServerTs: initialAnchor,
+          trackSeq: 1,
+        },
+      };
+
+      // Server offline from t=10_000 until t=100_000 (90 seconds elapsed)
+      // Track 1 (30s) finishes at 40_000
+      // Track 2 (40s) finishes at 80_000
+      // Track 3 (50s) should be playing at 20s (20_000ms) into the song at now=100_000
+      const now = 100_000;
+      const caughtUp = store.catchUpStalePlayback(room, now);
+
+      expect(caughtUp.nowPlaying.status).toBe('playing');
+      expect(caughtUp.nowPlaying.item?.song.id).toBe('song_3');
+      expect(caughtUp.nowPlaying.positionMs).toBe(20_000);
+      expect(caughtUp.nowPlaying.anchorServerTs).toBe(now);
+      expect(caughtUp.nowPlaying.trackSeq).toBe(3);
+
+      // Queue should have 0 items left (all popped)
+      expect(caughtUp.queue.length).toBe(0);
+
+      // History should contain song_1 and song_2
+      expect(caughtUp.history.length).toBe(2);
+      expect(caughtUp.history[0].song.id).toBe('song_1');
+      expect(caughtUp.history[1].song.id).toBe('song_2');
+    });
+
+    it('transitions to idle when downtime exceeds all queued tracks', () => {
+      const song1 = makeTestSong('song_1', 30); // 30s
+      const song2 = makeTestSong('song_2', 40); // 40s
+
+      const initialAnchor = 10_000;
+      const room: Room = {
+        code: 'IDLE',
+        version: 1,
+        hostUserId: 'u1',
+        createdAt: initialAnchor,
+        members: new Map(),
+        defaults: {},
+        queue: [
+          { qid: 'q_2', song: song2, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+        ],
+        history: [],
+        nowPlaying: {
+          item: { qid: 'q_1', song: song1, addedByUserId: 'u1', addedAt: initialAnchor, recommended: false },
+          status: 'playing',
+          positionMs: 0,
+          anchorServerTs: initialAnchor,
+          trackSeq: 1,
+        },
+      };
+
+      // Total queue duration = 30s + 40s = 70s. Finishes at 80_000.
+      // Rehydrate at now=150_000 (70s after queue ended)
+      const now = 150_000;
+      const caughtUp = store.catchUpStalePlayback(room, now);
+
+      expect(caughtUp.nowPlaying.status).toBe('idle');
+      expect(caughtUp.nowPlaying.item).toBeNull();
+      expect(caughtUp.queue.length).toBe(0);
+      expect(caughtUp.history.length).toBe(2);
+      expect(caughtUp.history[0].song.id).toBe('song_1');
+      expect(caughtUp.history[1].song.id).toBe('song_2');
+    });
+  });
 });
 

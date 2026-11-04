@@ -89,6 +89,98 @@ describe('Jam2Manager', () => {
       }
     });
 
+    describe('20-member Room Cap (Task B1)', () => {
+      it('rejects the 21st user with ROOM_FULL error and message', async () => {
+        const room = await manager.createRoom('user_host', 'HostUser');
+        // Host is member 1. Add 19 guests -> total 20 members
+        for (let i = 1; i <= 19; i++) {
+          const joinRes = await manager.joinRoom(room.code, `user_guest_${i}`, `Guest ${i}`);
+          expect('room' in joinRes).toBe(true);
+        }
+
+        const current = await store.getRoom(room.code);
+        expect(current?.members.size).toBe(20);
+
+        // Attempt to join 21st user
+        const fullRes = await manager.joinRoom(room.code, 'user_guest_20', 'Guest 20');
+        expect('error' in fullRes).toBe(true);
+        if ('error' in fullRes) {
+          expect(fullRes.error.code).toBe('ROOM_FULL');
+          expect(fullRes.error.message).toBe('This Jam is full (20 people)');
+        }
+      });
+
+      it('allows an existing member to rejoin when room is full (even if offline)', async () => {
+        const room = await manager.createRoom('user_host', 'HostUser');
+        for (let i = 1; i <= 19; i++) {
+          await manager.joinRoom(room.code, `user_guest_${i}`, `Guest ${i}`);
+        }
+
+        const current = await store.getRoom(room.code);
+        expect(current?.members.size).toBe(20);
+        current!.members.get('user_guest_1')!.online = false;
+
+        // Existing member guest 1 rejoins
+        const rejoinRes = await manager.joinRoom(room.code, 'user_guest_1', 'Guest 1');
+        expect('room' in rejoinRes).toBe(true);
+        if ('room' in rejoinRes) {
+          expect(rejoinRes.room.members.get('user_guest_1')?.online).toBe(true);
+        }
+      });
+
+      it('frees a slot after member leave so a new user can join', async () => {
+        const room = await manager.createRoom('user_host', 'HostUser');
+        for (let i = 1; i <= 19; i++) {
+          await manager.joinRoom(room.code, `user_guest_${i}`, `Guest ${i}`);
+        }
+
+        // 21st user rejected
+        const rejectedRes = await manager.joinRoom(room.code, 'user_new', 'New User');
+        expect('error' in rejectedRes).toBe(true);
+
+        // Member 19 leaves
+        const leaveRes = await manager.leaveRoom(room.code, 'user_guest_19');
+        expect(leaveRes.success).toBe(true);
+
+        const current = await store.getRoom(room.code);
+        expect(current?.members.size).toBe(19);
+
+        // Now new user can join
+        const joinRes = await manager.joinRoom(room.code, 'user_new', 'New User');
+        expect('room' in joinRes).toBe(true);
+        if ('room' in joinRes) {
+          expect(joinRes.room.members.has('user_new')).toBe(true);
+          expect(joinRes.room.members.size).toBe(20);
+        }
+      });
+
+      it('frees a slot after member is kicked so a new user can join', async () => {
+        const room = await manager.createRoom('user_host', 'HostUser');
+        for (let i = 1; i <= 19; i++) {
+          await manager.joinRoom(room.code, `user_guest_${i}`, `Guest ${i}`);
+        }
+
+        // Host kicks guest 18
+        const kickRes = await manager.executeCommand(
+          room.code,
+          { type: 'kick', code: room.code, userId: 'user_guest_18' },
+          'user_host',
+        );
+        expect('room' in kickRes).toBe(true);
+
+        const current = await store.getRoom(room.code);
+        expect(current?.members.size).toBe(19);
+
+        // New user can join
+        const joinRes = await manager.joinRoom(room.code, 'user_another', 'Another User');
+        expect('room' in joinRes).toBe(true);
+        if ('room' in joinRes) {
+          expect(joinRes.room.members.has('user_another')).toBe(true);
+          expect(joinRes.room.members.size).toBe(20);
+        }
+      });
+    });
+
     it('F11.a: concurrent createRoom calls resolve collisions via retry loop without overwrite', async () => {
       let count = 0;
       vi.spyOn(manager, 'generateUniqueRoomCode').mockImplementation(async () => {
@@ -357,6 +449,83 @@ describe('Jam2Manager', () => {
       });
       await vi.advanceTimersByTimeAsync(0);
       expect(threw).toBe(true);
+    });
+  });
+
+  describe('Kick Ban Asynchronous Write (Task B4)', () => {
+    it('kick command completes without awaiting a pending Redis set write', async () => {
+      const room = await manager.createRoom('host_k', 'HostK');
+      await manager.joinRoom(room.code, 'bad_u', 'BadUser');
+
+      let redisSetCalled = false;
+      const slowSetPromise = new Promise<string>(() => {
+        // Never resolves immediately
+      });
+
+      const redisConfig = await import('../../src/config/redis');
+      vi.spyOn(redisConfig, 'getRedisClient').mockReturnValue({
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockImplementation(async (key: string) => {
+          if (key.includes('bad_u')) {
+            redisSetCalled = true;
+            return slowSetPromise;
+          }
+          return 'OK';
+        }),
+        del: vi.fn().mockResolvedValue(1),
+        scan: vi.fn().mockResolvedValue(['0', []]),
+      } as any);
+
+      // Execute kick
+      const kickRes = await manager.executeCommand(
+        room.code,
+        { type: 'kick', code: room.code, userId: 'bad_u' },
+        'host_k',
+      );
+
+      // executeCommand returns successfully immediately even though Redis write is still pending!
+      expect('room' in kickRes).toBe(true);
+      expect(redisSetCalled).toBe(true);
+
+      // In-memory ban is already effective
+      const rejoinRes = await manager.joinRoom(room.code, 'bad_u', 'BadUser');
+      expect('error' in rejoinRes).toBe(true);
+      if ('error' in rejoinRes) {
+        expect(rejoinRes.error.code).toBe('FORBIDDEN');
+      }
+    });
+  });
+
+  describe('Task B11: O(1) userActiveRoom map and code generation', () => {
+    it('getActiveRoomForUser updates on create, join, leave, and destroy', async () => {
+      expect(manager.getActiveRoomForUser('user_x')).toBeNull();
+
+      // Create
+      const room = await manager.createRoom('user_x', 'UserX');
+      expect(manager.getActiveRoomForUser('user_x')).toBe(room.code);
+
+      // Join
+      await manager.joinRoom(room.code, 'user_y', 'UserY');
+      expect(manager.getActiveRoomForUser('user_y')).toBe(room.code);
+
+      // Leave
+      await manager.leaveRoom(room.code, 'user_y');
+      expect(manager.getActiveRoomForUser('user_y')).toBeNull();
+
+      // Destroy
+      await manager.destroyRoom(room.code, 'ended');
+      expect(manager.getActiveRoomForUser('user_x')).toBeNull();
+    });
+
+    it('generateUniqueRoomCode produces only valid JAM_ROOM_CODE_CHARS', async () => {
+      const { JAM_ROOM_CODE_CHARS } = await import('../../src/jam2/types');
+      for (let i = 0; i < 20; i++) {
+        const code = await manager.generateUniqueRoomCode();
+        expect(code.length).toBe(4);
+        for (const char of code) {
+          expect(JAM_ROOM_CODE_CHARS).toContain(char);
+        }
+      }
     });
   });
 });

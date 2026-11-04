@@ -108,6 +108,7 @@ class JamStateStoreTest {
 
         val tick = Jam2Tick(
             code = "ROOM",
+            version = 1L,
             serverTime = 15000L,
             nowPlaying = JamTickNowPlaying(
                 positionMs = 12000L,
@@ -124,12 +125,35 @@ class JamStateStoreTest {
     }
 
     @Test
+    fun `applyTick ignores tick when tick version is less than current room version`() {
+        val store = JamStateStore(myUserId = "host_1")
+        store.applySnapshot(makeSnapshot("ROOM", 5L, "host_1"), isEpoch = true)
+
+        val staleTick = Jam2Tick(
+            code = "ROOM",
+            version = 4L, // Stale version < 5L
+            serverTime = 15000L,
+            nowPlaying = JamTickNowPlaying(
+                positionMs = 12000L,
+                anchorServerTs = 15000L,
+                status = JamPlaybackStatus.PLAYING,
+                trackSeq = 1L
+            )
+        )
+
+        val updated = store.applyTick(staleTick)
+        assertFalse(updated)
+        assertEquals(5000L, store.room.value?.nowPlaying?.positionMs)
+    }
+
+    @Test
     fun `applyTick ignores tick when trackSeq does not match`() {
         val store = JamStateStore(myUserId = "host_1")
         store.applySnapshot(makeSnapshot("ROOM", 1L, "host_1"), isEpoch = true)
 
         val staleTick = Jam2Tick(
             code = "ROOM",
+            version = 1L,
             serverTime = 15000L,
             nowPlaying = JamTickNowPlaying(
                 positionMs = 99999L,

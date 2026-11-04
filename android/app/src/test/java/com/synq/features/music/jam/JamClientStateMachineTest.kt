@@ -1,8 +1,15 @@
 package com.synq.features.music.jam
 
 import com.synq.data.remote.TokenRefreshResult
+import com.synq.data.repository.AuthRepository
+import com.synq.features.music.domain.model.Song
+import com.synq.features.music.playback.JamPlaybackInterceptor
+import com.synq.features.music.playback.PlaybackState
+import io.mockk.coEvery
+import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -62,6 +69,35 @@ class JamClientStateMachineTest {
         }
     }
 
+    private class FakeJamPlayerBridge : JamPlayerBridge {
+        override val playbackState = kotlinx.coroutines.flow.MutableStateFlow(PlaybackState())
+        override var jamInterceptor: JamPlaybackInterceptor? = null
+        override fun getPlayerCurrentPosition(): Long = 0L
+        override fun getPlayerPlayWhenReady(): Boolean = false
+        override fun getPlayerPlaybackState(): Int = 1
+        override fun getPlaybackSpeed(): Float = 1.0f
+        override fun getPlayerDuration(): Long = 100000L
+        override fun playJamSyncSong(song: Song, initialPositionMs: Long, playWhenReady: Boolean, targetQid: String?, forceRefresh: Boolean) {}
+        override fun prefetchTrack(song: Song) {}
+        override fun stop() {}
+        override fun applyJamPlay() {}
+        override fun applyJamPause() {}
+        override fun applyJamSeek(positionMs: Long) {}
+        override fun applyJamSpeed(factor: Float) {}
+        override fun setJamQueue(jamQueue: List<Song>, targetSong: Song?, targetQid: String?, queueQids: List<String>, recommendedQids: Set<String>) {}
+        override fun stashPersonalQueue() {}
+        override fun restorePersonalQueue() {}
+        override fun setPlaybackSpeed(speed: Float) {}
+        override fun invalidateStreamCache(songId: String) {}
+    }
+
+    private class FakeJamPreferencesBridge : JamPreferencesBridge {
+        override fun saveLastJam(code: String, avatarUrl: String?) {}
+        override fun clearLastJam() {}
+        override fun rejoinCandidate(): String? = null
+        override fun getLastAvatarUrl(): String? = null
+    }
+
     private lateinit var transport: FakeJamTransport
     private lateinit var stateStore: JamStateStore
     private lateinit var clockSync: ClockSync
@@ -80,7 +116,7 @@ class JamClientStateMachineTest {
         )
     }
 
-    private fun kotlinx.coroutines.test.TestScope.createClient(): JamClient {
+    private fun kotlinx.coroutines.test.TestScope.createClient(autoClockSync: Boolean = false): JamClient {
         return JamClient(
             transport = transport,
             stateStore = stateStore,
@@ -95,7 +131,7 @@ class JamClientStateMachineTest {
                     TokenRefreshResult.Unauthorized
                 }
             },
-            autoClockSync = false,
+            autoClockSync = autoClockSync,
             monotonicNowMs = { currentTime },
             wallClockNowMs = { currentTime }
         )
@@ -201,7 +237,16 @@ class JamClientStateMachineTest {
     }
 
     @Test
-    fun `when not ACTIVE sendCommand fails fast with error Reconnecting try again`() = runTest {
+    fun `when DISCONNECTED or CLOSED sendCommand fails fast with error Reconnecting try again`() = runTest {
+        val client = createClient()
+        // Disconnected
+        val res = client.sendCommand("play")
+        assertTrue(res.isFailure)
+        assertEquals("Reconnecting… try again", res.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `when RECONNECTING sendCommand waits up to 4s and fails after timeout`() = runTest {
         val client = createClient()
         tokenToProvide = "valid_token"
         transport.nextEmitResult = Result.success(makeRoomJson("FAST", "user_me"))
@@ -215,10 +260,59 @@ class JamClientStateMachineTest {
         runCurrent()
         assertTrue(client.clientState.value is JamClientState.Reconnecting)
 
-        // Send command while Reconnecting -> must fail fast with specific message
-        val res = client.sendCommand("play")
-        assertTrue(res.isFailure)
-        assertEquals("Reconnecting… try again", res.exceptionOrNull()?.message)
+        // Keep socket connection failing so reconnect loop stays in Reconnecting
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("No internet"))
+
+        var commandResult: Result<Long>? = null
+        val cmdJob = launch {
+            commandResult = client.sendCommand("play")
+        }
+        runCurrent()
+        assertNull("Command should be waiting, not failed immediately", commandResult)
+
+        // Advance 4001ms to trigger timeout
+        advanceTimeBy(4001L)
+        runCurrent()
+
+        assertTrue(commandResult!!.isFailure)
+        assertEquals("Reconnecting… try again", commandResult!!.exceptionOrNull()?.message)
+        cmdJob.join()
+    }
+
+    @Test
+    fun `when RECONNECTING sendCommand succeeds once active state restored within 4s`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CMD", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Drop connection to enter Reconnecting
+        transport.emitEvent(JamTransport.Event.Disconnected("network drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        transport.emittedEvents.clear()
+        transport.nextEmitResult = Result.success(JSONObject().apply { put("version", 42L) })
+
+        var commandResult: Result<Long>? = null
+        val cmdJob = launch {
+            commandResult = client.sendCommand("play")
+        }
+        runCurrent()
+        assertNull("Command should wait during reconnecting", commandResult)
+
+        // Restore active state within 1s
+        advanceTimeBy(1000L)
+        client.setActiveForTesting("RECONNECT_CMD", JamRole.HOST)
+        runCurrent()
+
+        assertTrue("Command should succeed once Active is restored", commandResult!!.isSuccess)
+        assertEquals(42L, commandResult!!.getOrNull())
+        assertEquals(1, transport.emittedEvents.filter { it.first == "jam2:cmd" }.size)
+        cmdJob.join()
     }
 
     @Test
@@ -298,6 +392,155 @@ class JamClientStateMachineTest {
     }
 
     @Test
+    fun `transient token refresh in reconnect loop keeps retrying and does not close Jam`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("AUTH_TRANSIENT", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+
+        // Disconnect
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        // Transient failure
+        tokenResultToProvide = TokenRefreshResult.Transient(null)
+
+        // Advance through reconnect delay
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // Should STILL be in Reconnecting state, NOT Closed("auth_failed")
+        assertTrue("State should remain Reconnecting on transient error", client.clientState.value is JamClientState.Reconnecting)
+
+        // Advance through another backoff
+        advanceTimeBy(4000L)
+        runCurrent()
+        assertTrue("State should still remain Reconnecting", client.clientState.value is JamClientState.Reconnecting)
+
+        // Now auth refresh returns Unauthorized -> immediately closes
+        tokenResultToProvide = TokenRefreshResult.Unauthorized
+        advanceTimeBy(5000L)
+        runCurrent()
+
+        val finalState = client.clientState.value
+        assertTrue("State should be Closed on real Unauthorized", finalState is JamClientState.Closed)
+        assertEquals("auth_failed", (finalState as JamClientState.Closed).reason)
+    }
+
+    @Test
+    fun `reconnect loop does not restart itself on network restore but skips backoff delay`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_NO_RESTART", "user_me"))
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        // Drop connection
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        val initialJob = client.reconnectJob
+        assertNotNull("Reconnect job should be created", initialJob)
+        assertTrue("Reconnect job should be active", initialJob!!.isActive)
+
+        // Keep socket connection failing on attempt 1 so it enters backoff for attempt 2
+        transport.awaitConnectedResult = Result.failure(IllegalStateException("No network"))
+        advanceTimeBy(2000L)
+        runCurrent()
+
+        // It is now waiting in backoff for attempt 2 (e.g. 2s+ delay)
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+        assertEquals("Initial reconnect job should still be the running job", initialJob, client.reconnectJob)
+
+        // Now network restores, socket connect is working, and rejoin will succeed
+        transport.awaitConnectedResult = Result.success(Unit)
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_NO_RESTART", "user_me"))
+
+        // Call onNetworkRestored multiple times rapidly
+        client.onNetworkRestored()
+        client.onNetworkRestored()
+        client.onNetworkRestored()
+
+        // The job should NOT have been cancelled or recreated
+        assertEquals("Reconnect job instance must not change or be cancelled", initialJob, client.reconnectJob)
+        assertTrue("Reconnect job should still be active without being cancelled", initialJob.isActive)
+
+        // Running current immediately processes the skipped backoff without waiting 2000ms+
+        runCurrent()
+
+        // Reconnect succeeded into Active state
+        val finalState = client.clientState.value
+        assertTrue("Client should be active after skipped backoff", finalState is JamClientState.Active)
+        assertEquals("RECONNECT_NO_RESTART", (finalState as JamClientState.Active).code)
+    }
+
+    @Test
+    fun `JamSessionManager default JamClient construction forwards TokenRefreshResult Transient from AuthRepository`() = runTest {
+        val mockAuthRepo = mockk<AuthRepository>()
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Success("valid_token")
+        coEvery { mockAuthRepo.getFreshAccessToken() } returns "valid_token"
+
+        val fakeTransport = FakeJamTransport()
+        fakeTransport.nextEmitResult = Result.success(makeRoomJson("PROD_WIRING", "user_me"))
+
+        val fakePlayerManager = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val jsm = JamSessionManager(
+            playerManager = fakePlayerManager,
+            authRepository = mockAuthRepo,
+            networkMonitorProvider = null,
+            jamPreferences = fakePrefs,
+            context = null,
+            coroutineScope = backgroundScope,
+            transportOverride = fakeTransport,
+            jamClientOverride = null,
+            clockSyncOverride = ClockSync(monotonicNowMs = { 1000L }, wallClockNowMs = { 1000L }),
+            stateStoreOverride = JamStateStore("user_me"),
+            currentTimeProvider = { 1000L },
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        // Create room to get into Active state
+        jsm.jamClient.createRoom()
+        runCurrent()
+        assertTrue(jsm.jamClient.clientState.value is JamClientState.Active)
+
+        // Now token refresh returns Transient
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Transient(null)
+        coEvery { mockAuthRepo.getFreshAccessToken() } returns null
+
+        // Disconnect transport
+        fakeTransport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(jsm.jamClient.clientState.value is JamClientState.Reconnecting)
+
+        // Advance time during reconnect loop
+        advanceTimeBy(2500L)
+        runCurrent()
+
+        assertTrue("Client must remain Reconnecting on Transient result", jsm.jamClient.clientState.value is JamClientState.Reconnecting)
+
+        // Now mock returns Unauthorized
+        coEvery { mockAuthRepo.getFreshAccessTokenResult() } returns TokenRefreshResult.Unauthorized
+        advanceTimeBy(10000L)
+        runCurrent()
+
+        assertFalse("Jam session must be torn down on Unauthorized", jsm.jamState.value.isInJam)
+        assertTrue(
+            "Client must transition to Closed/Disconnected on Unauthorized",
+            jsm.jamClient.clientState.value is JamClientState.Closed || jsm.jamClient.clientState.value is JamClientState.Disconnected
+        )
+    }
+
+    @Test
     fun `when awaitConnected fails createRoom returns failure and transitions to Disconnected`() = runTest {
         val client = createClient()
         tokenToProvide = "valid_token"
@@ -346,6 +589,63 @@ class JamClientStateMachineTest {
         val finalState = client.clientState.value
         assertTrue("Expected Active state after reconnect, but was $finalState", finalState is JamClientState.Active)
         assertEquals("RECN", (finalState as JamClientState.Active).code)
+    }
+
+    @Test
+    fun `when createRoom fails clockSyncJob is cleaned up and not running`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        // awaitConnected succeeds, but create emit fails
+        transport.nextEmitResult = Result.failure(JamProtocolException("INTERNAL", "Server error"))
+
+        val res = client.createRoom()
+        runCurrent()
+
+        assertTrue(res.isFailure)
+        assertFalse("clockSyncJob must not leak on createRoom failure", client.isClockSyncRunning)
+    }
+
+    @Test
+    fun `when joinRoom fails clockSyncJob is cleaned up and not running`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.failure(JamProtocolException("NOT_FOUND", "Room not found"))
+
+        val res = client.joinRoom("TEST99")
+        runCurrent()
+
+        assertTrue(res.isFailure)
+        assertFalse("clockSyncJob must not leak on joinRoom failure", client.isClockSyncRunning)
+    }
+
+    @Test
+    fun `clock sync runs exactly once with 3 samples on reconnect`() = runTest {
+        val client = createClient(autoClockSync = true)
+        tokenToProvide = "valid_token"
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CLOCK", "user_me"))
+
+        client.createRoom()
+        advanceTimeBy(500L)
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        transport.emittedEvents.clear()
+
+        // Drop connection
+        transport.emitEvent(JamTransport.Event.Disconnected("drop"))
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Reconnecting)
+
+        transport.nextEmitResult = Result.success(makeRoomJson("RECONNECT_CLOCK", "user_me"))
+
+        // Reconnect loop runs
+        advanceTimeBy(2500L)
+        runCurrent()
+
+        assertTrue(client.clientState.value is JamClientState.Active)
+        val timePings = transport.emittedEvents.filter { it.first == "jam2:time" }
+        // Exactly 3 pings from a single clock sync run, not 6 or 9!
+        assertEquals("Should perform exactly one 3-sample clock sync", 3, timePings.size)
     }
 
     @Test
@@ -431,5 +731,604 @@ class JamClientStateMachineTest {
 
         // Version should remain 10 because sync uses isEpoch = false
         assertEquals(10L, stateStore.room.value?.version)
+    }
+
+    @Test
+    fun `tick with version less than or equal to current room does not call sync`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("TICK1", "user_me").apply {
+            getJSONObject("room").put("version", 5)
+        }
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertEquals(5L, stateStore.room.value?.version)
+        transport.emittedEvents.clear()
+
+        // Tick with lower version (stale)
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK1",
+            version = 4L,
+            serverTime = 2000L,
+            nowPlaying = JamTickNowPlaying(100L, 2000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        // Tick with same version
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK1",
+            version = 5L,
+            serverTime = 3000L,
+            nowPlaying = JamTickNowPlaying(200L, 3000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        val syncEmits = transport.emittedEvents.filter { it.first == "jam2:sync" }
+        assertEquals(0, syncEmits.size)
+    }
+
+    @Test
+    fun `tick with version greater than current room calls sync`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("TICK2", "user_me").apply {
+            getJSONObject("room").put("version", 5)
+        }
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertEquals(5L, stateStore.room.value?.version)
+        transport.emittedEvents.clear()
+
+        // Prepare sync response
+        transport.nextEmitResult = Result.success(makeRoomJson("TICK2", "user_me").apply {
+            getJSONObject("room").put("version", 6)
+        })
+
+        // Tick with higher version (server is ahead)
+        transport.emitEvent(JamTransport.Event.Tick(Jam2Tick(
+            code = "TICK2",
+            version = 6L,
+            serverTime = 4000L,
+            nowPlaying = JamTickNowPlaying(500L, 4000L, JamPlaybackStatus.PLAYING, 0L)
+        )))
+        runCurrent()
+
+        val syncEmits = transport.emittedEvents.filter { it.first == "jam2:sync" }
+        assertEquals(1, syncEmits.size)
+    }
+
+    @Test
+    fun `closed event with moved reason sets correct user message and policy toast`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("MOVE1", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+
+        transport.emitEvent(JamTransport.Event.Closed("moved"))
+        runCurrent()
+
+        val state = client.clientState.value
+        assertTrue(state is JamClientState.Closed)
+        val closed = state as JamClientState.Closed
+        assertEquals("moved", closed.reason)
+        assertEquals("You joined another Jam on a different device", closed.message)
+
+        val toastMsg = closedToastFor("moved", alreadyToasted = false)
+        assertEquals("You joined another Jam on a different device", toastMsg)
+    }
+
+    @Test
+    fun `seekTo burst of 20 seeks sends first immediately and latest after window nothing in between`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK_BURST", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // First seek goes out immediately
+        sessionManager.seekTo(100L)
+        runCurrent()
+
+        // Burst of seeks while window is open
+        for (i in 2..20) {
+            sessionManager.seekTo(i * 100L) // 200, 300, ..., 2000
+        }
+        runCurrent()
+
+        // Only first seek (100L) should be sent immediately
+        val seeksBeforeWindow = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeksBeforeWindow.size)
+        assertEquals(100L, (seeksBeforeWindow[0].second as JSONObject).getLong("positionMs"))
+
+        // Advance past the 250ms window
+        advanceTimeBy(250L)
+        runCurrent()
+
+        // Now latest seek (2000L) is sent after window, nothing in between (total 2 seeks)
+        val seeksAfterWindow = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(2, seeksAfterWindow.size)
+        assertEquals(2000L, (seeksAfterWindow[1].second as JSONObject).getLong("positionMs"))
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `seekTo repeated seeks to 0 separated by time sends both`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK_SAME", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // First seek to 0
+        sessionManager.seekTo(0L)
+        runCurrent()
+
+        val seeks1 = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeks1.size)
+        assertEquals(0L, (seeks1[0].second as JSONObject).getLong("positionMs"))
+
+        // Advance 1s
+        advanceTimeBy(1000L)
+        runCurrent()
+
+        // Second seek to 0 (same target position)
+        sessionManager.seekTo(0L)
+        runCurrent()
+
+        val seeks2 = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(2, seeks2.size)
+        assertEquals(0L, (seeks2[1].second as JSONObject).getLong("positionMs"))
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `seekTo teardown cancels pending work`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val roomJson = makeRoomJson("SEEK_TEARDOWN", "user_me")
+        transport.nextEmitResult = Result.success(roomJson)
+
+        client.createRoom()
+        runCurrent()
+        assertTrue(client.clientState.value is JamClientState.Active)
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        transport.nextEmitResult = Result.success(JSONObject().apply {
+            put("ok", true)
+            put("room", roomJson.getJSONObject("room"))
+        })
+
+        // Seek 1 sends immediately
+        sessionManager.seekTo(100L)
+        runCurrent()
+
+        // Seek 2 is queued during throttle window
+        sessionManager.seekTo(500L)
+        runCurrent()
+
+        // Teardown before 250ms delay completes
+        sessionManager.teardownJam()
+        runCurrent()
+
+        // Advance time well past the window
+        advanceTimeBy(1000L)
+        runCurrent()
+
+        // Seek 500 should never have been sent
+        val seeks = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "seek"
+        }
+        assertEquals(1, seeks.size)
+        assertEquals(100L, (seeks[0].second as JSONObject).getLong("positionMs"))
+    }
+
+    @Test
+    fun `command while reconnecting shows toast once not once per tap`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val toasts = mutableListOf<String>()
+        var virtualNow = 10000L
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            currentTimeProvider = { virtualNow },
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // First tap: should trigger reconnect toast
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // Rapid subsequent taps for same command within 3s
+        virtualNow += 500L
+        sessionManager.nextTrack()
+        runCurrent()
+
+        virtualNow += 500L
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertEquals(1, toasts.size)
+        assertEquals("Reconnecting… your action will go through once connected", toasts[0])
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `three taps of next during reconnect result in one next command sent after active`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // Tap next 3 times during reconnect
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // No command should have reached transport yet
+        val nextCmdsBeforeActive = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(0, nextCmdsBeforeActive.size)
+
+        // Jam reconnects and becomes Active
+        client.setActiveForTesting("ROOM_D1", JamRole.HOST)
+        runCurrent()
+
+        // Exactly one "next" command sent after Active
+        val nextCmdsAfterActive = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(1, nextCmdsAfterActive.size)
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `second different command during reconnect is not dropped`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // Send two different commands
+        sessionManager.nextTrack()
+        sessionManager.previousTrack()
+        runCurrent()
+
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertEquals(setOf("next", "prev"), sessionManager.pendingCommandKeys)
+        }
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        // Jam becomes Active
+        client.setActiveForTesting("ROOM_D1", JamRole.HOST)
+        runCurrent()
+
+        val cmds = transport.emittedEvents.filter { it.first == "jam2:cmd" }
+            .map { (it.second as JSONObject).getString("type") }
+        assertTrue(cmds.contains("next"))
+        assertTrue(cmds.contains("prev"))
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `key is released and toast shown after reconnect timeout failure`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val toasts = mutableListOf<String>()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertTrue(sessionManager.hasPendingCommand.value)
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.contains("next"))
+        }
+
+        // Advance past 4000ms timeout of sendCommandRaw
+        advanceTimeBy(4500L)
+        runCurrent()
+
+        // Key should be released
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.isEmpty())
+        }
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        assertTrue(toasts.any { it.contains("Couldn't reach the Jam. Check your connection and try again.") })
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `teardown clears pending command keys and resets hasPendingCommand`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+        runCurrent()
+
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.isEmpty())
+        }
+        assertFalse(sessionManager.hasPendingCommand.value)
+    }
+
+    private fun makeSong(id: String, title: String = "Test Song"): Song {
+        return Song(
+            id = id,
+            title = title,
+            artists = emptyList(),
+            album = null,
+            durationSeconds = 180,
+            imageUrl = null,
+            year = "2024",
+            language = "en",
+            hasLyrics = false,
+            playCount = 0,
+            label = "",
+            streamRef = "",
+            providerId = "jiosaavn"
+        )
+    }
+
+    @Test
+    fun `two taps of next while active both execute without dropping or showing reconnect toast`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+        val toasts = mutableListOf<String>()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setActiveForTesting("ROOM_ACTIVE", JamRole.HOST)
+        runCurrent()
+
+        // Two rapid next taps while connected
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // Both next commands must reach the transport
+        val nextCmds = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(2, nextCmds.size)
+
+        // Neither tap was dropped, and no "Still reconnecting" or "Reconnecting" toast was emitted
+        assertTrue(toasts.none { it.contains("reconnecting", ignoreCase = true) })
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `queueAdd returns true when accepted and false when dropped as duplicate during reconnect`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_QUEUE")
+        runCurrent()
+
+        val song = makeSong("song_1")
+
+        // First add while reconnecting: accepted
+        val firstResult = sessionManager.addSongToJam(song, playNext = false)
+        assertTrue("First queueAdd must return true", firstResult)
+
+        // Immediate duplicate tap for same song during reconnect: dropped
+        val secondResult = sessionManager.addSongToJam(song, playNext = false)
+        assertFalse("Duplicate queueAdd during reconnect must return false", secondResult)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `reconnect timeout failure surfaces typed ReconnectTimeoutException`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        client.setReconnectingForTesting("ROOM_TIMEOUT")
+        runCurrent()
+
+        var caughtException: Throwable? = null
+        val job = backgroundScope.launch {
+            val res = client.sendCommandRaw("next")
+            caughtException = res.exceptionOrNull()
+        }
+
+        advanceTimeBy(4500L)
+        runCurrent()
+        job.join()
+
+        assertNotNull(caughtException)
+        assertTrue("Expected ReconnectTimeoutException, got: $caughtException", caughtException is ReconnectTimeoutException)
     }
 }

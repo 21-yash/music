@@ -120,4 +120,52 @@ class JamH6ReconnectTest {
         )
         assertEquals(2, pingCount)
     }
+
+    @Test
+    fun testJamClient_pingWithProtocolErrorAck_treatedAsSuccessAndDoesNotDisconnect() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        var pingCount = 0
+        var disconnected = false
+        val eventsFlow = MutableSharedFlow<JamTransport.Event>()
+
+        val fakeTransport = object : JamTransport {
+            override val events: Flow<JamTransport.Event> get() = eventsFlow
+            override val isConnected: Boolean get() = true
+            override fun connect(token: String?) {}
+            override suspend fun awaitConnected(timeoutMs: Long): Result<Unit> = Result.success(Unit)
+            override fun disconnect() {
+                disconnected = true
+            }
+            override suspend fun emit(event: String, data: Any?, ackTimeoutMs: Long): Result<JSONObject> {
+                if (event == "jam2:time") {
+                    pingCount++
+                    // Returns RATE_LIMITED JamProtocolException from server
+                    return Result.failure(JamProtocolException("RATE_LIMITED", "Too many requests"))
+                }
+                return Result.success(JSONObject())
+            }
+        }
+
+        val client = JamClient(
+            transport = fakeTransport,
+            stateStore = JamStateStore(),
+            clockSync = ClockSync(),
+            tokenProvider = { "test-token" },
+            scope = backgroundScope,
+            ioDispatcher = testDispatcher,
+            monotonicNowMs = { System.currentTimeMillis() },
+            autoClockSync = false
+        )
+
+        client.setActiveForTesting("TESTROOM", JamRole.GUEST)
+        client.onNetworkRestored()
+        testScheduler.advanceTimeBy(HealthCheckPolicy.RETRY_DELAY_MS + 100L)
+
+        assertFalse("Transport must not be disconnected when ping returns a server protocol ack", disconnected)
+        assertTrue(
+            "ClientState must remain Active",
+            client.clientState.value is JamClientState.Active
+        )
+        assertEquals("Ping should be sent only once because first ping proved link is alive", 1, pingCount)
+    }
 }

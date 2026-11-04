@@ -150,5 +150,45 @@ describe('Task H7 backend auth refresh and limiter fail-open', () => {
     expect(nextCalls).toBe(1);
     expect(req.limiterWaitMs).toBeGreaterThanOrEqual(700);
   });
+
+  it('Task B11 / R9: limiter fail-closed driven by explicit failClosed option on 750ms timeout (503 ServiceUnavailableError)', async () => {
+    const hangingAuthLimiter = createLazyLimiter({
+      windowMs: 60000,
+      limit: 10,
+      keyPrefix: 'login',
+      enableInTest: true,
+      failClosed: true,
+      customStore: {
+        init: () => {},
+        increment: () => new Promise(() => {}), // never resolves
+        decrement: () => {},
+        resetKey: () => {},
+      } as any,
+    });
+
+    const req: any = {
+      path: '/arbitrary/path',
+      originalUrl: '/arbitrary/path',
+      ip: '127.0.0.1',
+      headers: {},
+      app: { get: () => false },
+    };
+    const res: any = {};
+    let passedErr: any = null;
+
+    await new Promise<void>((resolve) => {
+      const next = (err?: any) => {
+        passedErr = err;
+        resolve();
+      };
+
+      hangingAuthLimiter(req, res, next);
+    });
+
+    expect(passedErr).toBeDefined();
+    expect(passedErr.statusCode).toBe(503);
+    expect(passedErr.code).toBe('SERVICE_UNAVAILABLE');
+    expect(req.limiterWaitMs).toBeGreaterThanOrEqual(700);
+  });
 });
 

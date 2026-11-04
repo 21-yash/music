@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const JAM_ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export const MAX_ROOM_MEMBERS = 20;
 
 // ─── Song Schema (mirrors Android SongDto & backend Song) ─────────────
 export const artistCreditSchema = z.object({
@@ -138,7 +139,9 @@ export type Jam2ErrorCode =
   | 'INVALID'
   | 'QUEUE_FULL'
   | 'RATE_LIMITED'
-  | 'PROTOCOL';
+  | 'ROOM_FULL'
+  | 'PROTOCOL'
+  | 'INTERNAL';
 
 export interface Jam2Error {
   code: Jam2ErrorCode;

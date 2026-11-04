@@ -101,6 +101,7 @@ class JamStateStore(
     fun applyTick(tick: Jam2Tick): Boolean {
         val current = _room.value ?: return false
         if (tick.code != current.code) return false
+        if (tick.version < current.version) return false
         if (tick.nowPlaying.trackSeq != current.nowPlaying.trackSeq) return false
 
         val updatedNowPlaying = current.nowPlaying.copy(

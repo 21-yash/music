@@ -77,15 +77,18 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   sportsWorker.start();
 
   server.on('connection', (socket) => {
-    logger.info({ socketId: socket.id }, 'Socket.IO client connected');
+    const connectedAt = Date.now();
+    const userId = socket.data.user?.userId;
+    logger.info({ socketId: socket.id, userId }, 'Socket.IO client connected');
 
     // Register domain handlers
     registerSportsHandlers(socket);
     registerJam2Handlers(server, socket);
 
     socket.on('disconnect', (reason) => {
+      const durationMs = Date.now() - connectedAt;
       logger.info(
-        { socketId: socket.id, reason },
+        { socketId: socket.id, userId, reason, durationMs },
         'Socket.IO client disconnected',
       );
     });

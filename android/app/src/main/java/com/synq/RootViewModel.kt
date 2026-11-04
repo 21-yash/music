@@ -56,6 +56,7 @@ class RootViewModel @Inject constructor(
     val jamUiEvents = jamSessionManager.stateStore.uiEvents
     val jamClosedEvents = jamSessionManager.jamClient.closedEvents
     val jamClockSync = jamSessionManager.clockSync
+    val jamHasPendingCommand = jamSessionManager.hasPendingCommand
 
     fun clearJamError() {
         jamSessionManager.clearError()

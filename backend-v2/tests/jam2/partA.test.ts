@@ -123,7 +123,7 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       }
     });
 
-    it('accepts trackEnded for unknown duration (0) only after 15s', () => {
+    it('accepts trackEnded for unknown duration (0) only after 15s and only from host or playback perm holder', () => {
       const room = makeTestRoom();
       room.nowPlaying.item!.song.duration = 0; // Unknown duration
 
@@ -131,19 +131,33 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       const resEarly = applyCommand(
         room,
         { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
-        'guest_1',
+        'host_1',
         room.nowPlaying.anchorServerTs + 5000,
       );
       expect('room' in resEarly).toBe(true);
       if ('room' in resEarly) {
         expect(resEarly.room.nowPlaying.trackSeq).toBe(1);
+        expect(resEarly.applied).toBe(false);
       }
 
-      // At 16s: accepted
-      const resLate = applyCommand(
+      // At 16s by guest without playback permission: rejected (Task B6)
+      const resGuestNoPerm = applyCommand(
         room,
         { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
         'guest_1',
+        room.nowPlaying.anchorServerTs + 16000,
+      );
+      expect('room' in resGuestNoPerm).toBe(true);
+      if ('room' in resGuestNoPerm) {
+        expect(resGuestNoPerm.room.nowPlaying.trackSeq).toBe(1);
+        expect(resGuestNoPerm.applied).toBe(false);
+      }
+
+      // At 16s by host: accepted
+      const resLate = applyCommand(
+        room,
+        { code: 'TEST', type: 'trackEnded', trackSeq: 1 },
+        'host_1',
         room.nowPlaying.anchorServerTs + 16000,
       );
       expect('room' in resLate).toBe(true);
@@ -546,9 +560,12 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       const store = new Jam2Store();
       const manager = new Jam2Manager(store);
 
-      const joinPromises = Array.from({ length: 20 }, (_, i) =>
-        manager.joinRoom('COLD2', `user_${i}`, `User ${i}`),
-      );
+      const joinPromises = [
+        manager.joinRoom('COLD2', 'u_host', 'Host'),
+        ...Array.from({ length: 19 }, (_, i) =>
+          manager.joinRoom('COLD2', `user_${i}`, `User ${i}`),
+        ),
+      ];
 
       const results = await Promise.all(joinPromises);
       for (const res of results) {
@@ -559,7 +576,8 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       expect(roomGetCalls).toHaveLength(1);
 
       const finalRoom = await store.getRoom('COLD2');
-      for (let i = 0; i < 20; i++) {
+      expect(finalRoom?.members.get('u_host')?.online).toBe(true);
+      for (let i = 0; i < 19; i++) {
         expect(finalRoom?.members.get(`user_${i}`)?.online).toBe(true);
       }
       manager.stop();
@@ -620,7 +638,12 @@ describe('Phase 1 Review Fixes (Part A)', () => {
 
       // Advance to t = baseTime + 25s (> 20s host grace)
       vi.setSystemTime(baseTime + 25000);
+      const setRoomSpy = vi.spyOn(store, 'setRoom');
       await manager.ensureHost('HANDO', baseTime + 25000);
+
+      expect(setRoomSpy).toHaveBeenCalled();
+      const updatedRoomCall = setRoomSpy.mock.calls.find(call => call[0].hostUserId === 'u_guest');
+      expect(updatedRoomCall).toBeDefined();
 
       room = await store.getRoom('HANDO');
       expect(room?.hostUserId).toBe('u_guest'); // Host passed to online guest
@@ -859,6 +882,59 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       }
       manager.stop();
     });
+
+    it('B4 / R10: executeCommand kick resolves immediately while Redis set is pending, and swallows Redis rejection', async () => {
+      let redisResolve: () => void = () => {};
+      let redisReject: (err: any) => void = () => {};
+      let redisCallStarted = false;
+
+      const mockRedisClient = {
+        get: vi.fn(async () => null),
+        set: vi.fn((...args: any[]) => {
+          redisCallStarted = true;
+          return new Promise<any>((resolve, reject) => {
+            redisResolve = () => resolve('OK');
+            redisReject = reject;
+          });
+        }),
+        del: vi.fn(),
+        scan: vi.fn(async () => ['0', []]),
+      };
+
+      vi.spyOn(redisConfig, 'getRedisClient').mockReturnValue(mockRedisClient as any);
+
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+      await manager.joinRoom(room.code, 'u_kicked', 'KickedUser');
+
+      // Execute kick
+      const kickPromise = manager.executeCommand(
+        room.code,
+        { code: room.code, type: 'kick', userId: 'u_kicked' },
+        'u_host',
+      );
+
+      // Assert kickPromise resolves to success WITHOUT waiting for Redis to resolve
+      const kickRes = await kickPromise;
+      expect('room' in kickRes).toBe(true);
+      if ('room' in kickRes) {
+        expect(kickRes.room.members.has('u_kicked')).toBe(false);
+      }
+
+      // Redis call was started in background
+      expect(redisCallStarted).toBe(true);
+
+      // Now reject the pending Redis set promise: it must be swallowed without throwing
+      redisReject(new Error('Redis connection severed'));
+      await new Promise((r) => setTimeout(r, 20));
+
+      // In-memory ban is still active
+      const kicks = (manager as any).kickedUsers.get(room.code);
+      expect(kicks?.has('u_kicked')).toBe(true);
+
+      manager.stop();
+    });
   });
 
   describe('Item 11: KeyedMutex cleanup & Prune loop re-fetch', () => {
@@ -926,6 +1002,100 @@ describe('Phase 1 Review Fixes (Part A)', () => {
       // getRoom should have been called for room.code
       expect(getRoomSpy).toHaveBeenCalledWith(room.code);
 
+      manager.stop();
+    });
+  });
+
+  describe('Task R8: Online member count for 20 member room cap', () => {
+    it('1. 20 online members -> 21st new user is rejected with ROOM_FULL', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // Add 19 more online members (total 20 online including host)
+      for (let i = 1; i <= 19; i++) {
+        const joinRes = await manager.joinRoom(room.code, `u_guest_${i}`, `Guest ${i}`);
+        expect('room' in joinRes).toBe(true);
+      }
+
+      const freshRoom = await store.getRoom(room.code);
+      expect(freshRoom?.members.size).toBe(20);
+
+      // 21st new member attempts to join
+      const overflowRes = await manager.joinRoom(room.code, 'u_guest_21', 'Guest 21');
+      expect('error' in overflowRes).toBe(true);
+      if ('error' in overflowRes) {
+        expect(overflowRes.error.code).toBe('ROOM_FULL');
+        expect(overflowRes.error.message).toContain('20 people');
+      }
+      manager.stop();
+    });
+
+    it('2. 19 online members + 5 offline members -> new member CAN join (becomes 20th online)', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // Join 5 members and mark them offline
+      for (let i = 1; i <= 5; i++) {
+        await manager.joinRoom(room.code, `u_offline_${i}`, `Offline Guest ${i}`);
+        const r = await store.getRoom(room.code);
+        const m = r!.members.get(`u_offline_${i}`);
+        if (m) m.online = false;
+      }
+
+      // Now join 18 more online members (1 host + 18 = 19 online members)
+      for (let i = 1; i <= 18; i++) {
+        await manager.joinRoom(room.code, `u_online_${i}`, `Online Guest ${i}`);
+      }
+
+      const freshRoom = await store.getRoom(room.code);
+      let onlineCount = 0;
+      for (const m of freshRoom!.members.values()) {
+        if (m.online) onlineCount++;
+      }
+      expect(onlineCount).toBe(19);
+      expect(freshRoom!.members.size).toBe(24); // 1 host + 5 offline + 18 online
+
+      // A brand new member (u_new) attempts to join -> allowed because onlineCount is 19 (< 20)
+      const joinRes = await manager.joinRoom(room.code, 'u_new', 'New Guest');
+      expect('room' in joinRes).toBe(true);
+      if ('room' in joinRes) {
+        expect(joinRes.room.members.has('u_new')).toBe(true);
+        expect(joinRes.room.members.get('u_new')?.online).toBe(true);
+      }
+      manager.stop();
+    });
+
+    it('3. An existing offline member can always rejoin even if room is at 20 online members', async () => {
+      const store = new Jam2Store();
+      const manager = new Jam2Manager(store);
+      const room = await manager.createRoom('u_host', 'Host');
+
+      // u_rejoining joins initially then goes offline
+      await manager.joinRoom(room.code, 'u_rejoining', 'Rejoining Guest');
+      let currentRoom = await store.getRoom(room.code);
+      const rejoiningMember = currentRoom!.members.get('u_rejoining');
+      if (rejoiningMember) rejoiningMember.online = false;
+
+      // Fill up to 20 online members (1 host + 19 other online guests)
+      for (let i = 1; i <= 19; i++) {
+        await manager.joinRoom(room.code, `u_online_${i}`, `Online Guest ${i}`);
+      }
+
+      currentRoom = await store.getRoom(room.code);
+      let onlineCount = 0;
+      for (const m of currentRoom!.members.values()) {
+        if (m.online) onlineCount++;
+      }
+      expect(onlineCount).toBe(20);
+
+      // u_rejoining is an existing offline member. They rejoin!
+      const rejoinRes = await manager.joinRoom(room.code, 'u_rejoining', 'Rejoining Guest');
+      expect('room' in rejoinRes).toBe(true);
+      if ('room' in rejoinRes) {
+        expect(rejoinRes.room.members.get('u_rejoining')?.online).toBe(true);
+      }
       manager.stop();
     });
   });

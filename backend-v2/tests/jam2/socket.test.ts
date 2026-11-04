@@ -601,5 +601,147 @@ describe('Jam 2.0 WebSocket Integration', () => {
 
     resolverSpy.mockRestore();
   });
+
+  it('B7: emits jam2:closed {reason: "moved"} to old sockets when same user creates a new room', async () => {
+    // 1. Host creates room A
+    const createA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createA.ok).toBe(true);
+    const codeA = (createA as any).room.code;
+
+    // 2. Guest on Socket 1 joins room A
+    const joinA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: codeA }, res);
+    });
+    expect(joinA.ok).toBe(true);
+
+    // 3. Connect Guest Socket 2 (same user ID)
+    const guestSocket2 = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: guestToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((res) => guestSocket2.on('connect', () => res()));
+
+    try {
+      // 4. Set up listener on Guest Socket 1 for jam2:closed
+      const closedPromise = new Promise<{ reason: string }>((resolve) => {
+        guestSocket.once('jam2:closed', resolve);
+      });
+
+      // 5. Guest Socket 2 creates room B
+      const createB: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+        guestSocket2.emit('jam2:create', { protocol: 2 }, res);
+      });
+      expect(createB.ok).toBe(true);
+
+      // 6. Guest Socket 1 should receive moved event
+      const closedEvent = await closedPromise;
+      expect(closedEvent.reason).toBe('moved');
+    } finally {
+      guestSocket2.disconnect();
+    }
+  });
+
+  it('B7: emits jam2:closed {reason: "moved"} to old sockets when same user joins another room', async () => {
+    // 1. Host creates room A
+    const createA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createA.ok).toBe(true);
+    const codeA = (createA as any).room.code;
+
+    // 2. Create another user/room for room C
+    const host2Token = generateAccessToken({ userId: 'host-2-id-123456789012', username: 'host2' });
+    const host2Socket = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: host2Token },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((res) => host2Socket.on('connect', () => res()));
+
+    const createC: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      host2Socket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createC.ok).toBe(true);
+    const codeC = (createC as any).room.code;
+
+    // 3. Guest on Socket 1 joins room A
+    const joinA: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      guestSocket.emit('jam2:join', { protocol: 2, code: codeA }, res);
+    });
+    expect(joinA.ok).toBe(true);
+
+    // 4. Connect Guest Socket 2 (same user ID)
+    const guestSocket2 = ioClient(`http://localhost:${port}`, {
+      auth: { apiKey: env.APP_API_KEY, token: guestToken },
+      transports: ['websocket'],
+      reconnection: false,
+    });
+    await new Promise<void>((res) => guestSocket2.on('connect', () => res()));
+
+    try {
+      // 5. Set up listener on Guest Socket 1 for jam2:closed
+      const closedPromise = new Promise<{ reason: string }>((resolve) => {
+        guestSocket.once('jam2:closed', resolve);
+      });
+
+      // 6. Guest Socket 2 joins room C
+      const joinC: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+        guestSocket2.emit('jam2:join', { protocol: 2, code: codeC }, res);
+      });
+      expect(joinC.ok).toBe(true);
+
+      // 7. Guest Socket 1 should receive moved event
+      const closedEvent = await closedPromise;
+      expect(closedEvent.reason).toBe('moved');
+    } finally {
+      guestSocket2.disconnect();
+      host2Socket.disconnect();
+    }
+  });
+
+  it('B9: returns INTERNAL error code on unexpected catch in jam2:create', async () => {
+    const createSpy = vi.spyOn(jam2Manager, 'createRoom').mockRejectedValueOnce(new Error('Unexpected DB breakdown'));
+
+    const ack: Jam2Ack = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+
+    expect(ack.ok).toBe(false);
+    if (!ack.ok) {
+      expect(ack.code).toBe('INTERNAL');
+      expect(ack.message).toContain('Internal server error creating room');
+    }
+
+    createSpy.mockRestore();
+  });
+
+  it('B9: queueAddMany ack returns added: 0 when added songs are 0', async () => {
+    // 1. Host creates room
+    const createRes: Jam2Ack<{ room: RoomSnapshot }> = await new Promise((res) => {
+      hostSocket.emit('jam2:create', { protocol: 2 }, res);
+    });
+    expect(createRes.ok).toBe(true);
+    const code = (createRes as any).room.code;
+
+    // 2. Add song once
+    const song = makeTestSong('song_single_add');
+    const firstAdd: Jam2Ack<any> = await new Promise((res) => {
+      hostSocket.emit('jam2:cmd', { code, type: 'queueAdd', song }, res);
+    });
+    expect(firstAdd.ok).toBe(true);
+
+    // 3. Try queueAddMany with that same duplicate song
+    const duplicateBatchAck: Jam2Ack<any> = await new Promise((res) => {
+      hostSocket.emit('jam2:cmd', { code, type: 'queueAddMany', songs: [song] }, res);
+    });
+    expect(duplicateBatchAck.ok).toBe(true);
+    if (duplicateBatchAck.ok) {
+      expect(duplicateBatchAck.added).toBe(0);
+      expect(duplicateBatchAck.skippedDuplicate).toBe(1);
+    }
+  });
 });
 

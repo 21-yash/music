@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.Sync
+import com.synq.features.music.util.SeekHold
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,6 +59,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.synq.RootViewModel
 import com.synq.features.music.components.AnimatedEqualizerBars
@@ -89,6 +93,7 @@ fun JamScreen(
     val jamState by rootViewModel.jamState.collectAsState()
     val room by rootViewModel.jamRoom.collectAsState()
     val clientState by rootViewModel.jamClientState.collectAsState()
+    val hasPendingCommand by rootViewModel.jamHasPendingCommand.collectAsState()
     val localPlaybackState by rootViewModel.jamLocalPlaybackState.collectAsState()
     val playerPlaybackState by rootViewModel.playbackState.collectAsState()
     val clockSync = rootViewModel.jamClockSync
@@ -109,24 +114,6 @@ fun JamScreen(
 
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
-
-    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-        onResult = { _ -> }
-    )
-
-    LaunchedEffect(Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                context,
-                android.Manifest.permission.POST_NOTIFICATIONS
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (!hasPermission && !rootViewModel.jamPreferences.hasRequestedNotificationPermission()) {
-                rootViewModel.jamPreferences.setRequestedNotificationPermission(true)
-                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
 
     LaunchedEffect(uiState.isInJam, hasSeenBatteryTip) {
         if (uiState.isInJam && !hasSeenBatteryTip && !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)) {
@@ -223,6 +210,8 @@ fun JamScreen(
             containerColor = cardBg
         )
     }
+
+
 
     if (showIntroDialog) {
         JamIntroDialog(
@@ -434,10 +423,14 @@ fun JamScreen(
                 ) {
                     // Status Pill
                     var showReconnectingChip by remember { mutableStateOf(false) }
-                    LaunchedEffect(clientState) {
+                    LaunchedEffect(clientState, hasPendingCommand) {
                         if (clientState is JamClientState.Reconnecting) {
-                            kotlinx.coroutines.delay(4000L)
-                            showReconnectingChip = true
+                            if (hasPendingCommand) {
+                                showReconnectingChip = true
+                            } else if (!showReconnectingChip) {
+                                kotlinx.coroutines.delay(2000L)
+                                showReconnectingChip = true
+                            }
                         } else {
                             showReconnectingChip = false
                         }
@@ -618,25 +611,7 @@ fun JamScreen(
                         val hostName = uiState.hostName.ifBlank { "Host" }
                         val addedByMember = uiState.members.find { it.userId == nowPlayingItem.addedByUserId }
                         val addedByName = addedByMember?.username ?: if (nowPlayingItem.recommended) "Auto-recommended" else "Host"
-
-                        // Expected position computed live from clockSync
-                        var liveExpectedPos by remember { mutableLongStateOf(0L) }
                         val isPlaying = nowPlaying.status == JamPlaybackStatus.PLAYING
-
-                        LaunchedEffect(nowPlaying, localPlaybackState) {
-                            while (isActive) {
-                                liveExpectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
-                                delay(250)
-                            }
-                        }
-
-                        val jamProgress = computeJamProgress(
-                            metadataDurationSec = nowPlayingItem.song.durationSeconds,
-                            playerDurationMs = playerPlaybackState.durationMs,
-                            positionMs = liveExpectedPos
-                        )
-                        val durationMs = jamProgress.durationMs
-                        val progress = jamProgress.fraction
 
                         Card(
                             shape = RoundedCornerShape(24.dp),
@@ -692,43 +667,18 @@ fun JamScreen(
 
                                 Spacer(modifier = Modifier.height(16.dp))
 
-                                // Progress Slider
-                                Slider(
-                                    value = progress,
-                                    onValueChange = { targetRatio ->
-                                        if (!uiState.canControlPlayback) {
-                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                        } else if (jamProgress.canSeek) {
-                                            val targetMs = (targetRatio * durationMs).toLong()
-                                            rootViewModel.jamSeekTo(targetMs)
-                                        }
-                                    },
-                                    enabled = uiState.canControlPlayback && jamProgress.canSeek,
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = Accent,
-                                        activeTrackColor = Accent,
-                                        inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
-                                        disabledThumbColor = Accent.copy(alpha = 0.4f),
-                                        disabledActiveTrackColor = Accent.copy(alpha = 0.4f)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
+                                // Progress Slider (isolated to avoid recomposing parent JamScreen)
+                                JamTrackProgressBar(
+                                    nowPlaying = nowPlaying,
+                                    nowPlayingItem = nowPlayingItem,
+                                    localPlaybackState = localPlaybackState,
+                                    playerDurationMs = playerPlaybackState.durationMs,
+                                    clockSync = clockSync,
+                                    canControlPlayback = uiState.canControlPlayback,
+                                    hostName = hostName,
+                                    isDark = isDark,
+                                    onSeekTo = { targetMs -> rootViewModel.jamSeekTo(targetMs) }
                                 )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = formatTime(liveExpectedPos),
-                                        fontSize = 11.sp,
-                                        color = textSecondary
-                                    )
-                                    Text(
-                                        text = if (durationMs > 0L) formatTime(durationMs) else "--:--",
-                                        fontSize = 11.sp,
-                                        color = textSecondary
-                                    )
-                                }
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -1769,6 +1719,127 @@ fun PeopleSheet(
 
             Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+}
+
+@Composable
+private fun JamTrackProgressBar(
+    nowPlaying: JamNowPlaying,
+    nowPlayingItem: JamQueueItem,
+    localPlaybackState: LocalPlaybackState,
+    playerDurationMs: Long,
+    clockSync: ClockSync,
+    canControlPlayback: Boolean,
+    hostName: String,
+    isDark: Boolean,
+    onSeekTo: (Long) -> Unit
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var liveExpectedPos by remember { mutableLongStateOf(0L) }
+    val isPlaying = nowPlaying.status == JamPlaybackStatus.PLAYING
+    val context = LocalContext.current
+
+    LaunchedEffect(nowPlaying, localPlaybackState, isPlaying) {
+        liveExpectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+        if (!isPlaying) return@LaunchedEffect
+
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                liveExpectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
+                delay(200)
+            }
+        }
+    }
+
+    val jamProgress = computeJamProgress(
+        metadataDurationSec = nowPlayingItem.song.durationSeconds,
+        playerDurationMs = playerDurationMs,
+        positionMs = liveExpectedPos
+    )
+    val durationMs = jamProgress.durationMs
+    val progress = jamProgress.fraction
+    val trackKey = "${nowPlayingItem.song.id}_${nowPlaying?.trackSeq ?: 0L}"
+
+    var dragProgressRatio by remember { mutableStateOf<Float?>(null) }
+    var seekHold by remember { mutableStateOf<SeekHold?>(null) }
+
+    LaunchedEffect(trackKey) {
+        dragProgressRatio = null
+        seekHold = null
+    }
+
+    LaunchedEffect(seekHold) {
+        val hold = seekHold ?: return@LaunchedEffect
+        val remaining = hold.timeoutMs - (android.os.SystemClock.elapsedRealtime() - hold.releasedAtMs)
+        if (remaining > 0) {
+            delay(remaining)
+        }
+        seekHold = null
+    }
+
+    LaunchedEffect(seekHold, liveExpectedPos) {
+        val hold = seekHold ?: return@LaunchedEffect
+        val nowRealtime = android.os.SystemClock.elapsedRealtime()
+        if (hold.shouldRelease(liveExpectedPos, nowRealtime, trackKey)) {
+            seekHold = null
+        }
+    }
+
+    val heldRatio = seekHold?.let {
+        if (durationMs > 0L) (it.targetMs.toFloat() / durationMs).coerceIn(0f, 1f) else null
+    }
+
+    Slider(
+        value = (dragProgressRatio ?: heldRatio ?: progress).coerceIn(0f, 1f),
+        onValueChange = { targetRatio ->
+            if (canControlPlayback && jamProgress.canSeek) {
+                dragProgressRatio = targetRatio
+                seekHold = null
+            }
+        },
+        onValueChangeFinished = {
+            val target = dragProgressRatio
+            dragProgressRatio = null
+            if (!canControlPlayback) {
+                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+            } else if (jamProgress.canSeek && target != null) {
+                val targetMs = (target * durationMs).toLong()
+                seekHold = SeekHold(
+                    targetMs = targetMs,
+                    releasedAtMs = android.os.SystemClock.elapsedRealtime(),
+                    trackKey = trackKey
+                )
+                onSeekTo(targetMs)
+            }
+        },
+        enabled = canControlPlayback && jamProgress.canSeek,
+        colors = SliderDefaults.colors(
+            thumbColor = Accent,
+            activeTrackColor = Accent,
+            inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
+            disabledThumbColor = Accent.copy(alpha = 0.4f),
+            disabledActiveTrackColor = Accent.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    val displayPos = dragProgressRatio?.let { (it * durationMs).toLong() }
+        ?: seekHold?.targetMs
+        ?: liveExpectedPos
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = formatTime(displayPos),
+            fontSize = 11.sp,
+            color = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+        )
+        Text(
+            text = if (durationMs > 0L) formatTime(durationMs) else "--:--",
+            fontSize = 11.sp,
+            color = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+        )
     }
 }
 

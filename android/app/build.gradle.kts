@@ -75,6 +75,12 @@ android {
         jvmTarget = "17"
     }
 
+    testOptions {
+        unitTests.all {
+            it.maxHeapSize = "1024m"
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
