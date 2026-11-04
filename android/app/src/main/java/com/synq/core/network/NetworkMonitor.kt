@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import com.synq.features.music.jam.JamSessionManager
+import com.synq.features.music.jam.safeLogI
 import com.synq.workers.SyncManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -49,12 +50,48 @@ class NetworkMonitor(
 
     @Volatile
     private var isJamActive: Boolean = false
+    private val networkTransports = mutableMapOf<Network, String>()
 
     fun setJamActive(active: Boolean) {
         isJamActive = active
     }
 
     fun isJamActive(): Boolean = isJamActive
+
+    fun describeActiveNetwork(): String {
+        val cm = connectivityManager ?: return "NONE"
+        val active = cm.activeNetwork ?: return "NONE"
+        val caps = cm.getNetworkCapabilities(active) ?: return "NONE"
+        return getTransportName(caps)
+    }
+
+    internal fun getTransportName(caps: NetworkCapabilities?): String {
+        if (caps == null) return "UNKNOWN"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WIFI"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "CELLULAR"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ETHERNET"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "BLUETOOTH"
+            else -> "OTHER"
+        }
+    }
+
+    private fun getShortId(network: Network): String {
+        val str = network.toString()
+        return if (str.length > 12) str.takeLast(8) else str
+    }
+
+    private fun decideValidatedAction(network: Network): String {
+        if (isInitialCallback) return "ignored"
+        val wasOffline = !_isOnline.value
+        val networkChanged = network != lastNotifiedValidatedNetwork
+        return if (networkChanged || wasOffline) {
+            if (isJamActive) "handover started" else "new active network"
+        } else {
+            "ignored"
+        }
+    }
 
     private fun hasValidInternetConnection(): Boolean {
         val activeNetwork = connectivityManager?.activeNetwork ?: return false
@@ -114,9 +151,16 @@ class NetworkMonitor(
                 val isValidated = caps != null &&
                         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val transport = getTransportName(caps)
+                networkTransports[event.network] = transport
+                val shortId = getShortId(event.network)
+
                 if (isValidated) {
+                    val decision = decideValidatedAction(event.network)
+                    safeLogI("NetworkMonitor", "Available: id=$shortId, validated=true, transport=$transport -> $decision")
                     handleValidatedNetwork(event.network)
                 } else {
+                    safeLogI("NetworkMonitor", "Available: id=$shortId, validated=false, transport=$transport -> queued")
                     currentNetwork = event.network
                 }
             }
@@ -124,9 +168,16 @@ class NetworkMonitor(
                 val hasInternet = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 val isValidated = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 val isOnlineNow = hasInternet && isValidated
+                val transport = getTransportName(event.capabilities)
+                networkTransports[event.network] = transport
+                val shortId = getShortId(event.network)
+
                 if (isOnlineNow) {
+                    val decision = decideValidatedAction(event.network)
+                    safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=true, transport=$transport -> $decision")
                     handleValidatedNetwork(event.network)
                 } else {
+                    safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=false, transport=$transport -> ignored")
                     if (currentNetwork == event.network || lastNotifiedValidatedNetwork == event.network) {
                         _isOnline.value = false
                         lastNotifiedValidatedNetwork = null
@@ -134,6 +185,9 @@ class NetworkMonitor(
                 }
             }
             is NetworkEvent.Lost -> {
+                val shortId = getShortId(event.network)
+                val transport = networkTransports.remove(event.network) ?: "UNKNOWN"
+                safeLogI("NetworkMonitor", "Lost: id=$shortId, validated=false, transport=$transport -> ignored")
                 handleNetworkLost(event.network)
             }
         }

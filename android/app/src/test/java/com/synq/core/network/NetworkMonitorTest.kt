@@ -44,7 +44,7 @@ class NetworkMonitorTest {
     }
 
     private fun createCapabilities(internet: Boolean, validated: Boolean): NetworkCapabilities {
-        val caps = mockk<NetworkCapabilities>()
+        val caps = mockk<NetworkCapabilities>(relaxed = true)
         every { caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) } returns internet
         every { caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } returns validated
         return caps

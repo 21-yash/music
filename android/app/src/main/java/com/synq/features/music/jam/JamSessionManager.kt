@@ -97,7 +97,8 @@ class JamSessionManager(
         scope = scope,
         ioDispatcher = ioDispatcher,
         monotonicNowMs = currentTimeProvider,
-        wallClockNowMs = currentTimeProvider
+        wallClockNowMs = currentTimeProvider,
+        activeTransportProvider = { networkMonitorProvider?.get()?.describeActiveNetwork() ?: "UNKNOWN" }
     )
 
     private val _jamState = MutableStateFlow(JamState())

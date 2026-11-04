@@ -38,7 +38,8 @@ class JamClient(
     private val tokenResultProvider: (suspend () -> TokenRefreshResult)? = null,
     private val autoClockSync: Boolean = true,
     private val monotonicNowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
-    private val wallClockNowMs: () -> Long = { System.currentTimeMillis() }
+    private val wallClockNowMs: () -> Long = { System.currentTimeMillis() },
+    private val activeTransportProvider: (() -> String)? = null
 ) {
     private suspend fun fetchFreshTokenResult(): TokenRefreshResult {
         if (tokenResultProvider != null) {
@@ -131,7 +132,8 @@ class JamClient(
             }
 
             is JamTransport.Event.Disconnected -> {
-                safeLogI("JamClient", "Transport Disconnected: reason=${event.reason}")
+                val transportType = activeTransportProvider?.invoke() ?: "UNKNOWN"
+                safeLogI("JamClient", "Transport Disconnected: reason=${event.reason}, transport=$transportType")
                 if (_clientState.value !is JamClientState.Closed && _clientState.value !is JamClientState.Disconnected) {
                     handleConnectionLoss("transport disconnected (${event.reason})")
                 }
@@ -457,7 +459,8 @@ class JamClient(
     }
 
     private fun startReconnectLoop(code: String, resetBackoff: Boolean, trigger: String = "unknown") {
-        safeLogI("JamClient", "Starting reconnect loop for room $code. Trigger: $trigger")
+        val transportType = activeTransportProvider?.invoke() ?: "UNKNOWN"
+        safeLogI("JamClient", "Starting reconnect loop for room $code. Trigger: $trigger, transport=$transportType")
         if (resetBackoff) {
             reconnectAttempt = 1
             reconnectStartedAt = monotonicNowMs()
