@@ -1777,9 +1777,12 @@ private fun JamTrackProgressBar(
         seekHold = null
     }
 
-    val nowRealtime = android.os.SystemClock.elapsedRealtime()
-    if (seekHold != null && seekHold!!.shouldRelease(liveExpectedPos, nowRealtime, trackKey)) {
-        seekHold = null
+    LaunchedEffect(seekHold, liveExpectedPos) {
+        val hold = seekHold ?: return@LaunchedEffect
+        val nowRealtime = android.os.SystemClock.elapsedRealtime()
+        if (hold.shouldRelease(liveExpectedPos, nowRealtime, trackKey)) {
+            seekHold = null
+        }
     }
 
     val heldRatio = seekHold?.let {

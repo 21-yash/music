@@ -456,9 +456,12 @@ fun FullPlayerSheet(
                         seekHold = null
                     }
 
-                    val nowRealtime = android.os.SystemClock.elapsedRealtime()
-                    if (seekHold != null && seekHold!!.shouldRelease(playbackState.playbackPositionMs, nowRealtime, trackKey)) {
-                        seekHold = null
+                    LaunchedEffect(seekHold, playbackState.playbackPositionMs) {
+                        val hold = seekHold ?: return@LaunchedEffect
+                        val nowRealtime = android.os.SystemClock.elapsedRealtime()
+                        if (hold.shouldRelease(playbackState.playbackPositionMs, nowRealtime, trackKey)) {
+                            seekHold = null
+                        }
                     }
 
                     val heldRatio = seekHold?.let {
