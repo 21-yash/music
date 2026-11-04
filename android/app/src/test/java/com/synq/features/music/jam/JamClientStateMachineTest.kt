@@ -996,4 +996,223 @@ class JamClientStateMachineTest {
         assertEquals(1, seeks.size)
         assertEquals(100L, (seeks[0].second as JSONObject).getLong("positionMs"))
     }
+
+    @Test
+    fun `command while reconnecting shows toast once not once per tap`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val toasts = mutableListOf<String>()
+        var virtualNow = 10000L
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            currentTimeProvider = { virtualNow },
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // First tap: should trigger reconnect toast
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // Rapid subsequent taps for same command within 3s
+        virtualNow += 500L
+        sessionManager.nextTrack()
+        runCurrent()
+
+        virtualNow += 500L
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertEquals(1, toasts.size)
+        assertEquals("Reconnecting… your action will go through once connected", toasts[0])
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `three taps of next during reconnect result in one next command sent after active`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // Tap next 3 times during reconnect
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        sessionManager.nextTrack()
+        runCurrent()
+
+        // No command should have reached transport yet
+        val nextCmdsBeforeActive = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(0, nextCmdsBeforeActive.size)
+
+        // Jam reconnects and becomes Active
+        client.setActiveForTesting("ROOM_D1", JamRole.HOST)
+        runCurrent()
+
+        // Exactly one "next" command sent after Active
+        val nextCmdsAfterActive = transport.emittedEvents.filter {
+            it.first == "jam2:cmd" && (it.second as? JSONObject)?.optString("type") == "next"
+        }
+        assertEquals(1, nextCmdsAfterActive.size)
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `second different command during reconnect is not dropped`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        transport.emittedEvents.clear()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        // Send two different commands
+        sessionManager.nextTrack()
+        sessionManager.previousTrack()
+        runCurrent()
+
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertEquals(setOf("next", "prev"), sessionManager.pendingCommandKeys)
+        }
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        // Jam becomes Active
+        client.setActiveForTesting("ROOM_D1", JamRole.HOST)
+        runCurrent()
+
+        val cmds = transport.emittedEvents.filter { it.first == "jam2:cmd" }
+            .map { (it.second as JSONObject).getString("type") }
+        assertTrue(cmds.contains("next"))
+        assertTrue(cmds.contains("prev"))
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `key is released and toast shown after reconnect timeout failure`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+        val toasts = mutableListOf<String>()
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler),
+            toastEmitter = { toasts.add(it) }
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertTrue(sessionManager.hasPendingCommand.value)
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.contains("next"))
+        }
+
+        // Advance past 4000ms timeout of sendCommandRaw
+        advanceTimeBy(4500L)
+        runCurrent()
+
+        // Key should be released
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.isEmpty())
+        }
+        assertFalse(sessionManager.hasPendingCommand.value)
+
+        assertTrue(toasts.any { it.contains("Couldn't reach the Jam. Check your connection and try again.") })
+
+        sessionManager.teardownJam()
+    }
+
+    @Test
+    fun `teardown clears pending command keys and resets hasPendingCommand`() = runTest {
+        val client = createClient()
+        tokenToProvide = "valid_token"
+
+        val fakePlayer = FakeJamPlayerBridge()
+        val fakePrefs = FakeJamPreferencesBridge()
+
+        val sessionManager = JamSessionManager(
+            playerManager = fakePlayer,
+            jamPreferences = fakePrefs,
+            coroutineScope = backgroundScope,
+            jamClientOverride = client,
+            stateStoreOverride = stateStore,
+            clockSyncOverride = clockSync,
+            ioDispatcher = StandardTestDispatcher(scheduler = testScheduler)
+        )
+
+        client.setReconnectingForTesting("ROOM_D1")
+        runCurrent()
+
+        sessionManager.nextTrack()
+        runCurrent()
+
+        assertTrue(sessionManager.hasPendingCommand.value)
+
+        sessionManager.teardownJam()
+        runCurrent()
+
+        synchronized(sessionManager.pendingCommandKeys) {
+            assertTrue(sessionManager.pendingCommandKeys.isEmpty())
+        }
+        assertFalse(sessionManager.hasPendingCommand.value)
+    }
 }

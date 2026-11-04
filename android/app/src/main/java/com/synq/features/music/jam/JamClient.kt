@@ -406,6 +406,11 @@ class JamClient(
         _clientState.value = JamClientState.Active(code, role)
     }
 
+    internal fun setReconnectingForTesting(code: String, attempt: Int = 1) {
+        activeRoomCode = code
+        _clientState.value = JamClientState.Reconnecting(code, attempt)
+    }
+
     private fun isPingAlive(res: Result<JSONObject>): Boolean {
         if (res.isSuccess) return true
         val err = res.exceptionOrNull()

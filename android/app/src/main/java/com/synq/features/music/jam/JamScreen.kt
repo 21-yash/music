@@ -93,6 +93,7 @@ fun JamScreen(
     val jamState by rootViewModel.jamState.collectAsState()
     val room by rootViewModel.jamRoom.collectAsState()
     val clientState by rootViewModel.jamClientState.collectAsState()
+    val hasPendingCommand by rootViewModel.jamHasPendingCommand.collectAsState()
     val localPlaybackState by rootViewModel.jamLocalPlaybackState.collectAsState()
     val playerPlaybackState by rootViewModel.playbackState.collectAsState()
     val clockSync = rootViewModel.jamClockSync
@@ -422,10 +423,14 @@ fun JamScreen(
                 ) {
                     // Status Pill
                     var showReconnectingChip by remember { mutableStateOf(false) }
-                    LaunchedEffect(clientState) {
+                    LaunchedEffect(clientState, hasPendingCommand) {
                         if (clientState is JamClientState.Reconnecting) {
-                            kotlinx.coroutines.delay(2000L)
-                            showReconnectingChip = true
+                            if (hasPendingCommand) {
+                                showReconnectingChip = true
+                            } else if (!showReconnectingChip) {
+                                kotlinx.coroutines.delay(2000L)
+                                showReconnectingChip = true
+                            }
                         } else {
                             showReconnectingChip = false
                         }
