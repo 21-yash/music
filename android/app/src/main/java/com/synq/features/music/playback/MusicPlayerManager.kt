@@ -9,15 +9,24 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.synq.core.domain.AppError
 import com.synq.core.domain.AppResult
 import com.synq.data.repository.RecentlyPlayedRepository
 import com.synq.features.music.data.repository.MusicRepository
+import com.synq.features.music.domain.model.AlbumRef
 import com.synq.features.music.domain.model.Artist
+import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.features.music.domain.model.Lyrics
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.StreamInfo
 import com.synq.features.music.util.SongDeduplicator
+import com.synq.features.music.jam.JamPlayerBridge
+import com.synq.features.music.sleeptimer.SleepTimerPlayerBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicBoolean
+import com.synq.features.music.jam.safeLogI
+import com.synq.features.music.jam.safeLogW
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +50,22 @@ interface JamPlaybackInterceptor {
     fun onAddToQueue(song: Song): Boolean
     fun onPlayQueue(songs: List<Song>, startIndex: Int): Boolean
     fun onStartArtistRadio(artist: Artist): Boolean
+
+    fun onTogglePlayPause(): Boolean = false
+    fun onPlay(): Boolean = false
+    fun onPause(): Boolean = false
+    fun onSeekTo(positionMs: Long): Boolean = false
+    fun onSkipToNext(): Boolean = false
+    fun onSkipToPrevious(): Boolean = false
+    fun onPlayQueueIndex(index: Int): Boolean = false
+    fun onRemoveFromQueue(index: Int): Boolean = false
+    fun onReorderQueue(fromIndex: Int, toIndex: Int): Boolean = false
+    fun onToggleShuffle(): Boolean = false
+    fun onToggleRepeat(): Boolean = false
+    fun onTrackEnded(): Boolean = false
+    fun onPlaybackStateChanged(state: Int) {}
+    fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {}
+    fun onPlayerError(error: androidx.media3.common.PlaybackException): Boolean = false
 }
 
 @Singleton
@@ -51,14 +76,14 @@ class MusicPlayerManager @Inject constructor(
     private val audioCacheProvider: AudioCacheProvider,
     private val streamCacheStorage: StreamCacheStorage,
     private val networkMonitor: com.synq.core.network.NetworkMonitor,
-) {
-    var jamInterceptor: JamPlaybackInterceptor? = null
+) : JamPlayerBridge, SleepTimerPlayerBridge {
+    override var jamInterceptor: JamPlaybackInterceptor? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    override val playbackState: StateFlow<PlaybackState> get() = _playbackState.asStateFlow()
     private val _playbackState = MutableStateFlow(PlaybackState())
-    val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     private val _queue = MutableStateFlow<List<Song>>(emptyList())
     val queue: StateFlow<List<Song>> = _queue.asStateFlow()
@@ -81,24 +106,29 @@ class MusicPlayerManager @Inject constructor(
     val isLyricsLoading: StateFlow<Boolean> = _isLyricsLoading.asStateFlow()
 
     // Sleep timer stop hook
-    var onTrackEndedListener: (() -> Unit)? = null
+    override var onTrackEndedListener: (() -> Unit)? = null
 
     // Session-based deduplication tracker
     private val sessionPlayedIds = mutableSetOf<String>()
 
-    // Tracks IDs of songs automatically appended as recommendations
+    // Tracks IDs of songs automatically appended as recommendations in personal queue
     private val _recommendedSongIds = MutableStateFlow<Set<String>>(emptySet())
     val recommendedSongIds: StateFlow<Set<String>> = _recommendedSongIds.asStateFlow()
 
+    // Mirror queue QIDs and Jam recommendations by QID for Jam sessions
+    private val _jamQueueQids = MutableStateFlow<List<String>>(emptyList())
+    val jamQueueQids: StateFlow<List<String>> = _jamQueueQids.asStateFlow()
+
+    private val _jamRecommendedQids = MutableStateFlow<Set<String>>(emptySet())
+    val jamRecommendedQids: StateFlow<Set<String>> = _jamRecommendedQids.asStateFlow()
+
+    fun isItemRecommended(qid: String): Boolean = qid in _jamRecommendedQids.value
+
     // Personal queue isolation for Jam sessions
-    private var stashedPersonalQueue: List<Song>? = null
-    private var stashedPersonalIndex: Int? = null
-    private var stashedSourcePlaylist: List<Song>? = null
-    private var stashedNextSourceIndex: Int = 0
+    private val personalQueueStash = PersonalQueueStash()
 
     // Artist Radio state tracking (ensures only this artist's songs play during radio)
     private var activeRadioArtist: String? = null
-    private var stashedActiveRadioArtist: String? = null
 
     // Lazy paging state for large playlists
     private var sourcePlaylist: List<Song>? = null
@@ -110,13 +140,48 @@ class MusicPlayerManager @Inject constructor(
     companion object {
         private const val MAX_INITIAL_QUEUE_SIZE = 100
         private const val QUEUE_PAGE_CHUNK = 50
+        private val isNewPipeWarmedUp = AtomicBoolean(false)
+
+        fun shouldWarmUp(isOnline: Boolean, alreadyWarmed: Boolean): Boolean {
+            return isOnline && !alreadyWarmed
+        }
     }
 
     private var positionTrackerJob: Job? = null
     private var isFetchingRecommendations = false
+    private var lastPlayMediaUriTimestamp: Long? = null
+
+    private val singleFlightExtractor = SingleFlightExtractor(scope = scope) { videoId, reason ->
+        rawExtractYouTubeStream(videoId, reason)
+    }
+
+    private var lastPrefetchedNextId: String? = null
+
+    private val reResolveGuard = ReResolveGuard()
+    private var playingFromFullCache: Boolean = false
+    private val autoSkipPolicy = AutoSkipPolicy()
 
     init {
         initializeController()
+        warmUpNewPipeAsync()
+    }
+
+    private fun warmUpNewPipeAsync() {
+        if (!shouldWarmUp(isOnline = networkMonitor.isOnline.value, alreadyWarmed = isNewPipeWarmedUp.get())) {
+            return
+        }
+        if (isNewPipeWarmedUp.compareAndSet(false, true)) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val warmStartTime = SystemClock.elapsedRealtime()
+                    extractYouTubeStream("dQw4w9WgXcQ", reason = "warmup")
+                    val duration = SystemClock.elapsedRealtime() - warmStartTime
+                    safeLogI("PlayTiming", "NewPipe warm-up completed in $duration ms")
+                } catch (e: Exception) {
+                    safeLogW("PlayTiming", "NewPipe warm-up failed: ${e.message}")
+                }
+            }
+        }
     }
 
     private fun initializeController() {
@@ -128,10 +193,74 @@ class MusicPlayerManager @Inject constructor(
         controllerFuture?.addListener(
             {
                 controller = controllerFuture?.get()
-                controller?.addListener(playerListener)
+                controller?.let { ctrl ->
+                    ctrl.addListener(playerListener)
+                    syncStateFromController(ctrl)
+                }
             },
             MoreExecutors.directExecutor()
         )
+    }
+
+    private fun syncStateFromController(ctrl: MediaController) {
+        val currentItem = ctrl.currentMediaItem
+        val isPlaying = ctrl.isPlaying
+        val position = ctrl.currentPosition
+        val duration = ctrl.duration.takeIf { it > 0 } ?: 0L
+
+        if (currentItem != null) {
+            val songId = currentItem.mediaId
+            val title = currentItem.mediaMetadata.title?.toString() ?: ""
+            val artistName = currentItem.mediaMetadata.artist?.toString() ?: ""
+            val artworkUri = currentItem.mediaMetadata.artworkUri?.toString()
+
+            val existingSong = _playbackState.value.currentSong
+            val songToSet = if (existingSong != null && existingSong.id == songId) {
+                existingSong
+            } else {
+                Song(
+                    id = songId,
+                    title = title,
+                    artists = listOf(ArtistCredit(id = "", name = artistName)),
+                    album = AlbumRef(id = "", title = currentItem.mediaMetadata.albumTitle?.toString() ?: ""),
+                    durationSeconds = (duration / 1000).toInt(),
+                    imageUrl = artworkUri,
+                    year = "",
+                    language = "",
+                    hasLyrics = false,
+                    playCount = 0,
+                    label = "",
+                    streamRef = "",
+                    providerId = ""
+                )
+            }
+
+            if (_queue.value.isEmpty()) {
+                _queue.value = listOf(songToSet)
+                _currentIndex.value = 0
+            }
+
+            _playbackState.update {
+                it.copy(
+                    currentSong = songToSet,
+                    isPlaying = isPlaying,
+                    playbackPositionMs = position,
+                    durationMs = duration
+                )
+            }
+        } else {
+            _playbackState.update {
+                it.copy(
+                    isPlaying = isPlaying,
+                    playbackPositionMs = position,
+                    durationMs = duration
+                )
+            }
+        }
+
+        if (isPlaying) {
+            startPositionTracking()
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -144,6 +273,7 @@ class MusicPlayerManager @Inject constructor(
         sourcePlaylist = null
         nextSourceIndex = 0
         unshuffledQueue = null
+        lastPrefetchedNextId = null
         _recommendedSongIds.value = emptySet()
         sessionPlayedIds.add(song.id)
         _queue.value = listOf(song)
@@ -158,6 +288,7 @@ class MusicPlayerManager @Inject constructor(
         if (songs.isEmpty()) return
         if (jamInterceptor?.onPlayQueue(songs, startIndex) == true) return
         activeRadioArtist = null
+        lastPrefetchedNextId = null
         _recommendedSongIds.value = emptySet()
         val validIndex = startIndex.coerceIn(0, songs.size - 1)
         unshuffledQueue = songs
@@ -221,6 +352,7 @@ class MusicPlayerManager @Inject constructor(
         if (initialTracks.isNotEmpty()) {
             val seed = initialTracks.first()
             sessionPlayedIds.add(seed.id)
+            lastPrefetchedNextId = null
             _queue.value = initialTracks
             _currentIndex.value = 0
             loadAndPlay(seed)
@@ -263,9 +395,14 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L) {
-        // If this song was part of recommended songs, push it above the separator
-        if (song.id in _recommendedSongIds.value) {
+    private fun loadAndPlay(song: Song, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
+        if (_playbackState.value.currentSong?.id != song.id) {
+            lastPrefetchedNextId = null
+        }
+        reResolveGuard.onSongStarted(song.id)
+
+        // If this song was part of recommended songs, push it above the separator (personal queue only)
+        if (jamInterceptor == null && song.id in _recommendedSongIds.value) {
             _recommendedSongIds.update { recs ->
                 val currentIdx = _currentIndex.value
                 val q = _queue.value
@@ -284,7 +421,7 @@ class MusicPlayerManager @Inject constructor(
             it.copy(
                 currentSong = song, 
                 error = null, 
-                isPlaying = true,
+                isPlaying = playWhenReady,
                 playbackPositionMs = initialPositionMs,
                 bufferedPositionMs = 0L
             ) 
@@ -299,15 +436,23 @@ class MusicPlayerManager @Inject constructor(
                 recentlyPlayedRepository.recordPlay(song)
             } catch (_: Exception) {}
 
-            // 1. Check if song is already cached in local SimpleCache
-            val isCached = audioCacheProvider.isSongCached(song.id)
+            // 1. Check if song is already cached in local SimpleCache (Task F16 & G4: verify FULL cache)
+            val isCached = audioCacheProvider.isFullyCached(song.id)
             val cachedStreamUri = streamCacheStorage.getStreamUri(song.id)
+            val sourceChoice = PlaybackSourcePolicy.chooseSource(isCached, cachedStreamUri)
 
-            if (isCached) {
-                val streamUri = cachedStreamUri ?: "https://audio.cache/${song.id}.mp4"
-                playMediaUri(song, streamUri, initialPositionMs)
+            if (sourceChoice != PlaybackSourcePolicy.SourceType.NETWORK) {
+                playingFromFullCache = true
+                val streamUri = if (sourceChoice == PlaybackSourcePolicy.SourceType.CACHE_WITH_SAVED_URI) {
+                    cachedStreamUri!!
+                } else {
+                    "https://audio.cache/${song.id}.mp4"
+                }
+                playMediaUri(song, streamUri, initialPositionMs, playWhenReady)
                 return@launch
             }
+
+            playingFromFullCache = false
 
             // 2. If not cached, check if offline
             if (!networkMonitor.isOnline.value) {
@@ -315,45 +460,120 @@ class MusicPlayerManager @Inject constructor(
                 return@launch
             }
 
+            safeLogI("PlayTiming", "resolveStream started: songId=${song.id}, provider=${song.providerId}")
+            val resolveStartTime = SystemClock.elapsedRealtime()
+
             try {
-                // 3. Resolve stream via backend
-                val streamResult = repository.resolveStream(song.id, song.providerId)
-                if (streamResult !is AppResult.Success) {
-                    if (!networkMonitor.isOnline.value) {
-                        notifyOfflineUnavailable()
-                    } else {
-                        controller?.stop()
-                        controller?.clearMediaItems()
-                        stopPositionTracking()
-                        _playbackState.update { it.copy(error = "Failed to fetch stream info", isPlaying = false) }
+                // Check if direct on-device YouTube extraction applies
+                var finalUri: String? = null
+                var lastError: AppError? = null
+                var isDirect = false
+
+                val plan = StreamResolutionPlan.choose(song.providerId, song.id)
+
+                // Task M1: Before extracting, use saved stream URI if younger than 2h even when not fully cached
+                val savedStreamUri = streamCacheStorage.getStreamUri(song.id, PlaybackSourcePolicy.PLAY_REUSE_MAX_AGE_MS)
+                val uriAgeMs = streamCacheStorage.getStreamUriAgeMs(song.id)
+                val reuseDecision = PlaybackSourcePolicy.decideSavedUriReuse(
+                    isFullyCached = isCached,
+                    savedUri = savedStreamUri,
+                    uriAgeMs = uriAgeMs,
+                    maxAgeMs = PlaybackSourcePolicy.PLAY_REUSE_MAX_AGE_MS
+                )
+
+                if (reuseDecision == PlaybackSourcePolicy.SavedUriDecision.REUSE && !savedStreamUri.isNullOrBlank()) {
+                    finalUri = savedStreamUri
+                    isDirect = (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE)
+                    safeLogI("PlayTiming", "Reusing saved stream URI (age=${uriAgeMs}ms, direct=$isDirect) for songId=${song.id}")
+                } else if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
+                    val directUri = extractYouTubeStream(song.id, reason = "play")
+                    if (!directUri.isNullOrBlank()) {
+                        finalUri = directUri
+                        isDirect = true
                     }
-                    return@launch
                 }
 
-                // 4. Extract media URI
-                val finalUri = when (val info = streamResult.data) {
-                    is StreamInfo.JioSaavn -> info.url
-                    is StreamInfo.YouTube -> extractYouTubeStream(info.videoId)
-                    is StreamInfo.None -> null
+                if (finalUri.isNullOrBlank()) {
+                    // 3. Resolve stream via backend with retry policy
+                    var attempt = 1
+
+                    while (attempt <= 3) {
+                        if (!networkMonitor.isOnline.value) {
+                            notifyOfflineUnavailable()
+                            return@launch
+                        }
+
+                        val streamResult = repository.resolveStream(song.id, song.providerId)
+                        if (streamResult is AppResult.Success) {
+                            when (val info = streamResult.data) {
+                                is StreamInfo.JioSaavn -> {
+                                    finalUri = info.url
+                                    break
+                                }
+                                is StreamInfo.YouTube -> {
+                                    val ytUri = extractYouTubeStream(info.videoId, reason = "play")
+                                    if (ytUri.isNullOrBlank()) {
+                                        val err = AppError.Server(StreamRetryPolicy.CODE_YOUTUBE_EXTRACTION_FAILED, "YouTube extraction failed")
+                                        lastError = err
+                                        val decision = StreamRetryPolicy.decide(err, attempt)
+                                        if (decision is StreamRetryDecision.Retry) {
+                                            attempt++
+                                            delay(decision.delayMs)
+                                            continue
+                                        } else {
+                                            break
+                                        }
+                                    } else {
+                                        finalUri = ytUri
+                                        break
+                                    }
+                                }
+                                is StreamInfo.None -> {
+                                    val err = AppError.Server("STREAM_UNAVAILABLE", "No playable stream")
+                                    lastError = err
+                                    break
+                                }
+                            }
+                        } else if (streamResult is AppResult.Error) {
+                            lastError = streamResult.error
+                            val decision = StreamRetryPolicy.decide(streamResult.error, attempt)
+                            if (decision is StreamRetryDecision.Retry) {
+                                attempt++
+                                delay(decision.delayMs)
+                                continue
+                            } else {
+                                break
+                            }
+                        }
+                    }
                 }
 
                 if (finalUri.isNullOrBlank()) {
                     if (!networkMonitor.isOnline.value) {
                         notifyOfflineUnavailable()
                     } else {
+                        android.util.Log.w(
+                            "StreamResolve",
+                            "Stream resolution failed: errorClass=${lastError?.javaClass?.simpleName} code=${lastError?.code} message=${lastError?.message} songId=${song.id} provider=${song.providerId}"
+                        )
+                        val userMessage = lastError?.let { StreamRetryPolicy.userFriendlyMessage(it) } ?: "This song can't be played right now"
                         controller?.stop()
                         controller?.clearMediaItems()
                         stopPositionTracking()
-                        _playbackState.update { it.copy(error = "Stream not available for this song", isPlaying = false) }
+                        _playbackState.update { it.copy(error = userMessage, isPlaying = false) }
+                        handleUnrecoverablePlaybackError(song, userMessage)
                     }
                     return@launch
                 }
+
+                val resolveDuration = SystemClock.elapsedRealtime() - resolveStartTime
+                safeLogI("PlayTiming", "resolveStream finished in $resolveDuration ms (direct: $isDirect)")
 
                 // 5. Store resolved stream URI for future offline playback from SimpleCache
                 streamCacheStorage.saveStreamUri(song.id, finalUri)
 
                 // 6. Play media item
-                playMediaUri(song, finalUri, initialPositionMs)
+                playMediaUri(song, finalUri, initialPositionMs, playWhenReady)
 
             } catch (e: Exception) {
                 if (!networkMonitor.isOnline.value) {
@@ -384,7 +604,7 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L) {
+    private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.primaryArtistName)
@@ -399,6 +619,10 @@ class MusicPlayerManager @Inject constructor(
             song.id
         }
 
+        val isCached = audioCacheProvider.isFullyCached(song.id) || audioCacheProvider.hasSpansForKey(cacheKey)
+        safeLogI("PlayTiming", "playMediaUri called: songId=${song.id}, cacheKey=$cacheKey, isCached=$isCached")
+        lastPlayMediaUriTimestamp = SystemClock.elapsedRealtime()
+
         val mediaItem = MediaItem.Builder()
             .setMediaId(song.id)
             .setCustomCacheKey(cacheKey)
@@ -412,10 +636,16 @@ class MusicPlayerManager @Inject constructor(
                 seekTo(initialPositionMs)
             }
             prepare()
-            play()
+            if (playWhenReady) {
+                play()
+            } else {
+                pause()
+            }
         }
 
-        startPositionTracking()
+        if (playWhenReady) {
+            startPositionTracking()
+        }
     }
 
     private fun fetchLyrics(song: Song) {
@@ -449,6 +679,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun prefetchAutoplayRecommendations(seedSong: Song) {
+        if (jamInterceptor != null) return // Server owns recommendations during Jam
         if (activeRadioArtist != null) return // Never add third-party songs during Artist Radio
         if (isFetchingRecommendations) return
         isFetchingRecommendations = true
@@ -489,21 +720,32 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    private suspend fun extractYouTubeStream(videoId: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun extractYouTubeStream(videoId: String, reason: String = "play"): String? {
+        return singleFlightExtractor.extract(videoId, reason)
+    }
+
+    private suspend fun rawExtractYouTubeStream(videoId: String, reason: String): String? = withContext(Dispatchers.IO) {
+        val extractStartTime = SystemClock.elapsedRealtime()
         try {
             val url = "https://www.youtube.com/watch?v=$videoId"
             val extractor = NewPipe.getService(0).getStreamExtractor(url) as YoutubeStreamExtractor
             extractor.fetchPage()
             val audioStreams = extractor.audioStreams
             val bestAudio = audioStreams.maxByOrNull { it.averageBitrate }
-            return@withContext bestAudio?.content ?: audioStreams.firstOrNull()?.content
+            val result = bestAudio?.content ?: audioStreams.firstOrNull()?.content
+            val duration = SystemClock.elapsedRealtime() - extractStartTime
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms (reason=$reason, id=${videoId.take(4)})")
+            return@withContext result
         } catch (e: Exception) {
-            e.printStackTrace()
+            val duration = SystemClock.elapsedRealtime() - extractStartTime
+            safeLogI("PlayTiming", "NewPipe extraction took $duration ms (reason=$reason, id=${videoId.take(4)})")
+            android.util.Log.w("NewPipeExtractor", "Failed to extract YouTube stream: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
 
     fun togglePlayPause() {
+        if (jamInterceptor?.onTogglePlayPause() == true) return
         controller?.let {
             if (it.isPlaying) {
                 it.pause()
@@ -516,6 +758,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun play() {
+        if (jamInterceptor?.onPlay() == true) return
         controller?.let {
             if (!it.isPlaying) {
                 it.play()
@@ -524,12 +767,13 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun pause() {
+    override fun pause() {
+        if (jamInterceptor?.onPause() == true) return
         controller?.pause()
         stopPositionTracking()
     }
 
-    fun stop() {
+    override fun stop() {
         controller?.stop()
         controller?.clearMediaItems()
         stopPositionTracking()
@@ -545,6 +789,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun seekTo(positionMs: Long) {
+        if (jamInterceptor?.onSeekTo(positionMs) == true) return
         controller?.seekTo(positionMs)
         _playbackState.update { it.copy(playbackPositionMs = positionMs) }
     }
@@ -558,7 +803,8 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun skipToNext() {
+    fun skipToNext(isAutoSkip: Boolean = false) {
+        if (jamInterceptor?.onSkipToNext() == true) return
         if (_isRepeatOne.value) {
             seekTo(0)
             controller?.play()
@@ -569,11 +815,13 @@ class MusicPlayerManager @Inject constructor(
         val isOffline = !networkMonitor.isOnline.value
 
         if (isOffline) {
-            // 1. Look for next cached song in current queue (forward or wrap-around)
+            // 1. Look for next cached song in current queue (forward or wrap-around unless auto-skipping)
             val nextCachedIdx = ((_currentIndex.value + 1) until q.size)
                 .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
-                ?: (0 until _currentIndex.value)
-                    .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                ?: if (!isAutoSkip) {
+                    (0 until _currentIndex.value)
+                        .firstOrNull { audioCacheProvider.isSongCached(q[it].id) }
+                } else null
 
             if (nextCachedIdx != null && nextCachedIdx != _currentIndex.value) {
                 _currentIndex.value = nextCachedIdx
@@ -628,7 +876,7 @@ class MusicPlayerManager @Inject constructor(
             }
         } else {
             // Queue ended:
-            if (activeRadioArtist != null) {
+            if (!isAutoSkip && activeRadioArtist != null) {
                 // Radio should only play songs of the artist: loop & reshuffle artist tracks
                 if (q.isNotEmpty()) {
                     val reshuffled = q.shuffled()
@@ -664,6 +912,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun skipToPrevious() {
+        if (jamInterceptor?.onSkipToPrevious() == true) return
         val currentPos = controller?.currentPosition ?: 0L
         if (currentPos > 3000L) {
             seekTo(0)
@@ -718,6 +967,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun playQueueIndex(index: Int) {
+        if (jamInterceptor?.onPlayQueueIndex(index) == true) return
         val q = _queue.value
         if (index in q.indices) {
             _currentIndex.value = index
@@ -779,6 +1029,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun removeQueueItem(index: Int) {
+        if (jamInterceptor?.onRemoveFromQueue(index) == true) return
         val list = _queue.value.toMutableList()
         if (index !in list.indices) return
         val removed = list.removeAt(index)
@@ -794,6 +1045,7 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        if (jamInterceptor?.onReorderQueue(fromIndex, toIndex) == true) return
         val list = _queue.value.toMutableList()
         if (fromIndex !in list.indices || toIndex !in list.indices || fromIndex == toIndex) return
         val item = list.removeAt(fromIndex)
@@ -812,10 +1064,12 @@ class MusicPlayerManager @Inject constructor(
 
     // Binary repeat mode: OFF vs ON
     fun toggleRepeat() {
+        if (jamInterceptor?.onToggleRepeat() == true) return
         _isRepeatOne.update { !it }
     }
 
     fun toggleShuffle() {
+        if (jamInterceptor?.onToggleShuffle() == true) return
         val willBeShuffle = !_isShuffle.value
         _isShuffle.value = willBeShuffle
 
@@ -856,6 +1110,8 @@ class MusicPlayerManager @Inject constructor(
             }
             unshuffledQueue = null
         }
+        lastPrefetchedNextId = null
+        triggerNextTrackPrefetch()
     }
 
     fun setShuffle(enabled: Boolean) {
@@ -868,33 +1124,49 @@ class MusicPlayerManager @Inject constructor(
     // Queue Isolation for Jam Sessions
     // ─────────────────────────────────────────────────────────────
 
-    fun stashPersonalQueue() {
-        stashedPersonalQueue = _queue.value
-        stashedPersonalIndex = _currentIndex.value
-        stashedSourcePlaylist = sourcePlaylist
-        stashedNextSourceIndex = nextSourceIndex
-        stashedActiveRadioArtist = activeRadioArtist
+    override fun stashPersonalQueue() {
+        if (personalQueueStash.isStashed) return
+        personalQueueStash.stash(
+            queue = _queue.value,
+            currentIndex = _currentIndex.value,
+            recommendedSongIds = _recommendedSongIds.value,
+            sourcePlaylist = sourcePlaylist,
+            nextSourceIndex = nextSourceIndex,
+            activeRadioArtist = activeRadioArtist
+        )
         activeRadioArtist = null
     }
 
-    fun restorePersonalQueue() {
-        stashedPersonalQueue?.let { stashed ->
-            _queue.value = stashed
-            _currentIndex.value = stashedPersonalIndex?.coerceIn(0, (stashed.size - 1).coerceAtLeast(0)) ?: 0
-            sourcePlaylist = stashedSourcePlaylist
-            nextSourceIndex = stashedNextSourceIndex
-            activeRadioArtist = stashedActiveRadioArtist
-            stashedPersonalQueue = null
-            stashedPersonalIndex = null
-            stashedSourcePlaylist = null
-            stashedNextSourceIndex = 0
-            stashedActiveRadioArtist = null
+    override fun restorePersonalQueue() {
+        personalQueueStash.restore()?.let { stashed ->
+            _queue.value = stashed.queue
+            _currentIndex.value = stashed.currentIndex.coerceIn(0, (stashed.queue.size - 1).coerceAtLeast(0))
+            _recommendedSongIds.value = stashed.recommendedSongIds
+            sourcePlaylist = stashed.sourcePlaylist
+            nextSourceIndex = stashed.nextSourceIndex
+            activeRadioArtist = stashed.activeRadioArtist
+            lastPrefetchedNextId = null
         }
+        _jamRecommendedQids.value = emptySet()
+        _jamQueueQids.value = emptyList()
     }
 
-    fun setJamQueue(jamQueue: List<Song>, targetSong: Song? = null) {
+    override fun setJamQueue(
+        jamQueue: List<Song>,
+        targetSong: Song?,
+        targetQid: String?,
+        queueQids: List<String>,
+        recommendedQids: Set<String>
+    ) {
         _queue.value = jamQueue
-        if (targetSong != null) {
+        _jamQueueQids.value = queueQids
+        _jamRecommendedQids.value = recommendedQids
+        if (targetQid != null && queueQids.isNotEmpty()) {
+            val idx = queueQids.indexOf(targetQid)
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        } else if (targetSong != null) {
             val idx = jamQueue.indexOfFirst { it.id == targetSong.id }
             if (idx >= 0) {
                 _currentIndex.value = idx
@@ -902,17 +1174,118 @@ class MusicPlayerManager @Inject constructor(
         }
     }
 
-    fun playJamSyncSong(song: Song, initialPositionMs: Long = 0L) {
+    override fun playJamSyncSong(
+        song: Song,
+        initialPositionMs: Long,
+        playWhenReady: Boolean,
+        targetQid: String?,
+        forceRefresh: Boolean
+    ) {
         activeRadioArtist = null
         sourcePlaylist = null
         nextSourceIndex = 0
-        _recommendedSongIds.value = emptySet()
         sessionPlayedIds.add(song.id)
-        val idx = _queue.value.indexOfFirst { it.id == song.id }
-        if (idx >= 0) {
-            _currentIndex.value = idx
+        if (forceRefresh) {
+            streamCacheStorage.invalidateStreamUri(song.id)
         }
-        loadAndPlay(song, initialPositionMs)
+        if (targetQid != null && _jamQueueQids.value.isNotEmpty()) {
+            val idx = _jamQueueQids.value.indexOf(targetQid)
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        } else {
+            val idx = _queue.value.indexOfFirst { it.id == song.id }
+            if (idx >= 0) {
+                _currentIndex.value = idx
+            }
+        }
+        loadAndPlay(song, initialPositionMs, playWhenReady)
+    }
+
+    override fun invalidateStreamCache(songId: String) {
+        streamCacheStorage.invalidateStreamUri(songId)
+    }
+
+    override fun prefetchTrack(song: Song) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (audioCacheProvider.isSongCached(song.id)) return@launch
+                val cachedUri = streamCacheStorage.getStreamUri(song.id)
+                val finalUri = if (!cachedUri.isNullOrBlank()) {
+                    cachedUri
+                } else {
+                    val plan = StreamResolutionPlan.choose(song.providerId, song.id)
+                    val directUri = if (plan == StreamResolutionPlan.Plan.DIRECT_YOUTUBE) {
+                        extractYouTubeStream(song.id, reason = "prefetch")
+                    } else null
+
+                    if (!directUri.isNullOrBlank()) {
+                        directUri
+                    } else {
+                        val streamResult = repository.resolveStream(song.id, song.providerId)
+                        if (streamResult is AppResult.Success) {
+                            when (val info = streamResult.data) {
+                                is StreamInfo.JioSaavn -> info.url
+                                is StreamInfo.YouTube -> extractYouTubeStream(info.videoId, reason = "prefetch")
+                                is StreamInfo.None -> null
+                            }
+                        } else null
+                    }
+                }
+
+                if (!finalUri.isNullOrBlank()) {
+                    streamCacheStorage.saveStreamUri(song.id, finalUri)
+                    audioCacheProvider.warmBytes(song.id, finalUri)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun setPlaybackSpeed(speed: Float) {
+        controller?.setPlaybackSpeed(speed)
+    }
+
+    override fun getPlaybackSpeed(): Float {
+        return controller?.playbackParameters?.speed ?: 1.0f
+    }
+
+    override fun getPlayerCurrentPosition(): Long {
+        return controller?.currentPosition ?: _playbackState.value.playbackPositionMs
+    }
+
+    override fun getPlayerPlayWhenReady(): Boolean {
+        return controller?.playWhenReady ?: false
+    }
+
+    override fun getPlayerPlaybackState(): Int {
+        return controller?.playbackState ?: androidx.media3.common.Player.STATE_IDLE
+    }
+
+    override fun getPlayerDuration(): Long {
+        return controller?.duration?.takeIf { it > 0 } ?: 0L
+    }
+
+    override fun applyJamPlay() {
+        controller?.let {
+            if (!it.isPlaying) {
+                it.play()
+                startPositionTracking()
+            }
+        }
+    }
+
+    override fun applyJamPause() {
+        controller?.pause()
+        stopPositionTracking()
+    }
+
+    override fun applyJamSeek(positionMs: Long) {
+        controller?.seekTo(positionMs)
+        _playbackState.update { it.copy(playbackPositionMs = positionMs) }
+    }
+
+    override fun applyJamSpeed(factor: Float) {
+        controller?.setPlaybackSpeed(factor)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -954,22 +1327,59 @@ class MusicPlayerManager @Inject constructor(
         controller?.removeListener(playerListener)
     }
 
+    private fun triggerNextTrackPrefetch() {
+        val nextSong = QueuePrefetchPolicy.decideNextTrackPrefetch(
+            currentIndex = _currentIndex.value,
+            queue = _queue.value,
+            isRepeatOne = _isRepeatOne.value,
+            lastPrefetchedNextId = lastPrefetchedNextId,
+            isJamActive = jamInterceptor != null,
+            isOnline = networkMonitor.isOnline.value,
+            isFullyCached = { audioCacheProvider.isSongCached(it) }
+        )
+
+        if (nextSong != null) {
+            lastPrefetchedNextId = nextSong.id
+            prefetchTrack(nextSong)
+        }
+    }
+
     private val playerListener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            jamInterceptor?.onPlayWhenReadyChanged(playWhenReady, reason)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _playbackState.update { it.copy(isPlaying = isPlaying) }
             if (isPlaying) {
                 startPositionTracking()
+                triggerNextTrackPrefetch()
             } else {
                 stopPositionTracking()
             }
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            jamInterceptor?.onPlaybackStateChanged(state)
+            if (state == Player.STATE_READY) {
+                autoSkipPolicy.onReady()
+                reResolveGuard.onReady()
+                val playTimestamp = lastPlayMediaUriTimestamp
+                if (playTimestamp != null) {
+                    val readyDuration = SystemClock.elapsedRealtime() - playTimestamp
+                    lastPlayMediaUriTimestamp = null
+                    safeLogI("PlayTiming", "ExoPlayer STATE_READY reached in $readyDuration ms from playMediaUri")
+                }
+                triggerNextTrackPrefetch()
+            }
             if (state == Player.STATE_ENDED) {
                 val listener = onTrackEndedListener
                 if (listener != null) {
                     onTrackEndedListener = null
                     listener.invoke()
+                    return
+                }
+                if (jamInterceptor?.onTrackEnded() == true) {
                     return
                 }
                 if (_isRepeatOne.value) {
@@ -982,6 +1392,45 @@ class MusicPlayerManager @Inject constructor(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            val song = _playbackState.value.currentSong
+
+            if (jamInterceptor?.onPlayerError(error) == true) {
+                return
+            }
+
+            if (song != null) {
+                val alreadyRetried = !reResolveGuard.shouldReResolve(song.id)
+                val action = PlaybackSourcePolicy.onErrorAction(
+                    playingFromFullCache = playingFromFullCache,
+                    alreadyRetried = alreadyRetried,
+                    online = networkMonitor.isOnline.value
+                )
+
+                when (action) {
+                    PlaybackSourcePolicy.ErrorAction.EVICT_AND_RETRY_NETWORK -> {
+                        audioCacheProvider.remove(song.id)
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                        playingFromFullCache = false
+                        scope.launch {
+                            val pos = getPlayerCurrentPosition()
+                            loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+                        }
+                        return
+                    }
+                    PlaybackSourcePolicy.ErrorAction.RE_RESOLVE_ONCE -> {
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                        scope.launch {
+                            val pos = getPlayerCurrentPosition()
+                            loadAndPlay(song, initialPositionMs = pos, playWhenReady = true)
+                        }
+                        return
+                    }
+                    PlaybackSourcePolicy.ErrorAction.GIVE_UP -> {
+                        streamCacheStorage.invalidateStreamUri(song.id)
+                    }
+                }
+            }
+
             _playbackState.update { 
                 it.copy(
                     isPlaying = false, 
@@ -989,6 +1438,35 @@ class MusicPlayerManager @Inject constructor(
                 ) 
             }
             stopPositionTracking()
+
+            if (song != null) {
+                handleUnrecoverablePlaybackError(song, error.message ?: "Playback error")
+            }
+        }
+    }
+
+    private fun handleUnrecoverablePlaybackError(song: Song, message: String) {
+        if (jamInterceptor == null) {
+            val shouldSkip = autoSkipPolicy.onFailure()
+            if (shouldSkip) {
+                val q = _queue.value
+                val hasNext = if (!networkMonitor.isOnline.value) {
+                    ((_currentIndex.value + 1) until q.size).any { audioCacheProvider.isSongCached(q[it].id) }
+                } else {
+                    autoSkipPolicy.canSkipForward(_currentIndex.value, q.size) || (sourcePlaylist != null && nextSourceIndex < (sourcePlaylist?.size ?: 0))
+                }
+
+                if (hasNext) {
+                    scope.launch {
+                        skipToNext(isAutoSkip = true)
+                    }
+                } else {
+                    autoSkipPolicy.onReady()
+                    controller?.stop()
+                }
+            } else {
+                controller?.stop()
+            }
         }
     }
 }

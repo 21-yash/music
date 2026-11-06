@@ -97,8 +97,24 @@ class AuthRepository @Inject constructor(
         return tokenRefresher.refresh(currentToken)
     }
 
+    suspend fun getFreshAccessTokenResult(): com.synq.data.remote.TokenRefreshResult {
+        val currentToken = tokenStorage.getAccessTokenSync()
+        val currentRefreshToken = tokenStorage.getRefreshTokenSync()
+        val userId = tokenStorage.getUserIdSync()
+        if (currentRefreshToken.isNullOrBlank() || userId.isNullOrBlank()) {
+            return com.synq.data.remote.TokenRefreshResult.Unauthorized
+        }
+        if (!currentToken.isNullOrBlank() && !com.synq.data.remote.JwtUtils.isExpiredOrNearExpiry(currentToken, 30L)) {
+            return com.synq.data.remote.TokenRefreshResult.Success(currentToken)
+        }
+        return tokenRefresher.refreshResult(currentToken)
+    }
+
     suspend fun refreshToken(staleAccessToken: String? = null): String? {
         return tokenRefresher.refresh(staleAccessToken)
     }
-}
 
+    suspend fun refreshTokenResult(staleAccessToken: String? = null): com.synq.data.remote.TokenRefreshResult {
+        return tokenRefresher.refreshResult(staleAccessToken)
+    }
+}

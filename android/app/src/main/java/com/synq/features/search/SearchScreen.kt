@@ -341,15 +341,13 @@ fun SearchScreen(
                 onSongClick = { song ->
                     if (jamState.isInJam) {
                         rootViewModel.addSongToJam(song)
-                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
                     } else {
                         viewModel.playSong(song)
                     }
                 },
                 onPlayNext = { song ->
                     if (jamState.isInJam) {
-                        rootViewModel.addSongToJam(song)
-                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
+                        rootViewModel.addSongToJam(song, playNext = true)
                     } else {
                         viewModel.playNext(song)
                     }
@@ -357,7 +355,6 @@ fun SearchScreen(
                 onAddToQueue = { song ->
                     if (jamState.isInJam) {
                         rootViewModel.addSongToJam(song)
-                        Toast.makeText(context, "Added to Jam: ${song.title}", Toast.LENGTH_SHORT).show()
                     } else {
                         viewModel.addToQueue(song)
                     }

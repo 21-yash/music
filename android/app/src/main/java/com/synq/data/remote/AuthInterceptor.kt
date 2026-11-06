@@ -12,10 +12,12 @@ import javax.inject.Singleton
  * OkHttp interceptor that attaches:
  * 1. The X-Api-Key header to every request.
  * 2. The Bearer access token to non-public endpoints.
+ * Proactively refreshes tokens expiring within 30s to avoid 401 round trips.
  */
 @Singleton
 class AuthInterceptor @Inject constructor(
     private val tokenStorage: TokenStorage,
+    private val tokenRefresher: TokenRefresher,
 ) : Interceptor {
 
     companion object {
@@ -40,7 +42,13 @@ class AuthInterceptor @Inject constructor(
         // Add Authorization header only for non-public paths
         val isPublic = PUBLIC_PATHS.any { path.contains(it) }
         if (!isPublic) {
-            val token = runBlocking { tokenStorage.getAccessTokenSync() }
+            var token = runBlocking { tokenStorage.getAccessTokenSync() }
+            if (token != null && JwtUtils.isExpiredOrNearExpiry(token, marginSeconds = 30L)) {
+                val refreshResult = runBlocking { tokenRefresher.refreshResult(token) }
+                if (refreshResult is TokenRefreshResult.Success) {
+                    token = refreshResult.token
+                }
+            }
             if (token != null) {
                 builder.header("Authorization", "Bearer $token")
             }

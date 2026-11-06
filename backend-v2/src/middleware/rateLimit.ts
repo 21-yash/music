@@ -2,7 +2,7 @@ import { Request, Response, NextFunction, RequestHandler } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { getRedisClient } from '../config/redis';
-import { TooManyRequestsError } from '../utils/errors';
+import { TooManyRequestsError, ServiceUnavailableError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
 interface LazyLimiterOptions {
@@ -12,18 +12,37 @@ interface LazyLimiterOptions {
   keyGenerator?: (req: Request) => string;
   skip?: (req: Request) => boolean;
   skipSuccessfulRequests?: boolean;
+  enableInTest?: boolean;
+  customStore?: any;
+  failClosed?: boolean;
+  timeoutMs?: number;
 }
+
+const lastLimiterWarnMap = new Map<string, number>();
 
 /**
  * Creates a rate limiter middleware that is initialized lazily on the first request.
  * This prevents calling getRedisClient() during module import time before Redis is connected.
- * In test mode (NODE_ENV === 'test'), rate limiting is bypassed.
+ * In test mode (NODE_ENV === 'test'), rate limiting is bypassed unless enableInTest is set.
+ *
+ * Task H7 / B11 / M2:
+ * - Guard timeout (default 750ms, 2000ms for sensitive auth) to ensure an idle/stalled Redis connection cannot block requests indefinitely.
+ * - On timeout, auth routes with failClosed: true (login, login_ip, register) return 503 ServiceUnavailableError to prevent unthrottled
+ *   brute-force attacks during an outage.
+ * - Auth refresh and non-auth routes (music, stream, sports, global) fail open so user experiences minimal disruption.
+ *
+ * Late 429 limitation:
+ * When Redis is slow (>timeoutMs) but eventually resolves, the in-flight Redis command completes in the
+ * background and increments the count. However, since the HTTP request already timed out and either
+ * failed open or returned 503, the 429 cannot be applied retroactively to that already-handled request.
+ * Subsequent requests within the window will see the incremented count.
  */
-function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
+export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
   let limiterInstance: RequestHandler | null = null;
+  const timeoutMs = options.timeoutMs ?? 750;
 
   return (req: Request, res: Response, next: NextFunction) => {
-    if (process.env.NODE_ENV === 'test') {
+    if (process.env.NODE_ENV === 'test' && !options.enableInTest) {
       return next();
     }
 
@@ -40,7 +59,7 @@ function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
         skip: options.skip,
         skipSuccessfulRequests: options.skipSuccessfulRequests,
         keyGenerator: options.keyGenerator,
-        store: new RedisStore({
+        store: options.customStore || new RedisStore({
           sendCommand: async (cmd: string, ...args: string[]) => {
             try {
               return (await getRedisClient().call(cmd, ...args)) as any;
@@ -59,7 +78,47 @@ function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
       });
     }
 
-    return limiterInstance(req, res, next);
+    let called = false;
+    const startMs = Date.now();
+
+    const safeNext = (err?: any) => {
+      if (called) return;
+      called = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      const waitMs = Date.now() - startMs;
+      (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
+      next(err);
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      if (called) return;
+      called = true;
+      const now = Date.now();
+      const lastWarn = lastLimiterWarnMap.get(options.keyPrefix) || 0;
+      const shouldFailClosed = Boolean(options.failClosed);
+
+      if (now - lastWarn >= 60_000) {
+        lastLimiterWarnMap.set(options.keyPrefix, now);
+        logger.warn(
+          { limiter: options.keyPrefix, path: req.path, failClosed: shouldFailClosed },
+          `Rate limiter '${options.keyPrefix}' timed out after ${timeoutMs}ms; ${shouldFailClosed ? 'failing closed (503)' : 'failing open'}`
+        );
+      }
+      const waitMs = now - startMs;
+      (req as any).limiterWaitMs = ((req as any).limiterWaitMs || 0) + waitMs;
+
+      if (shouldFailClosed) {
+        next(new ServiceUnavailableError('Authentication service temporarily unavailable. Please try again.'));
+      } else {
+        next();
+      }
+    }, timeoutMs);
+
+    try {
+      limiterInstance(req, res, safeNext);
+    } catch (err) {
+      safeNext(err);
+    }
   };
 }
 
@@ -106,6 +165,8 @@ export const loginLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   keyPrefix: 'login',
+  failClosed: true,
+  timeoutMs: 2000,
   keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? 'unknown')}:${String(req.body?.login ?? '').trim().toLowerCase()}`,
   skipSuccessfulRequests: true,
 });
@@ -115,6 +176,8 @@ export const loginIpLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   keyPrefix: 'login_ip',
+  failClosed: true,
+  timeoutMs: 2000,
 });
 
 /** Auth register: 5 req / 1 hour per IP */
@@ -122,6 +185,8 @@ export const registerLimiter = createLazyLimiter({
   windowMs: 60 * 60 * 1000,
   limit: 5,
   keyPrefix: 'register',
+  failClosed: true,
+  timeoutMs: 2000,
 });
 
 /** Auth refresh: 30 req / 15 min per IP */

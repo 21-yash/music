@@ -33,7 +33,8 @@ class RootViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     val sleepTimerManager: SleepTimerManager,
     val jamSessionManager: JamSessionManager,
-    private val themePreferences: com.synq.data.local.ThemePreferences
+    private val themePreferences: com.synq.data.local.ThemePreferences,
+    val jamPreferences: com.synq.features.music.jam.JamPreferences
 ) : ViewModel() {
     val playbackState = playerManager.playbackState
     val queue = playerManager.queue
@@ -48,6 +49,22 @@ class RootViewModel @Inject constructor(
     val sleepRemainingSeconds = sleepTimerManager.remainingSeconds
 
     val jamState = jamSessionManager.jamState
+    val jamUiState = jamSessionManager.stateStore.uiState
+    val jamRoom = jamSessionManager.stateStore.room
+    val jamClientState = jamSessionManager.jamClient.clientState
+    val jamLocalPlaybackState = jamSessionManager.localPlaybackState
+    val jamUiEvents = jamSessionManager.stateStore.uiEvents
+    val jamClosedEvents = jamSessionManager.jamClient.closedEvents
+    val jamClockSync = jamSessionManager.clockSync
+    val jamHasPendingCommand = jamSessionManager.hasPendingCommand
+
+    fun clearJamError() {
+        jamSessionManager.clearError()
+    }
+
+    fun retryJamPlayback() {
+        jamSessionManager.retryPlayback()
+    }
 
     val isLoggedIn: StateFlow<Boolean?> = authRepository.isLoggedIn
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -125,8 +142,25 @@ class RootViewModel @Inject constructor(
         playerManager.togglePlayPause()
     }
 
-    fun stopPlayback() {
+    private val _showLeaveJamConfirmDialog = MutableStateFlow(false)
+    val showLeaveJamConfirmDialog: StateFlow<Boolean> = _showLeaveJamConfirmDialog.asStateFlow()
+
+    fun dismissLeaveJamConfirmDialog() {
+        _showLeaveJamConfirmDialog.value = false
+    }
+
+    fun confirmLeaveJamAndStopPlayback() {
+        _showLeaveJamConfirmDialog.value = false
+        jamSessionManager.leaveJam()
         playerManager.stop()
+    }
+
+    fun stopPlayback() {
+        if (jamState.value.isInJam) {
+            _showLeaveJamConfirmDialog.value = true
+        } else {
+            playerManager.stop()
+        }
     }
 
     private val _isPlaylistEditing = MutableStateFlow(false)
@@ -213,30 +247,92 @@ class RootViewModel @Inject constructor(
     }
 
     // Jam session
-    fun startJam() {
+    fun startJam(avatarUrl: String? = null, onComplete: ((Result<Unit>) -> Unit)? = null) {
         val currUser = _user.value
-        val userId = currUser?.id ?: "guest_${System.currentTimeMillis() % 10000}"
-        val username = currUser?.username ?: "You"
-        jamSessionManager.createJam(userId, username, null)
+        val userId = currUser?.id
+        if (userId.isNullOrBlank()) {
+            val err = "Sign in required to start a Jam"
+            jamSessionManager.setError(err)
+            onComplete?.invoke(Result.failure(Exception(err)))
+            return
+        }
+        val username = currUser.username
+        val userAvatar = avatarUrl ?: jamPreferences.getLastAvatarUrl()
+        jamSessionManager.createJam(userId, username, userAvatar) { res ->
+            onComplete?.invoke(res.map { })
+        }
     }
 
-    fun joinJam(code: String) {
+    fun joinJam(code: String, avatarUrl: String? = null, onComplete: ((Result<Unit>) -> Unit)? = null) {
         val currUser = _user.value
-        val userId = currUser?.id ?: "guest_${System.currentTimeMillis() % 10000}"
-        val username = currUser?.username ?: "Guest"
-        jamSessionManager.joinJam(code, userId, username, null)
+        val userId = currUser?.id
+        if (userId.isNullOrBlank()) {
+            val err = "Sign in required to join a Jam"
+            jamSessionManager.setError(err)
+            onComplete?.invoke(Result.failure(Exception(err)))
+            return
+        }
+        val username = currUser.username
+        val userAvatar = avatarUrl ?: jamPreferences.getLastAvatarUrl()
+        jamSessionManager.joinJam(code, userId, username, userAvatar) { res ->
+            onComplete?.invoke(res.map { })
+        }
     }
 
     fun leaveJam() {
         jamSessionManager.leaveJam()
     }
 
-    fun addSongToJam(song: Song) {
-        jamSessionManager.addSongToJam(song)
+    fun endJam() {
+        jamSessionManager.endJam()
+    }
+
+    fun stepOutLocally() {
+        jamSessionManager.stepOutLocally()
+    }
+
+    fun resumeFromLocalStepOut() {
+        jamSessionManager.resumeFromLocalStepOut()
+    }
+
+    fun toggleJamPlayPause() {
+        jamSessionManager.togglePlayPause()
+    }
+
+    fun jamSeekTo(positionMs: Long) {
+        jamSessionManager.seekTo(positionMs)
+    }
+
+    fun jamNextTrack() {
+        jamSessionManager.nextTrack()
+    }
+
+    fun jamPreviousTrack() {
+        jamSessionManager.previousTrack()
+    }
+
+    fun addSongToJam(song: Song, playNext: Boolean = false) {
+        jamSessionManager.addSongToJam(song, playNext)
     }
 
     fun removeSongFromJam(index: Int) {
         jamSessionManager.removeSongFromJam(index)
+    }
+
+    fun removeByQid(qid: String) {
+        jamSessionManager.removeByQid(qid)
+    }
+
+    fun playItemByQid(qid: String) {
+        jamSessionManager.playItemByQid(qid)
+    }
+
+    fun moveByQid(qid: String, toQueueIndex: Int) {
+        jamSessionManager.moveByQid(qid, toQueueIndex)
+    }
+
+    fun promoteRecommended(qid: String) {
+        jamSessionManager.promoteRecommended(qid)
     }
 
     fun reorderJamQueue(fromIndex: Int, toIndex: Int) {
@@ -245,6 +341,22 @@ class RootViewModel @Inject constructor(
 
     fun setAttendeeReorderPermission(allow: Boolean) {
         jamSessionManager.setAttendeeReorderPermission(allow)
+    }
+
+    fun setMemberPerms(userId: String, perms: com.synq.features.music.jam.JamPermissions) {
+        jamSessionManager.setMemberPerms(userId, perms)
+    }
+
+    fun setDefaults(perms: com.synq.features.music.jam.JamPermissions) {
+        jamSessionManager.setDefaults(perms, applyToExisting = true)
+    }
+
+    fun kickMember(userId: String) {
+        jamSessionManager.kickMember(userId)
+    }
+
+    fun transferHost(userId: String) {
+        jamSessionManager.transferHost(userId)
     }
 
     // Playlist Add Modal actions

@@ -13,10 +13,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
+import java.io.IOException
 import javax.inject.Provider
 
 class TokenRefresherTest {
@@ -52,12 +54,58 @@ class TokenRefresherTest {
     }
 
     @Test
+    fun testHttp401ReturnsUnauthorizedAndClearsTokens() = runTest {
+        coEvery { authApi.refreshToken(any()) } throws createHttpException(401)
+
+        val result = tokenRefresher.refreshResult("old_access_token")
+
+        assertTrue("HTTP 401 must produce Unauthorized result", result is TokenRefreshResult.Unauthorized)
+        coVerify(exactly = 1) { tokenStorage.clearTokens() }
+    }
+
+    @Test
     fun testHttp500DoesNotClearTokens() = runTest {
         coEvery { authApi.refreshToken(any()) } throws createHttpException(500)
 
         val result = tokenRefresher.refresh("old_access_token")
 
         assertNull(result)
+        coVerify(exactly = 0) { tokenStorage.clearTokens() }
+    }
+
+    @Test
+    fun testHttp500ReturnsTransientAndDoesNotClearTokens() = runTest {
+        coEvery { authApi.refreshToken(any()) } throws createHttpException(500)
+
+        val result = tokenRefresher.refreshResult("old_access_token")
+
+        assertTrue("HTTP 500 must produce Transient result", result is TokenRefreshResult.Transient)
+        val transient = result as TokenRefreshResult.Transient
+        assertEquals("old_access_token", transient.fallbackToken)
+        coVerify(exactly = 0) { tokenStorage.clearTokens() }
+    }
+
+    @Test
+    fun testHttp503FromRateLimiterReturnsTransientAndDoesNotClearTokens() = runTest {
+        coEvery { authApi.refreshToken(any()) } throws createHttpException(503)
+
+        val result = tokenRefresher.refreshResult("old_access_token")
+
+        assertTrue("HTTP 503 must produce Transient result", result is TokenRefreshResult.Transient)
+        val transient = result as TokenRefreshResult.Transient
+        assertEquals("old_access_token", transient.fallbackToken)
+        coVerify(exactly = 0) { tokenStorage.clearTokens() }
+    }
+
+    @Test
+    fun testIOExceptionReturnsTransientAndDoesNotClearTokens() = runTest {
+        coEvery { authApi.refreshToken(any()) } throws IOException("Network unreachable")
+
+        val result = tokenRefresher.refreshResult("old_access_token")
+
+        assertTrue("IOException must produce Transient result", result is TokenRefreshResult.Transient)
+        val transient = result as TokenRefreshResult.Transient
+        assertEquals("old_access_token", transient.fallbackToken)
         coVerify(exactly = 0) { tokenStorage.clearTokens() }
     }
 

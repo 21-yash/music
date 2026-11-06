@@ -16,18 +16,89 @@ class StreamCacheStorage @Inject constructor(
 ) {
     companion object {
         private const val PREFS_NAME = "stream_cache_urls"
+        const val DEFAULT_TTL_MS = 4 * 60 * 60 * 1000L // 4 hours TTL for CDN stream URLs
+        private val hasSwept = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
     private val prefs by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    fun saveStreamUri(songId: String, uri: String) {
-        prefs.edit().putString(songId, uri).apply()
+    init {
+        if (hasSwept.compareAndSet(false, true)) {
+            sweepExpired()
+        }
     }
 
-    fun getStreamUri(songId: String): String? {
-        return prefs.getString(songId, null)
+    /**
+     * Sweeps expired and malformed stream cache URL entries from SharedPreferences.
+     * Runs once automatically on process startup; can also be called explicitly.
+     */
+    fun sweepExpired(nowMs: Long = System.currentTimeMillis(), maxAgeMs: Long = DEFAULT_TTL_MS): Int {
+        val allEntries = prefs.all
+        val editor = prefs.edit()
+        var sweptCount = 0
+        for ((key, value) in allEntries) {
+            val entry = value as? String ?: continue
+            val delimiter = entry.indexOf('|')
+            if (delimiter == -1) {
+                editor.remove(key)
+                sweptCount++
+                continue
+            }
+            val timestamp = entry.substring(0, delimiter).toLongOrNull()
+            if (timestamp == null || nowMs - timestamp > maxAgeMs) {
+                editor.remove(key)
+                sweptCount++
+            }
+        }
+        if (sweptCount > 0) {
+            editor.apply()
+        }
+        return sweptCount
+    }
+
+    fun saveStreamUri(songId: String, uri: String, timestamp: Long = System.currentTimeMillis()) {
+        prefs.edit().putString(songId, "$timestamp|$uri").apply()
+    }
+
+    fun getStreamUri(songId: String, maxAgeMs: Long = DEFAULT_TTL_MS): String? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) {
+            // Legacy entry without timestamp: invalidate
+            removeStreamUri(songId)
+            return null
+        }
+        val timestamp = entry.substring(0, delimiter).toLongOrNull() ?: run {
+            removeStreamUri(songId)
+            return null
+        }
+        if (System.currentTimeMillis() - timestamp > maxAgeMs) {
+            removeStreamUri(songId)
+            return null
+        }
+        return entry.substring(delimiter + 1)
+    }
+
+    fun getStreamUriAgeMs(songId: String, nowMs: Long = System.currentTimeMillis()): Long? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) return null
+        val timestamp = entry.substring(0, delimiter).toLongOrNull() ?: return null
+        return (nowMs - timestamp).coerceAtLeast(0L)
+    }
+
+    fun getRawStreamUri(songId: String): String? {
+        val entry = prefs.getString(songId, null) ?: return null
+        val delimiter = entry.indexOf('|')
+        if (delimiter == -1) return null
+        val uri = entry.substring(delimiter + 1)
+        return uri.takeIf { it.isNotBlank() }
+    }
+
+    fun invalidateStreamUri(songId: String) {
+        removeStreamUri(songId)
     }
 
     fun removeStreamUri(songId: String) {

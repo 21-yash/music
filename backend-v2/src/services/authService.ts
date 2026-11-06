@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { User, IUser } from '../models/User';
 import { Invite } from '../models/Invite';
 import {
@@ -178,6 +179,54 @@ export async function login(
 }
 
 /**
+ * Fast SHA-256 token hashing for refresh tokens.
+ * Refresh tokens are 256-bit cryptographically secure random values from crypto.randomBytes,
+ * so expensive key-derivation algorithms like bcrypt are unnecessary and block the Node event loop.
+ */
+function hashRefreshToken(rawToken: string): string {
+  const digest = crypto.createHash('sha256').update(rawToken).digest('hex');
+  return `sha256:${digest}`;
+}
+
+function verifyTokenHashSync(rawToken: string, storedHash: string): boolean {
+  if (!storedHash.startsWith('sha256:')) return false;
+  const digest = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expected = `sha256:${digest}`;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(storedHash);
+  if (a.byteLength !== b.byteLength) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+async function findTokenIndex(tokens: { tokenHash: string; expiresAt: Date }[], rawToken: string): Promise<number> {
+  const now = new Date();
+  // Pass 1: Check sha256 entries first (fast O(n) synchronous comparison)
+  for (let i = 0; i < tokens.length; i++) {
+    const rt = tokens[i];
+    if (rt.expiresAt < now) continue;
+    if (rt.tokenHash.startsWith('sha256:')) {
+      if (verifyTokenHashSync(rawToken, rt.tokenHash)) {
+        return i;
+      }
+    }
+  }
+
+  // Pass 2: Fall back to legacy bcrypt entries only if no sha256 match found
+  for (let i = 0; i < tokens.length; i++) {
+    const rt = tokens[i];
+    if (rt.expiresAt < now) continue;
+    if (!rt.tokenHash.startsWith('sha256:')) {
+      const match = await bcrypt.compare(rawToken, rt.tokenHash);
+      if (match) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
+/**
  * Refresh the access token using a valid refresh token.
  *
  * Rotates the refresh token: the old one is invalidated, a new one is
@@ -193,18 +242,8 @@ export async function refreshAccessToken(
     throw new UnauthorizedError('Invalid refresh token');
   }
 
-  // Find a matching, non-expired refresh token
-  let matchedIndex = -1;
-  for (let i = 0; i < user.refreshTokens.length; i++) {
-    const rt = user.refreshTokens[i];
-    if (rt.expiresAt < new Date()) continue;
-
-    const matches = await bcrypt.compare(rawRefreshToken, rt.tokenHash);
-    if (matches) {
-      matchedIndex = i;
-      break;
-    }
-  }
+  // Find a matching, non-expired refresh token (sha256 first, then legacy bcrypt)
+  const matchedIndex = await findTokenIndex(user.refreshTokens, rawRefreshToken);
 
   if (matchedIndex === -1) {
     throw new UnauthorizedError('Invalid or expired refresh token');
@@ -233,17 +272,12 @@ export async function logout(
   const user = await User.findById(userId);
   if (!user) return; // Silently succeed — user already gone
 
-  for (let i = 0; i < user.refreshTokens.length; i++) {
-    const matches = await bcrypt.compare(
-      rawRefreshToken,
-      user.refreshTokens[i].tokenHash,
-    );
-    if (matches) {
-      user.refreshTokens.splice(i, 1);
-      await user.save();
-      logger.info({ userId: user._id }, 'User logged out (single session)');
-      return;
-    }
+  const index = await findTokenIndex(user.refreshTokens, rawRefreshToken);
+  if (index !== -1) {
+    user.refreshTokens.splice(index, 1);
+    await user.save();
+    logger.info({ userId: user._id }, 'User logged out (single session)');
+    return;
   }
 
   // Token not found — still a successful logout (idempotent)
@@ -292,7 +326,11 @@ export async function getSessions(
   for (const rt of user.refreshTokens) {
     let isCurrent = false;
     if (currentRefreshToken) {
-      isCurrent = await bcrypt.compare(currentRefreshToken, rt.tokenHash);
+      if (rt.tokenHash.startsWith('sha256:')) {
+        isCurrent = verifyTokenHashSync(currentRefreshToken, rt.tokenHash);
+      } else {
+        isCurrent = await bcrypt.compare(currentRefreshToken, rt.tokenHash);
+      }
     }
     sessions.push({
       id: rt._id.toString(),
@@ -399,7 +437,8 @@ async function issueTokens(
   });
 
   const rawRefreshToken = generateRefreshToken();
-  const tokenHash = await bcrypt.hash(rawRefreshToken, 10);
+  // Task H7: Store new refresh tokens with fast sha256 hash
+  const tokenHash = hashRefreshToken(rawRefreshToken);
 
   user.refreshTokens.push({
     tokenHash,
@@ -410,6 +449,12 @@ async function issueTokens(
 
   // Clean up expired tokens
   purgeExpiredTokens(user);
+
+  // Task H7: Cap stored refresh tokens per user at 10 (drop oldest by createdAt)
+  if (user.refreshTokens.length > 10) {
+    user.refreshTokens.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    user.refreshTokens = user.refreshTokens.slice(user.refreshTokens.length - 10) as typeof user.refreshTokens;
+  }
 
   await user.save();
 

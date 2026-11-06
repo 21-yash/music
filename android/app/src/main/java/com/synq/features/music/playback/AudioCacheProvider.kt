@@ -92,24 +92,62 @@ class AudioCacheProvider @Inject constructor(
         }
     }
 
-    fun isSongCached(songId: String): Boolean {
-        return try {
-            // 1. Check direct songId key spans
-            val spans = cache.getCachedSpans(songId)
-            if (spans.isNotEmpty() && spans.sumOf { it.length } > 20_000L) {
-                return true
+    fun warmBytes(songId: String, uriString: String, targetBytes: Long = WarmRange.DEFAULT_TARGET_BYTES) {
+        try {
+            val metadata = cache.getContentMetadata(songId)
+            val contentLength = ContentMetadata.getContentLength(metadata)
+            val totalLengthKnown = if (contentLength > 0L) contentLength else null
+            val cached = cache.getCachedBytes(songId, 0L, targetBytes)
+            val plan = WarmRange.plan(totalLengthKnown, cached, targetBytes)
+            if (plan is WarmRange.RangePlan.Warm) {
+                val lengthToRead = plan.endByte - plan.startByte + 1
+                val dataSpec = androidx.media3.datasource.DataSpec.Builder()
+                    .setUri(android.net.Uri.parse(uriString))
+                    .setPosition(plan.startByte)
+                    .setLength(lengthToRead)
+                    .setKey(songId)
+                    .build()
+                val cacheDataSource = buildCacheDataSourceFactory().createDataSource() as CacheDataSource
+                val writer = androidx.media3.datasource.cache.CacheWriter(cacheDataSource, dataSpec, null, null)
+                writer.cache()
             }
+        } catch (e: Exception) {
+            com.synq.features.music.jam.safeLogW("PlayTiming", "warmBytes failed: ${e.message}")
+        }
+    }
 
-            // 2. Check saved stream URI spans
+    fun isFullyCached(songId: String): Boolean {
+        return isKeyFullyCached(songId) || run {
+            val savedUri = streamCacheStorage.getStreamUri(songId)
+            !savedUri.isNullOrBlank() && isKeyFullyCached(savedUri)
+        }
+    }
+
+    fun isKeyFullyCached(key: String): Boolean {
+        return try {
+            val metadata = cache.getContentMetadata(key)
+            val contentLength = ContentMetadata.getContentLength(metadata)
+            if (contentLength <= 0L) return false
+            val spans = cache.getCachedSpans(key).map { it.position to it.length }
+            isRangeFullyCovered(spans, contentLength)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun isSongCached(songId: String): Boolean {
+        return isFullyCached(songId)
+    }
+
+    fun remove(songId: String): Boolean {
+        return try {
+            cache.removeResource(songId)
             val savedUri = streamCacheStorage.getStreamUri(songId)
             if (!savedUri.isNullOrBlank()) {
-                val uriSpans = cache.getCachedSpans(savedUri)
-                if (uriSpans.isNotEmpty() && uriSpans.sumOf { it.length } > 20_000L) {
-                    return true
-                }
+                cache.removeResource(savedUri)
             }
-
-            false
+            updateCacheSize()
+            true
         } catch (_: Exception) {
             false
         }
@@ -135,4 +173,32 @@ class AudioCacheProvider @Inject constructor(
             cache.release()
         } catch (_: Exception) {}
     }
+}
+
+/**
+ * Pure helper function to verify if a set of cached spans fully covers
+ * the byte range from 0 until totalLength without gaps.
+ */
+fun isRangeFullyCovered(spans: List<Pair<Long, Long>>, totalLength: Long): Boolean {
+    if (totalLength <= 0L || spans.isEmpty()) return false
+
+    val sorted = spans.sortedBy { it.first }
+    var coveredUntil = 0L
+
+    for ((start, length) in sorted) {
+        if (length <= 0L) continue
+        if (start > coveredUntil) {
+            // Gap detected in cached spans
+            return false
+        }
+        val end = start + length
+        if (end > coveredUntil) {
+            coveredUntil = end
+        }
+        if (coveredUntil >= totalLength) {
+            return true
+        }
+    }
+
+    return coveredUntil >= totalLength
 }

@@ -10,6 +10,8 @@ import { JioSaavnProvider } from './providers/music';
 import { YouTubeProvider } from './providers/music/youtube/youtubeProvider';
 import { initSportsService } from './services/sportsService';
 import { CricbuzzProvider } from './providers/sports/cricket/cricbuzzProvider';
+import { jam2Store } from './jam2/store';
+import { jam2Manager } from './jam2/manager';
 
 /**
  * Application entry point.
@@ -34,6 +36,9 @@ async function start(): Promise<void> {
         'Redis unavailable at startup — continuing without Redis (rate limiting will fail open)',
       );
     }
+
+    const persistedRoomsCount = await jam2Store.countPersistedRooms();
+    logger.info({ count: persistedRoomsCount }, 'Persisted jam2 rooms detected in Redis');
 
     // ─── Initialize Services ───────────────────────────────────
     registerMusicProvider(new JioSaavnProvider(), true);
@@ -60,8 +65,21 @@ async function start(): Promise<void> {
     });
 
     // ─── Graceful shutdown ─────────────────────────────────────
+    let isShuttingDown = false;
     const shutdown = async (signal: string) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
       logger.info({ signal }, 'Shutdown signal received');
+
+      // Force exit if graceful shutdown takes too long (armed before any async flushes)
+      setTimeout(() => {
+        logger.error('Graceful shutdown timed out. Forcing exit.');
+        process.exit(1);
+      }, 10_000);
+
+      jam2Manager.notifyServerRestart();
+      jam2Manager.stop();
+      await jam2Store.flushAllDirty();
 
       // Stop accepting new connections
       server.close(async () => {
@@ -73,12 +91,6 @@ async function start(): Promise<void> {
         logger.info('All connections closed. Exiting.');
         process.exit(0);
       });
-
-      // Force exit if graceful shutdown takes too long
-      setTimeout(() => {
-        logger.error('Graceful shutdown timed out. Forcing exit.');
-        process.exit(1);
-      }, 10_000);
     };
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));

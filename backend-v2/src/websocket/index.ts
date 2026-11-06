@@ -5,7 +5,7 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { verifyAccessToken } from '../utils/tokens';
 import { registerSportsHandlers } from './sportsHandler';
-import { registerJamHandlers } from './jamHandler';
+import { registerJam2Handlers } from '../jam2/socket';
 import { SportsWorker } from '../jobs/sportsWorker';
 
 let io: SocketIOServer | null = null;
@@ -24,8 +24,9 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
       credentials: true,
     },
     maxHttpBufferSize: 50_000,
-    pingInterval: 25_000,
-    pingTimeout: 20_000,
+    // Task H6: Mobile-friendly heartbeat settings to avoid spurious disconnects
+    pingInterval: 20_000,
+    pingTimeout: 25_000,
   });
   io = server;
 
@@ -76,15 +77,18 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   sportsWorker.start();
 
   server.on('connection', (socket) => {
-    logger.info({ socketId: socket.id }, 'Socket.IO client connected');
+    const connectedAt = Date.now();
+    const userId = socket.data.user?.userId;
+    logger.info({ socketId: socket.id, userId }, 'Socket.IO client connected');
 
     // Register domain handlers
     registerSportsHandlers(socket);
-    registerJamHandlers(server, socket);
+    registerJam2Handlers(server, socket);
 
     socket.on('disconnect', (reason) => {
+      const durationMs = Date.now() - connectedAt;
       logger.info(
-        { socketId: socket.id, reason },
+        { socketId: socket.id, userId, reason, durationMs },
         'Socket.IO client disconnected',
       );
     });

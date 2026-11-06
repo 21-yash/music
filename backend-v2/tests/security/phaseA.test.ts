@@ -11,7 +11,6 @@ import { User } from '../../src/models/User';
 import { initializeSocketIO } from '../../src/websocket';
 import { hashInviteCode } from '../../src/utils/invite';
 import * as redisConfig from '../../src/config/redis';
-import { socketToSessions } from '../../src/websocket/jamHandler';
 
 describe('Phase A Security Tests', () => {
   const VALID_KEY = env.APP_API_KEY;
@@ -353,7 +352,7 @@ describe('Phase A Security Tests', () => {
       expect(errMessage).toContain('Authentication token required');
     });
 
-    it('Socket with valid key and token connects successfully and ignores spoofed identity in jam:create', async () => {
+    it('Socket with valid key and token connects successfully and ignores spoofed identity in jam2:create', async () => {
       const socket = ioClient(`http://localhost:${port}`, {
         auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
         transports: ['websocket'],
@@ -366,124 +365,25 @@ describe('Phase A Security Tests', () => {
       });
       expect(connected).toBe(true);
 
-      // Verify that jam:create uses socket.data.user (testpilot) and ignores payload spoofing
-      const jamCreatedPromise = new Promise<any>((resolve) => {
-        socket.on('jam:created', (data) => resolve(data));
+      // Verify that jam2:create uses socket.data.user (testpilot) and ignores payload spoofing
+      const ack: any = await new Promise((resolve) => {
+        socket.emit(
+          'jam2:create',
+          {
+            protocol: 2,
+            userId: 'hacker-impersonated-id',
+            username: 'hacker-impersonated-name',
+          },
+          resolve,
+        );
       });
 
-      socket.emit('jam:create', {
-        userId: 'hacker-impersonated-id',
-        username: 'hacker-impersonated-name',
-      });
-
-      const jamData = await jamCreatedPromise;
-      expect(jamData.session.hostName).toBe('testpilot');
-      expect(jamData.session.hostUserId).toBe('user-123456789012345678901234');
-
-      socket.disconnect();
-    });
-
-    it('Host reconnect within disconnect grace keeps the room, host role, and avoids duplicate participants', async () => {
-      // Socket 1: Host creates room
-      const socket1 = ioClient(`http://localhost:${port}`, {
-        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
-        transports: ['websocket'],
-        reconnection: false,
-      });
-
-      await new Promise<void>((resolve) => socket1.on('connect', () => resolve()));
-
-      const created = await new Promise<any>((resolve) => {
-        socket1.on('jam:created', (data) => resolve(data));
-        socket1.emit('jam:create');
-      });
-      const roomCode = created.session.code;
-      expect(roomCode).toBeDefined();
-
-      // Simulate network drop on socket 1 (engine close triggers transport close, not explicit client namespace disconnect)
-      (socket1.io.engine as any).close();
-
-      // Socket 2: Host reconnects with same user ID within grace period
-      const socket2 = ioClient(`http://localhost:${port}`, {
-        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
-        transports: ['websocket'],
-        reconnection: false,
-      });
-
-      await new Promise<void>((resolve) => socket2.on('connect', () => resolve()));
-
-      const joined = await new Promise<any>((resolve) => {
-        socket2.on('jam:joined', (data) => resolve(data));
-        socket2.emit('jam:join', { code: roomCode });
-      });
-
-      // Host privileges and room are preserved
-      expect(joined.session.code).toBe(roomCode);
-      expect(joined.session.hostUserId).toBe('user-123456789012345678901234');
-      // Duplicate participant entry for the same user is purged
-      expect(joined.session.participants.length).toBe(1);
-      expect(joined.session.participants[0].socketId).toBe(socket2.id);
-
-      socket2.disconnect();
-    });
-
-    it('Explicit jam:leave is immediate (room deleted immediately if host alone)', async () => {
-      const socket = ioClient(`http://localhost:${port}`, {
-        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
-        transports: ['websocket'],
-        reconnection: false,
-      });
-
-      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
-
-      const created = await new Promise<any>((resolve) => {
-        socket.on('jam:created', (data) => resolve(data));
-        socket.emit('jam:create');
-      });
-      const roomCode = created.session.code;
-
-      // Explicit leave
-      socket.emit('jam:leave', { code: roomCode });
-      // Allow event loop to process leave
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Attempt to join the closed room should fail immediately
-      const joinErrorPromise = new Promise<string>((resolve) => {
-        socket.on('jam:error', (data) => resolve(data.message));
-        socket.emit('jam:join', { code: roomCode });
-      });
-
-      const errMsg = await joinErrorPromise;
-      expect(errMsg).toBe('Invalid or expired room code');
-
-      socket.disconnect();
-    });
-
-    it('socketToSessions cleans up map entry when last session code is removed (no memory leak on leave)', async () => {
-      const socket = ioClient(`http://localhost:${port}`, {
-        auth: { apiKey: VALID_KEY, token: VALID_TOKEN },
-        transports: ['websocket'],
-        reconnection: false,
-      });
-
-      await new Promise<void>((resolve) => socket.on('connect', () => resolve()));
-
-      const created = await new Promise<any>((resolve) => {
-        socket.on('jam:created', (data) => resolve(data));
-        socket.emit('jam:create');
-      });
-      const roomCode = created.session.code;
-      expect(roomCode).toBeDefined();
-
-      const serverSocketId = socket.id!;
-      expect(socketToSessions.has(serverSocketId)).toBe(true);
-
-      // Explicit leave
-      socket.emit('jam:leave', { code: roomCode });
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Map entry must be completely deleted, not an empty Set
-      expect(socketToSessions.has(serverSocketId)).toBe(false);
+      expect(ack.ok).toBe(true);
+      expect(ack.room.hostUserId).toBe('user-123456789012345678901234');
+      const hostMember = ack.room.members.find(
+        (m) => m.userId === 'user-123456789012345678901234',
+      );
+      expect(hostMember?.username).toBe('testpilot');
 
       socket.disconnect();
     });

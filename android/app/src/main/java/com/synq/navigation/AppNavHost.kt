@@ -277,7 +277,15 @@ fun AppNavHost(
 
         composable(Screen.Jam.route) {
             com.synq.features.music.jam.JamScreen(
-                onBackClick = { navController.popBackStack() },
+                onBackClick = {
+                    if (navController.previousBackStackEntry != null) {
+                        navController.popBackStack()
+                    } else {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                },
                 onNavigateToSearch = { navController.navigate(Screen.Search.route) },
                 rootViewModel = rootViewModel
             )

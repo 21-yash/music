@@ -32,6 +32,7 @@ export interface MusicProvider {
 
   /** Unique identifier used in Song.providerId, etc. */
   readonly id: string;
+  readonly getSongIsReliable?: boolean;
 
   /**
    * Search for songs, albums, and artists.

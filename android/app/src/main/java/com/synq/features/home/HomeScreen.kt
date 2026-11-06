@@ -391,12 +391,14 @@ fun HomeScreen(
             if (showJamIntro) {
                 JamIntroDialog(
                     onDismiss = { showJamIntro = false },
-                    onStartJam = {
-                        rootViewModel.startJam()
-                        onNavigateToJam()
+                    onStartJam = { onComplete ->
+                        rootViewModel.startJam(onComplete = onComplete)
                     },
-                    onJoinJam = { code ->
-                        rootViewModel.joinJam(code)
+                    onJoinJam = { code, onComplete ->
+                        rootViewModel.joinJam(code, onComplete = onComplete)
+                    },
+                    onSuccessNav = {
+                        showJamIntro = false
                         onNavigateToJam()
                     }
                 )
