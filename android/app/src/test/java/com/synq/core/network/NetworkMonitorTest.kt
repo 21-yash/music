@@ -5,8 +5,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import com.synq.features.music.jam.JamSessionManager
+import com.synq.workers.SyncManager
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -111,22 +114,30 @@ class NetworkMonitorTest {
     }
 
     @Test
-    fun testCapabilitiesWithoutValidatedDoesNotMarkOnline() = runTest {
-        val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
-        every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+    fun testCapabilitiesWithoutValidatedMarksOnlineAndNoSync() = runTest {
+        mockkObject(SyncManager)
+        try {
+            every { SyncManager.triggerOneTimeSync(any()) } returns Unit
 
-        val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
-        monitor.startMonitoring()
+            val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+            every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
 
-        val net = mockk<Network>()
-        // Captive portal: has internet capability flag, but NOT validated
-        val unvalidatedCaps = createCapabilities(internet = true, validated = false)
+            val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+            monitor.startMonitoring()
 
-        callbackSlot.captured.onAvailable(net)
-        callbackSlot.captured.onCapabilitiesChanged(net, unvalidatedCaps)
-        runCurrent()
+            val net = mockk<Network>()
+            // Captive portal / VPN / Jio: has internet capability flag, but NOT validated
+            val unvalidatedCaps = createCapabilities(internet = true, validated = false)
 
-        assertFalse("Network must not be marked online unless NET_CAPABILITY_VALIDATED is present", monitor.isOnline.value)
+            callbackSlot.captured.onAvailable(net)
+            callbackSlot.captured.onCapabilitiesChanged(net, unvalidatedCaps)
+            runCurrent()
+
+            assertTrue("Network must be marked online when NET_CAPABILITY_INTERNET is present even without VALIDATED", monitor.isOnline.value)
+            verify(exactly = 0) { SyncManager.triggerOneTimeSync(any()) }
+        } finally {
+            unmockkObject(SyncManager)
+        }
     }
 
     @Test
@@ -293,9 +304,9 @@ class NetworkMonitorTest {
 
     @Test
     fun testStartOfflineThenValidatedNetworkTriggersOneTimeSyncOnce() = runTest {
-        io.mockk.mockkObject(com.synq.workers.SyncManager)
+        mockkObject(SyncManager)
         try {
-            every { com.synq.workers.SyncManager.triggerOneTimeSync(any()) } returns Unit
+            every { SyncManager.triggerOneTimeSync(any()) } returns Unit
 
             val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
             every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
@@ -316,10 +327,111 @@ class NetworkMonitorTest {
             runCurrent()
 
             assertTrue(monitor.isOnline.value)
-            verify(exactly = 1) { com.synq.workers.SyncManager.triggerOneTimeSync(context) }
+            verify(exactly = 1) { SyncManager.triggerOneTimeSync(context) }
         } finally {
-            io.mockk.unmockkObject(com.synq.workers.SyncManager)
+            unmockkObject(SyncManager)
+        }
+    }
+
+    @Test
+    fun testAppStartsOfflineThenNetworkWithoutValidatedAvailableMarksOnlineAndTriggersSyncOnce() = runTest {
+        mockkObject(SyncManager)
+        try {
+            every { SyncManager.triggerOneTimeSync(any()) } returns Unit
+
+            val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+            every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+            every { connectivityManager.activeNetwork } returns null
+
+            // Start monitor offline
+            val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+            assertFalse(monitor.isOnline.value)
+            monitor.startMonitoring()
+
+            val net = mockk<Network>()
+            val caps = createCapabilities(internet = true, validated = false)
+            every { connectivityManager.getNetworkCapabilities(net) } returns caps
+
+            // Network callback arrives with internet=true, validated=false
+            callbackSlot.captured.onAvailable(net)
+            callbackSlot.captured.onCapabilitiesChanged(net, caps)
+            runCurrent()
+
+            assertTrue(monitor.isOnline.value)
+            verify(exactly = 1) { SyncManager.triggerOneTimeSync(context) }
+        } finally {
+            unmockkObject(SyncManager)
+        }
+    }
+
+    @Test
+    fun testAppStartsOnlineDoesNotTriggerSync() = runTest {
+        mockkObject(SyncManager)
+        try {
+            every { SyncManager.triggerOneTimeSync(any()) } returns Unit
+
+            val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+            every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+            // App starts online (activeNetwork configured in @Before setup)
+            val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+            assertTrue(monitor.isOnline.value)
+            monitor.startMonitoring()
+
+            val net = mockk<Network>()
+            val caps = createCapabilities(internet = true, validated = true)
+            every { connectivityManager.getNetworkCapabilities(net) } returns caps
+
+            callbackSlot.captured.onAvailable(net)
+            callbackSlot.captured.onCapabilitiesChanged(net, caps)
+            runCurrent()
+
+            assertTrue(monitor.isOnline.value)
+            verify(exactly = 0) { SyncManager.triggerOneTimeSync(any()) }
+        } finally {
+            unmockkObject(SyncManager)
+        }
+    }
+
+    @Test
+    fun testValidatedFlapOnSameNetworkWhileOnlineDoesNotTriggerSyncAndStaysOnline() = runTest {
+        mockkObject(SyncManager)
+        try {
+            every { SyncManager.triggerOneTimeSync(any()) } returns Unit
+
+            val callbackSlot = slot<ConnectivityManager.NetworkCallback>()
+            every { connectivityManager.registerDefaultNetworkCallback(capture(callbackSlot)) } returns Unit
+
+            val monitor = NetworkMonitor(context, jamSessionManagerProvider, this)
+            monitor.startMonitoring()
+
+            val net = mockk<Network>()
+            val capsValidated = createCapabilities(internet = true, validated = true)
+            val capsUnvalidated = createCapabilities(internet = true, validated = false)
+            every { connectivityManager.getNetworkCapabilities(net) } returns capsValidated
+
+            // Establish net with validated=true
+            callbackSlot.captured.onAvailable(net)
+            callbackSlot.captured.onCapabilitiesChanged(net, capsValidated)
+            runCurrent()
+
+            assertTrue(monitor.isOnline.value)
+
+            // Flap: validated drops to false on same network
+            callbackSlot.captured.onCapabilitiesChanged(net, capsUnvalidated)
+            runCurrent()
+
+            assertTrue("Must stay online when validated drops but internet remains", monitor.isOnline.value)
+            verify(exactly = 0) { SyncManager.triggerOneTimeSync(any()) }
+
+            // Flap: validated returns to true on same network
+            callbackSlot.captured.onCapabilitiesChanged(net, capsValidated)
+            runCurrent()
+
+            assertTrue("Must stay online when validated returns", monitor.isOnline.value)
+            verify(exactly = 0) { SyncManager.triggerOneTimeSync(any()) }
+        } finally {
+            unmockkObject(SyncManager)
         }
     }
 }
-

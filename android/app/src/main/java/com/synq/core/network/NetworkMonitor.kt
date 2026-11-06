@@ -10,6 +10,7 @@ import com.synq.workers.SyncManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,9 +85,8 @@ class NetworkMonitor(
 
     private fun decideValidatedAction(network: Network): String {
         if (isInitialCallback) return "ignored"
-        val wasOffline = !_isOnline.value
         val networkChanged = network != lastNotifiedValidatedNetwork
-        return if (networkChanged || wasOffline) {
+        return if (networkChanged) {
             if (isJamActive) "handover started" else "new active network"
         } else {
             "ignored"
@@ -96,8 +96,7 @@ class NetworkMonitor(
     private fun hasValidInternetConnection(): Boolean {
         val activeNetwork = connectivityManager?.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-               capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     fun startMonitoring() {
@@ -128,6 +127,7 @@ class NetworkMonitor(
         drainEvents()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun drainEvents() {
         if (!isDraining.compareAndSet(false, true)) return
         scope.launch {
@@ -149,12 +149,22 @@ class NetworkMonitor(
         when (event) {
             is NetworkEvent.Available -> {
                 val caps = connectivityManager?.getNetworkCapabilities(event.network)
-                val isValidated = caps != null &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val hasInternet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                val isValidated = hasInternet && caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
                 val transport = getTransportName(caps)
                 networkTransports[event.network] = transport
                 val shortId = getShortId(event.network)
+
+                if (hasInternet) {
+                    currentNetwork = event.network
+                    val wasOffline = !_isOnline.value
+                    _isOnline.value = true
+                    if (wasOffline && !isInitialCallback) {
+                        try {
+                            SyncManager.triggerOneTimeSync(context)
+                        } catch (_: Throwable) {}
+                    }
+                }
 
                 if (isValidated) {
                     val decision = decideValidatedAction(event.network)
@@ -167,22 +177,40 @@ class NetworkMonitor(
             }
             is NetworkEvent.CapabilitiesChanged -> {
                 val hasInternet = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                val isValidated = event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                val isOnlineNow = hasInternet && isValidated
+                val isValidated = hasInternet && event.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 val transport = getTransportName(event.capabilities)
                 networkTransports[event.network] = transport
                 val shortId = getShortId(event.network)
 
-                if (isOnlineNow) {
-                    val decision = decideValidatedAction(event.network)
-                    safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=true, transport=$transport -> $decision")
-                    handleValidatedNetwork(event.network)
+                if (hasInternet) {
+                    currentNetwork = event.network
+                    val wasOffline = !_isOnline.value
+                    _isOnline.value = true
+                    if (wasOffline && !isInitialCallback) {
+                        try {
+                            SyncManager.triggerOneTimeSync(context)
+                        } catch (_: Throwable) {}
+                    }
+
+                    if (isValidated) {
+                        val decision = decideValidatedAction(event.network)
+                        safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=true, transport=$transport -> $decision")
+                        handleValidatedNetwork(event.network)
+                    } else {
+                        safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=false, transport=$transport -> unvalidated")
+                        if (isInitialCallback) {
+                            isInitialCallback = false
+                        }
+                    }
                 } else {
-                    safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, validated=false, transport=$transport -> ignored")
-                    if (currentNetwork == event.network || lastNotifiedValidatedNetwork == event.network) {
-                        _isOnline.value = false
+                    safeLogI("NetworkMonitor", "CapabilitiesChanged: id=$shortId, internet=false, transport=$transport -> offline")
+                    if (currentNetwork == event.network) {
+                        currentNetwork = null
+                    }
+                    if (lastNotifiedValidatedNetwork == event.network) {
                         lastNotifiedValidatedNetwork = null
                     }
+                    _isOnline.value = hasValidInternetConnection()
                 }
             }
             is NetworkEvent.Lost -> {
@@ -196,8 +224,6 @@ class NetworkMonitor(
 
     private fun handleValidatedNetwork(network: Network) {
         currentNetwork = network
-        val wasOffline = !_isOnline.value
-        _isOnline.value = true
 
         if (isInitialCallback) {
             isInitialCallback = false
@@ -206,13 +232,8 @@ class NetworkMonitor(
         }
 
         val networkChanged = network != lastNotifiedValidatedNetwork
-        if (networkChanged || wasOffline) {
+        if (networkChanged) {
             lastNotifiedValidatedNetwork = network
-            if (wasOffline) {
-                try {
-                    SyncManager.triggerOneTimeSync(context)
-                } catch (_: Throwable) {}
-            }
             if (isJamActive) {
                 jamSessionManagerProvider.get().onNetworkRestored()
             }
@@ -229,7 +250,7 @@ class NetworkMonitor(
         if (currentNetwork == network) {
             currentNetwork = null
         }
-        _isOnline.value = (lastNotifiedValidatedNetwork != null) || hasValidInternetConnection()
+        _isOnline.value = (currentNetwork != null) || hasValidInternetConnection()
     }
 
     private sealed interface NetworkEvent {
