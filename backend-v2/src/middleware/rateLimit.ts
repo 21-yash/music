@@ -15,6 +15,7 @@ interface LazyLimiterOptions {
   enableInTest?: boolean;
   customStore?: any;
   failClosed?: boolean;
+  timeoutMs?: number;
 }
 
 const lastLimiterWarnMap = new Map<string, number>();
@@ -24,20 +25,21 @@ const lastLimiterWarnMap = new Map<string, number>();
  * This prevents calling getRedisClient() during module import time before Redis is connected.
  * In test mode (NODE_ENV === 'test'), rate limiting is bypassed unless enableInTest is set.
  *
- * Task H7 / B11:
- * - 750ms timeout guard to ensure an idle/stalled Redis connection cannot block requests indefinitely.
- * - On 750ms timeout, auth routes fail closed (503 ServiceUnavailableError) to prevent unthrottled
+ * Task H7 / B11 / M2:
+ * - Guard timeout (default 750ms, 2000ms for sensitive auth) to ensure an idle/stalled Redis connection cannot block requests indefinitely.
+ * - On timeout, auth routes with failClosed: true (login, login_ip, register) return 503 ServiceUnavailableError to prevent unthrottled
  *   brute-force attacks during an outage.
- * - Non-auth routes (music, stream, sports, global) fail open so user experiences minimal disruption.
+ * - Auth refresh and non-auth routes (music, stream, sports, global) fail open so user experiences minimal disruption.
  *
  * Late 429 limitation:
- * When Redis is slow (>750ms) but eventually resolves, the in-flight Redis command completes in the
+ * When Redis is slow (>timeoutMs) but eventually resolves, the in-flight Redis command completes in the
  * background and increments the count. However, since the HTTP request already timed out and either
  * failed open or returned 503, the 429 cannot be applied retroactively to that already-handled request.
  * Subsequent requests within the window will see the incremented count.
  */
 export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
   let limiterInstance: RequestHandler | null = null;
+  const timeoutMs = options.timeoutMs ?? 750;
 
   return (req: Request, res: Response, next: NextFunction) => {
     if (process.env.NODE_ENV === 'test' && !options.enableInTest) {
@@ -99,7 +101,7 @@ export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
         lastLimiterWarnMap.set(options.keyPrefix, now);
         logger.warn(
           { limiter: options.keyPrefix, path: req.path, failClosed: shouldFailClosed },
-          `Rate limiter '${options.keyPrefix}' timed out after 750ms; ${shouldFailClosed ? 'failing closed (503)' : 'failing open'}`
+          `Rate limiter '${options.keyPrefix}' timed out after ${timeoutMs}ms; ${shouldFailClosed ? 'failing closed (503)' : 'failing open'}`
         );
       }
       const waitMs = now - startMs;
@@ -110,7 +112,7 @@ export function createLazyLimiter(options: LazyLimiterOptions): RequestHandler {
       } else {
         next();
       }
-    }, 750);
+    }, timeoutMs);
 
     try {
       limiterInstance(req, res, safeNext);
@@ -164,6 +166,7 @@ export const loginLimiter = createLazyLimiter({
   limit: 10,
   keyPrefix: 'login',
   failClosed: true,
+  timeoutMs: 2000,
   keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? 'unknown')}:${String(req.body?.login ?? '').trim().toLowerCase()}`,
   skipSuccessfulRequests: true,
 });
@@ -174,6 +177,7 @@ export const loginIpLimiter = createLazyLimiter({
   limit: 30,
   keyPrefix: 'login_ip',
   failClosed: true,
+  timeoutMs: 2000,
 });
 
 /** Auth register: 5 req / 1 hour per IP */
@@ -182,6 +186,7 @@ export const registerLimiter = createLazyLimiter({
   limit: 5,
   keyPrefix: 'register',
   failClosed: true,
+  timeoutMs: 2000,
 });
 
 /** Auth refresh: 30 req / 15 min per IP */
@@ -189,5 +194,4 @@ export const refreshLimiter = createLazyLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   keyPrefix: 'refresh',
-  failClosed: true,
 });

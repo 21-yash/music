@@ -190,5 +190,116 @@ describe('Task H7 backend auth refresh and limiter fail-open', () => {
     expect(passedErr.code).toBe('SERVICE_UNAVAILABLE');
     expect(req.limiterWaitMs).toBeGreaterThanOrEqual(700);
   });
-});
 
+  it('Task M2: refresh limiter fails open (calls next() without error) when the limiter times out', async () => {
+    const hangingRefreshLimiter = createLazyLimiter({
+      windowMs: 60000,
+      limit: 10,
+      keyPrefix: 'refresh',
+      enableInTest: true,
+      customStore: {
+        init: () => {},
+        increment: () => new Promise(() => {}), // never resolves
+        decrement: () => {},
+        resetKey: () => {},
+      } as any,
+    });
+
+    const req: any = {
+      path: '/api/v1/auth/refresh',
+      originalUrl: '/api/v1/auth/refresh',
+      ip: '127.0.0.1',
+      headers: {},
+      app: { get: () => false },
+    };
+    const res: any = {};
+    let passedErr: any = 'NOT_CALLED';
+
+    await new Promise<void>((resolve) => {
+      const next = (err?: any) => {
+        passedErr = err;
+        resolve();
+      };
+
+      hangingRefreshLimiter(req, res, next);
+    });
+
+    expect(passedErr).toBeUndefined();
+    expect(req.limiterWaitMs).toBeGreaterThanOrEqual(700);
+  });
+
+  it('Task M2: login, login-IP and register still return 503 ServiceUnavailableError on a 2000ms timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const limiters = [
+        { name: 'login', limiter: createLazyLimiter({ windowMs: 60000, limit: 10, keyPrefix: 'login', failClosed: true, timeoutMs: 2000, enableInTest: true, customStore: { init: () => {}, increment: () => new Promise(() => {}), decrement: () => {}, resetKey: () => {} } as any }) },
+        { name: 'login_ip', limiter: createLazyLimiter({ windowMs: 60000, limit: 30, keyPrefix: 'login_ip', failClosed: true, timeoutMs: 2000, enableInTest: true, customStore: { init: () => {}, increment: () => new Promise(() => {}), decrement: () => {}, resetKey: () => {} } as any }) },
+        { name: 'register', limiter: createLazyLimiter({ windowMs: 60000, limit: 5, keyPrefix: 'register', failClosed: true, timeoutMs: 2000, enableInTest: true, customStore: { init: () => {}, increment: () => new Promise(() => {}), decrement: () => {}, resetKey: () => {} } as any }) },
+      ];
+
+      for (const { name, limiter } of limiters) {
+        const req: any = { path: `/api/v1/auth/${name}`, originalUrl: `/api/v1/auth/${name}`, ip: '127.0.0.1', headers: {}, app: { get: () => false } };
+        const res: any = {};
+        let errResult: any = undefined;
+
+        limiter(req, res, (err) => {
+          errResult = err;
+        });
+
+        // At 1999ms, timeout has not fired yet
+        vi.advanceTimersByTime(1999);
+        expect(errResult).toBeUndefined();
+
+        // At 2000ms, timeout fires and returns 503
+        vi.advanceTimersByTime(1);
+        expect(errResult).toBeDefined();
+        expect(errResult.statusCode).toBe(503);
+        expect(errResult.code).toBe('SERVICE_UNAVAILABLE');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Task M2: a limiter with a custom timeoutMs times out at that value (use fake timers)', async () => {
+    vi.useFakeTimers();
+    try {
+      const customTimeoutMs = 1500;
+      const customLimiter = createLazyLimiter({
+        windowMs: 60000,
+        limit: 10,
+        keyPrefix: 'custom',
+        timeoutMs: customTimeoutMs,
+        failClosed: true,
+        enableInTest: true,
+        customStore: {
+          init: () => {},
+          increment: () => new Promise(() => {}),
+          decrement: () => {},
+          resetKey: () => {},
+        } as any,
+      });
+
+      const req: any = { path: '/api/v1/test', originalUrl: '/api/v1/test', ip: '127.0.0.1', headers: {}, app: { get: () => false } };
+      const res: any = {};
+      let nextCalled = false;
+      let passedErr: any = null;
+
+      customLimiter(req, res, (err) => {
+        nextCalled = true;
+        passedErr = err;
+      });
+
+      // At customTimeoutMs - 1ms, not called
+      vi.advanceTimersByTime(customTimeoutMs - 1);
+      expect(nextCalled).toBe(false);
+
+      // At customTimeoutMs, called
+      vi.advanceTimersByTime(1);
+      expect(nextCalled).toBe(true);
+      expect(passedErr?.statusCode).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
