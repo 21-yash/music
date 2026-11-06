@@ -31,6 +31,7 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
+# Keep app data classes used with serialization
 -keep,includedescriptorclasses class com.synq.features.music.data.dto.**$$serializer { *; }
 -keepclassmembers class com.synq.features.music.data.dto.** {
     *** Companion;
@@ -66,7 +67,10 @@
 -keep class io.socket.** { *; }
 -dontwarn io.socket.**
 
-# NewPipe Extractor
+# NewPipe Extractor & Mozilla Rhino
 -keep class org.schabi.newpipe.extractor.** { *; }
 -dontwarn org.schabi.newpipe.extractor.**
+-dontwarn java.beans.**
+-dontwarn javax.script.**
+-dontwarn org.mozilla.javascript.**
 -keep class org.jsoup.** { *; }
