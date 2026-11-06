@@ -141,6 +141,10 @@ class MusicPlayerManager @Inject constructor(
         private const val MAX_INITIAL_QUEUE_SIZE = 100
         private const val QUEUE_PAGE_CHUNK = 50
         private val isNewPipeWarmedUp = AtomicBoolean(false)
+
+        fun shouldWarmUp(isOnline: Boolean, alreadyWarmed: Boolean): Boolean {
+            return isOnline && !alreadyWarmed
+        }
     }
 
     private var positionTrackerJob: Job? = null
@@ -163,6 +167,9 @@ class MusicPlayerManager @Inject constructor(
     }
 
     private fun warmUpNewPipeAsync() {
+        if (!shouldWarmUp(isOnline = networkMonitor.isOnline.value, alreadyWarmed = isNewPipeWarmedUp.get())) {
+            return
+        }
         if (isNewPipeWarmedUp.compareAndSet(false, true)) {
             scope.launch(Dispatchers.IO) {
                 try {
