@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import com.synq.features.music.util.SeekHold
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -588,7 +589,7 @@ fun JamScreen(
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.Top
                             ) {
                                 uiState.members.forEach { member ->
                                     JamMemberAvatarPill(
@@ -614,15 +615,82 @@ fun JamScreen(
                         val isPlaying = nowPlaying.status == JamPlaybackStatus.PLAYING
 
                         Card(
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(22.dp),
                             colors = CardDefaults.cardColors(containerColor = cardBg),
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
-                                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Accent.copy(alpha = 0.35f),
+                                        if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.05f)
+                                    )
+                                )
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .shadow(
+                                    elevation = if (isDark) 10.dp else 4.dp,
+                                    shape = RoundedCornerShape(22.dp),
+                                    ambientColor = Accent.copy(alpha = 0.20f),
+                                    spotColor = Accent.copy(alpha = 0.20f)
+                                )
                         ) {
-                            Column(modifier = Modifier.padding(18.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                Accent.copy(alpha = 0.07f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    )
+                                    .padding(horizontal = 16.dp, vertical = 13.dp)
+                            ) {
+                                // Top Header: Equalizer + NOW PLAYING + Added By Tag
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        AnimatedEqualizerBars(
+                                            color = Accent,
+                                            isPlaying = isPlaying && !isStepOut,
+                                            barCount = 3,
+                                            modifier = Modifier.padding(end = 6.dp)
+                                        )
+                                        Text(
+                                            text = "NOW PLAYING",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Accent,
+                                            letterSpacing = 1.sp
+                                        )
+                                    }
+
+                                    if (!nowPlayingItem.recommended) {
+                                        Surface(
+                                            shape = RoundedCornerShape(100.dp),
+                                            color = Accent.copy(alpha = 0.12f),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.25f))
+                                        ) {
+                                            val displayName = addedByMember?.username ?: "Host"
+                                            Text(
+                                                text = "Added by $displayName",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Accent,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
@@ -632,14 +700,14 @@ fun JamScreen(
                                         contentDescription = "Artwork for ${nowPlayingItem.song.title}",
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier
-                                            .size(72.dp)
-                                            .clip(RoundedCornerShape(14.dp))
+                                            .size(56.dp)
+                                            .clip(RoundedCornerShape(12.dp))
                                     )
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = nowPlayingItem.song.title,
-                                            fontSize = 17.sp,
+                                            fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = textPrimary,
                                             maxLines = 1,
@@ -648,24 +716,15 @@ fun JamScreen(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = nowPlayingItem.song.primaryArtistName,
-                                            fontSize = 13.5.sp,
+                                            fontSize = 13.sp,
                                             color = textSecondary,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "Added by $addedByName",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Accent
-                                            )
-                                        }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
 
                                 // Progress Slider (isolated to avoid recomposing parent JamScreen)
                                 JamTrackProgressBar(
@@ -680,7 +739,7 @@ fun JamScreen(
                                     onSeekTo = { targetMs -> rootViewModel.jamSeekTo(targetMs) }
                                 )
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
                                 // Transport Row
                                 Row(
@@ -698,22 +757,22 @@ fun JamScreen(
                                             }
                                         },
                                         modifier = Modifier
-                                            .size(48.dp)
+                                            .size(42.dp)
                                             .alpha(if (uiState.canControlPlayback) 1f else 0.38f)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.SkipPrevious,
                                             contentDescription = "Previous Track",
                                             tint = textPrimary,
-                                            modifier = Modifier.size(32.dp)
+                                            modifier = Modifier.size(28.dp)
                                         )
                                     }
 
                                     // Play / Pause / Step-Out
                                     Box(
                                         modifier = Modifier
-                                            .size(62.dp)
-                                            .shadow(12.dp, CircleShape, ambientColor = Accent, spotColor = Accent)
+                                            .size(54.dp)
+                                            .shadow(10.dp, CircleShape, ambientColor = Accent, spotColor = Accent)
                                             .background(PinkBrush, CircleShape)
                                             .clickable {
                                                 if (uiState.canControlPlayback) {
@@ -734,7 +793,7 @@ fun JamScreen(
                                             imageVector = if (displayPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                             contentDescription = if (displayPlaying) "Pause" else "Play",
                                             tint = Color.White,
-                                            modifier = Modifier.size(34.dp)
+                                            modifier = Modifier.size(30.dp)
                                         )
                                     }
 
@@ -748,14 +807,14 @@ fun JamScreen(
                                             }
                                         },
                                         modifier = Modifier
-                                            .size(48.dp)
+                                            .size(42.dp)
                                             .alpha(if (uiState.canControlPlayback) 1f else 0.38f)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.SkipNext,
                                             contentDescription = "Next Track",
                                             tint = textPrimary,
-                                            modifier = Modifier.size(32.dp)
+                                            modifier = Modifier.size(28.dp)
                                         )
                                     }
                                 }
@@ -1052,66 +1111,77 @@ fun JamScreen(
                     }
 
                     // ── Leave / End Jam Action Buttons ──
-                    val pillShape = RoundedCornerShape(100.dp)
+                    val actionButtonShape = RoundedCornerShape(16.dp)
 
                     // Leave Button (Host passes on; Jam continues)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(pillShape)
-                            .border(
-                                1.dp,
-                                if (uiState.isHost) textSecondary.copy(alpha = 0.4f) else Danger.copy(alpha = 0.6f),
-                                pillShape
-                            )
-                            .clickable {
-                                rootViewModel.leaveJam()
+                    Surface(
+                        onClick = { rootViewModel.leaveJam() },
+                        shape = actionButtonShape,
+                        color = if (uiState.isHost) {
+                            if (isDark) Color(0xFF1E1724) else Color(0xFFF1F5F9)
+                        } else {
+                            Danger.copy(alpha = 0.10f)
+                        },
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (uiState.isHost) {
+                                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
+                            } else {
+                                Danger.copy(alpha = 0.25f)
                             }
-                            .padding(vertical = 14.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                            contentDescription = "Leave Jam",
-                            tint = if (uiState.isHost) textPrimary else Danger,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Leave Jam",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (uiState.isHost) textPrimary else Danger
-                        )
+                        Row(
+                            modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = "Leave Jam",
+                                tint = if (uiState.isHost) textPrimary else Danger,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Leave Jam",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (uiState.isHost) textPrimary else Danger
+                            )
+                        }
                     }
 
                     // Host-Only: End Jam for Everyone
                     if (uiState.isHost) {
                         Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(pillShape)
-                                .border(1.dp, Danger.copy(alpha = 0.6f), pillShape)
-                                .clickable { showConfirmEndDialog = true }
-                                .padding(vertical = 14.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            onClick = { showConfirmEndDialog = true },
+                            shape = actionButtonShape,
+                            color = Danger.copy(alpha = 0.10f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Danger.copy(alpha = 0.25f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "End Jam for Everyone",
-                                tint = Danger,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "End Jam for Everyone",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Danger
-                            )
+                            Row(
+                                modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "End Jam for Everyone",
+                                    tint = Danger,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "End Jam",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Danger
+                                )
+                            }
                         }
                     }
 
@@ -1191,6 +1261,8 @@ private fun JamMemberAvatarPill(
                 fontWeight = FontWeight.ExtraBold,
                 color = Accent
             )
+        } else {
+            Spacer(modifier = Modifier.height(13.dp))
         }
     }
 }
@@ -1245,11 +1317,11 @@ private fun JamQueueItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${song.primaryArtistName} • added by $addedByName",
-                fontSize = 11.5.sp,
-                color = textSecondary,
+                text = "Added by $addedByName",
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = Accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1346,20 +1418,24 @@ private fun JamRecommendedRow(
         }
 
         // Add Button (Promote)
-        Button(
+        IconButton(
             onClick = onAdd,
-            shape = RoundedCornerShape(100.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Accent.copy(alpha = if (canAdd) 1f else 0.4f)),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            modifier = Modifier.height(34.dp)
+            modifier = Modifier.size(36.dp),
+            enabled = canAdd
         ) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Add", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Icon(
+                imageVector = Icons.Outlined.AddCircleOutline,
+                contentDescription = "Add to Jam Queue",
+                tint = if (canAdd) {
+                    if (isDark) Color.White.copy(alpha = 0.75f) else Color(0xFF64748B)
+                } else {
+                    if (isDark) Color.White.copy(alpha = 0.35f) else Color(0xFF64748B).copy(alpha = 0.35f)
+                },
+                modifier = Modifier.size(20.dp)
+            )
         }
 
         if (canDismiss) {
-            Spacer(modifier = Modifier.width(4.dp))
             IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
                 Icon(
                     imageVector = Icons.Default.Close,
@@ -1450,7 +1526,7 @@ fun PeopleSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             Row(
@@ -1478,7 +1554,7 @@ fun PeopleSheet(
                     colors = CardDefaults.cardColors(containerColor = Accent.copy(alpha = 0.08f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)) {
                         Text(
                             text = "Everyone can…",
                             fontSize = 13.sp,
@@ -1489,14 +1565,14 @@ fun PeopleSheet(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             FilterChip(
                                 selected = room.defaults.queueAdd,
                                 onClick = {
                                     onUpdateDefaults(room.defaults.copy(queueAdd = !room.defaults.queueAdd))
                                 },
-                                label = { Text("Add songs", fontSize = 11.5.sp) },
+                                label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Accent,
                                     selectedLabelColor = Color.White
@@ -1507,7 +1583,7 @@ fun PeopleSheet(
                                 onClick = {
                                     onUpdateDefaults(room.defaults.copy(playback = !room.defaults.playback))
                                 },
-                                label = { Text("Playback", fontSize = 11.5.sp) },
+                                label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Accent,
                                     selectedLabelColor = Color.White
@@ -1518,7 +1594,7 @@ fun PeopleSheet(
                                 onClick = {
                                     onUpdateDefaults(room.defaults.copy(queueManage = !room.defaults.queueManage))
                                 },
-                                label = { Text("Manage queue", fontSize = 11.5.sp) },
+                                label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Accent,
                                     selectedLabelColor = Color.White
@@ -1648,10 +1724,8 @@ fun PeopleSheet(
                     if (!isMemberHost) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 54.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             if (isHost) {
                                 // Editable Chips for Host
@@ -1660,7 +1734,7 @@ fun PeopleSheet(
                                     onClick = {
                                         onUpdateMemberPerms(member.userId, member.perms.copy(queueAdd = !member.perms.queueAdd))
                                     },
-                                    label = { Text("Add songs", fontSize = 11.sp) },
+                                    label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Accent,
                                         selectedLabelColor = Color.White
@@ -1671,7 +1745,7 @@ fun PeopleSheet(
                                     onClick = {
                                         onUpdateMemberPerms(member.userId, member.perms.copy(playback = !member.perms.playback))
                                     },
-                                    label = { Text("Playback", fontSize = 11.sp) },
+                                    label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Accent,
                                         selectedLabelColor = Color.White
@@ -1682,7 +1756,7 @@ fun PeopleSheet(
                                     onClick = {
                                         onUpdateMemberPerms(member.userId, member.perms.copy(queueManage = !member.perms.queueManage))
                                     },
-                                    label = { Text("Manage queue", fontSize = 11.sp) },
+                                    label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Accent,
                                         selectedLabelColor = Color.White
@@ -1693,19 +1767,19 @@ fun PeopleSheet(
                                 if (member.perms.queueAdd) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Add songs", fontSize = 11.sp) }
+                                        label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
                                     )
                                 }
                                 if (member.perms.playback) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Playback", fontSize = 11.sp) }
+                                        label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
                                     )
                                 }
                                 if (member.perms.queueManage) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Manage queue", fontSize = 11.sp) }
+                                        label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
                                     )
                                 }
                             }
@@ -1722,6 +1796,7 @@ fun PeopleSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun JamTrackProgressBar(
     nowPlaying: JamNowPlaying,
@@ -1813,6 +1888,21 @@ private fun JamTrackProgressBar(
             }
         },
         enabled = canControlPlayback && jamProgress.canSeek,
+        thumb = {},
+        track = { sliderState ->
+            SliderDefaults.Track(
+                sliderState = sliderState,
+                modifier = Modifier.height(4.dp),
+                drawStopIndicator = null,
+                thumbTrackGapSize = 0.dp,
+                colors = SliderDefaults.colors(
+                    activeTrackColor = Accent,
+                    inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
+                    disabledActiveTrackColor = Accent.copy(alpha = 0.4f),
+                    disabledInactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.05f)
+                )
+            )
+        },
         colors = SliderDefaults.colors(
             thumbColor = Accent,
             activeTrackColor = Accent,
@@ -1820,7 +1910,9 @@ private fun JamTrackProgressBar(
             disabledThumbColor = Accent.copy(alpha = 0.4f),
             disabledActiveTrackColor = Accent.copy(alpha = 0.4f)
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(26.dp)
     )
 
     val displayPos = dragProgressRatio?.let { (it * durationMs).toLong() }
