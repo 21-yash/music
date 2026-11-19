@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import com.synq.ui.components.SectionHeader
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -421,13 +422,4 @@ fun SearchResultsContent(
     }
 }
 
-@Composable
-fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-    )
-}
+

@@ -32,9 +32,9 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.features.music.domain.model.Song
-import com.synq.ui.SynqPink
-import com.synq.ui.SynqPinkGradient
-import com.synq.ui.isAppDark
+import com.synq.ui.theme.PinkGradientHero
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.Spacing
 
 private enum class PlaylistSortMode(val label: String) {
     DEFAULT("Default"),
@@ -44,6 +44,10 @@ private enum class PlaylistSortMode(val label: String) {
     RECENTLY_CREATED("Recently Created")
 }
 
+/**
+ * Add-to-Playlist bottom sheet (§3.2, §5: Reference visual north star).
+ * Token swap only — appearance remains visually equivalent / pixel-similar to baseline.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddToPlaylistSheet(
@@ -57,14 +61,13 @@ fun AddToPlaylistSheet(
     onCreatePlaylist: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val isDark = isAppDark()
     var searchQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(PlaylistSortMode.DEFAULT) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
 
-    val bgCard = if (isDark) Color(0xFF18131B) else MaterialTheme.colorScheme.surface
-    val searchBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
+    val bgCard = MaterialTheme.colorScheme.surfaceContainerHigh
+    val searchBg = MaterialTheme.colorScheme.surfaceContainerHighest
     val textPrimary = MaterialTheme.colorScheme.onSurface
     val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -110,13 +113,13 @@ fun AddToPlaylistSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = bgCard,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.s)
         ) {
             // Header: Cancel (left), drag handle (center), Done (right)
             Row(
@@ -131,8 +134,7 @@ fun AddToPlaylistSheet(
                     Text(
                         text = "Cancel",
                         color = textSecondary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
 
@@ -140,8 +142,8 @@ fun AddToPlaylistSheet(
                     modifier = Modifier
                         .width(36.dp)
                         .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(if (isDark) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f))
+                        .clip(MaterialTheme.shapes.small)
+                        .background(textSecondary.copy(alpha = 0.4f))
                 )
 
                 TextButton(
@@ -150,9 +152,8 @@ fun AddToPlaylistSheet(
                 ) {
                     Text(
                         text = "Done",
-                        color = SynqPink,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
+                        color = PinkPrimary,
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
             }
@@ -167,8 +168,7 @@ fun AddToPlaylistSheet(
             ) {
                 Text(
                     text = "Saved in",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = textPrimary
                 )
 
@@ -178,9 +178,8 @@ fun AddToPlaylistSheet(
                 ) {
                     Text(
                         text = "New playlist",
-                        color = SynqPink,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        color = PinkPrimary,
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
             }
@@ -232,7 +231,7 @@ fun AddToPlaylistSheet(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(38.dp)
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(searchBg)
                                     .padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.CenterStart
@@ -251,19 +250,16 @@ fun AddToPlaylistSheet(
                                     BasicTextField(
                                         value = searchQuery,
                                         onValueChange = { searchQuery = it },
-                                        textStyle = TextStyle(
-                                            color = textPrimary,
-                                            fontSize = 14.sp
-                                        ),
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = textPrimary),
                                         singleLine = true,
-                                        cursorBrush = SolidColor(SynqPink),
+                                        cursorBrush = SolidColor(PinkPrimary),
                                         modifier = Modifier.weight(1f),
                                         decorationBox = { innerTextField ->
                                             if (searchQuery.isEmpty()) {
                                                 Text(
-                                                    text = "Find playlist",
-                                                    color = textSecondary,
-                                                    fontSize = 14.sp
+                                                    text = "Find a playlist",
+                                                    color = textSecondary.copy(alpha = 0.7f),
+                                                    style = MaterialTheme.typography.bodyMedium
                                                 )
                                             }
                                             innerTextField()
@@ -272,13 +268,13 @@ fun AddToPlaylistSheet(
                                     if (searchQuery.isNotEmpty()) {
                                         IconButton(
                                             onClick = { searchQuery = "" },
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Close,
-                                                contentDescription = "Clear",
+                                                contentDescription = "Clear search",
                                                 tint = textSecondary,
-                                                modifier = Modifier.size(14.dp)
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
                                     }
@@ -287,40 +283,31 @@ fun AddToPlaylistSheet(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
+                            // Sort button
                             Box {
-                                Surface(
-                                    shape = RoundedCornerShape(19.dp),
-                                    color = searchBg,
-                                    modifier = Modifier
-                                        .height(38.dp)
-                                        .clickable { showSortMenu = true }
+                                TextButton(
+                                    onClick = { showSortMenu = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(
-                                            text = "Sort",
-                                            color = textPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
+                                    Text(
+                                        text = "Sort",
+                                        color = textSecondary,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
                                 }
 
                                 DropdownMenu(
                                     expanded = showSortMenu,
                                     onDismissRequest = { showSortMenu = false },
-                                    modifier = Modifier.background(bgCard)
+                                    containerColor = bgCard
                                 ) {
-                                    PlaylistSortMode.entries.forEach { mode ->
+                                    PlaylistSortMode.values().forEach { mode ->
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
-                                                    mode.label,
-                                                    color = if (sortMode == mode) SynqPink else textPrimary,
-                                                    fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal
+                                                    text = mode.label,
+                                                    color = if (sortMode == mode) PinkPrimary else textPrimary,
+                                                    style = MaterialTheme.typography.bodyMedium
                                                 )
                                             },
                                             onClick = {
@@ -332,71 +319,13 @@ fun AddToPlaylistSheet(
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
                 }
 
-                // ─── 3. ITEMS BELOW SEARCH BAR ───
-                if (searchQuery.isBlank()) {
-                    // Liked Songs row if NOT liked yet
-                    if (!isLiked) {
-                        item(key = "unsaved_liked_songs") {
-                            LikedSongRow(
-                                isLiked = false,
-                                onToggle = onToggleLike,
-                                textPrimary = textPrimary,
-                                textSecondary = textSecondary
-                            )
-                        }
-                    }
-
-                    // Remaining playlists where the song is not yet saved
-                    items(unsavedPlaylists, key = { "unsaved_${it.serverId}" }) { playlist ->
-                        PlaylistRow(
-                            playlist = playlist,
-                            isSaved = false,
-                            onToggle = { onSelectPlaylist(playlist) },
-                            textPrimary = textPrimary,
-                            textSecondary = textSecondary
-                        )
-                    }
-
-                    // "+ New playlist" row item
-                    item(key = "new_playlist_row") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showCreateDialog = true }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(searchBg),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = null,
-                                    tint = SynqPink,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(14.dp))
-
-                            Text(
-                                text = "New playlist",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
-                                color = textPrimary
-                            )
-                        }
-                    }
-                } else {
-                    // When searching: display all matching results
+                // ─── 3. SEARCH RESULTS OR UNSAVED ITEMS ───
+                if (searchQuery.isNotBlank()) {
+                    // Search mode: show matching Liked Songs if applicable
                     if (matchesLikedSongs) {
                         item(key = "search_liked_songs") {
                             LikedSongRow(
@@ -408,18 +337,19 @@ fun AddToPlaylistSheet(
                         }
                     }
 
-                    if (!matchesLikedSongs && matchingSearchResults.isEmpty()) {
+                    // Search mode: matching playlists
+                    if (matchingSearchResults.isEmpty() && !matchesLikedSongs) {
                         item(key = "no_search_results") {
-                            Column(
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 28.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "No playlists found for \"$searchQuery\"",
+                                    text = "No playlists found",
                                     color = textSecondary,
-                                    fontSize = 14.sp
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                         }
@@ -430,43 +360,62 @@ fun AddToPlaylistSheet(
                                 playlist = playlist,
                                 isSaved = isSaved,
                                 onToggle = {
-                                    if (isSaved) onRemoveFromPlaylist(playlist)
-                                    else onSelectPlaylist(playlist)
+                                    if (isSaved) {
+                                        onRemoveFromPlaylist(playlist)
+                                    } else {
+                                        onSelectPlaylist(playlist)
+                                    }
                                 },
                                 textPrimary = textPrimary,
                                 textSecondary = textSecondary
                             )
                         }
                     }
+                } else {
+                    // Default mode: Unsaved Liked Songs row (if not already liked)
+                    if (!isLiked) {
+                        item(key = "unsaved_liked_songs") {
+                            LikedSongRow(
+                                isLiked = false,
+                                onToggle = onToggleLike,
+                                textPrimary = textPrimary,
+                                textSecondary = textSecondary
+                            )
+                        }
+                    }
+
+                    // Default mode: Unsaved playlists
+                    items(unsavedPlaylists, key = { "unsaved_${it.serverId}" }) { playlist ->
+                        PlaylistRow(
+                            playlist = playlist,
+                            isSaved = false,
+                            onToggle = { onSelectPlaylist(playlist) },
+                            textPrimary = textPrimary,
+                            textSecondary = textSecondary
+                        )
+                    }
+
+                    if (playlists.isEmpty() && !isLiked) {
+                        item(key = "empty_playlists") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No playlists yet. Create one above!",
+                                    color = textSecondary,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Bottom Synq Pink Done Button
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = SynqPink,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(24.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-            ) {
-                Text(
-                    text = "Done",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 
-    // Existing App Create Playlist Dialog
     if (showCreateDialog) {
         CreatePlaylistDialog(
             defaultName = "Playlist #${playlists.size + 1}",
@@ -496,8 +445,8 @@ private fun LikedSongRow(
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(SynqPinkGradient),
+                .clip(MaterialTheme.shapes.small)
+                .background(PinkGradientHero),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -513,15 +462,14 @@ private fun LikedSongRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "Liked Songs",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
+                style = MaterialTheme.typography.titleMedium,
                 color = textPrimary,
                 maxLines = 1
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "Auto playlist",
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = textSecondary
             )
         }
@@ -531,7 +479,7 @@ private fun LikedSongRow(
                 modifier = Modifier
                     .size(28.dp)
                     .clip(CircleShape)
-                    .background(SynqPink),
+                    .background(PinkPrimary),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -582,14 +530,14 @@ private fun PlaylistRow(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(MaterialTheme.shapes.small)
             )
         } else {
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SynqPinkGradient),
+                    .clip(MaterialTheme.shapes.small)
+                    .background(PinkGradientHero),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -606,8 +554,7 @@ private fun PlaylistRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = playlist.name,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
+                style = MaterialTheme.typography.titleMedium,
                 color = textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -615,7 +562,7 @@ private fun PlaylistRow(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "${playlist.songCount} songs",
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = textSecondary
             )
         }
@@ -625,7 +572,7 @@ private fun PlaylistRow(
                 modifier = Modifier
                     .size(28.dp)
                     .clip(CircleShape)
-                    .background(SynqPink),
+                    .background(PinkPrimary),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

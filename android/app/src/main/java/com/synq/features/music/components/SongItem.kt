@@ -43,8 +43,18 @@ import coil.compose.AsyncImage
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.jam.LocalCanAddSongsToJam
 import com.synq.features.music.jam.LocalIsInJam
-import com.synq.ui.isAppDark
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.Spacing
 
+/**
+ * Standard Song row composable (§4.6, T2-1, T2-2).
+ *
+ * - Row container: Flat on background, 8dp vertical spacing, 20dp horizontal padding
+ * - Artwork: 48dp, shapes.small (8dp radius)
+ * - Title: titleMedium (15sp Medium), onSurface
+ * - Subtitle: bodySmall (13sp Normal), onSurfaceVariant
+ * - Trailing icon: bare 20dp icon, ≥48dp hit area, onSurfaceVariant
+ */
 @Composable
 fun SongItem(
     song: Song,
@@ -57,15 +67,12 @@ fun SongItem(
     isLiked: Boolean = false,
     isInJam: Boolean = LocalIsInJam.current
 ) {
-    val isDark = isAppDark()
-    val titleColor = if (isDark) Color.White else Color(0xFF0F172A)
-    val artistColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = 56.dp)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
@@ -74,7 +81,7 @@ fun SongItem(
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(48.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(MaterialTheme.shapes.small)
         )
         
         Spacer(modifier = Modifier.width(16.dp))
@@ -84,17 +91,16 @@ fun SongItem(
         ) {
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = titleColor,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = song.primaryArtistName,
-                style = MaterialTheme.typography.bodyMedium,
-                color = artistColor,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -104,17 +110,17 @@ fun SongItem(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             if (onAddToPlaylist != null) {
                 IconButton(
                     onClick = onAddToPlaylist,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.AddCircleOutline,
                         contentDescription = "Add to playlist",
-                        tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -122,12 +128,12 @@ fun SongItem(
 
             IconButton(
                 onClick = { showOptions = true },
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "More options",
-                    tint = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -169,8 +175,6 @@ fun SongOptionsSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
-    val isDark = isAppDark()
     val localAddToPlaylist = LocalAddToPlaylist.current
     val effectiveAddToPlaylist = onAddToPlaylist ?: { localAddToPlaylist(song) }
     val localOnNavigateToSongDetails = LocalOnNavigateToSongDetails.current
@@ -184,26 +188,24 @@ fun SongOptionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = if (isDark) Color(0xFF1E1624) else Color(0xFFFFFFFF),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.extraLarge,
         dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp)
+                .padding(horizontal = Spacing.xl, vertical = Spacing.l)
         ) {
             // Drag handle
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = Spacing.m)
                     .width(36.dp)
                     .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(
-                        if (isDark) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f)
-                    )
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
             )
 
             Row(
@@ -216,15 +218,14 @@ fun SongOptionsSheet(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.small)
                 )
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = song.title,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -232,23 +233,22 @@ fun SongOptionsSheet(
                     Text(
                         text = song.primaryArtistName,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.08f))
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.m))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Spacer(modifier = Modifier.height(Spacing.xs))
             
             if (isInJam) {
                 val canAdd = LocalCanAddSongsToJam.current
                 SongOptionItem(
                     icon = Icons.Default.Groups,
                     text = "Add to Jam Queue",
-                    isDark = isDark,
                     enabled = canAdd,
                     onClick = {
                         if (!canAdd) {
@@ -263,7 +263,6 @@ fun SongOptionsSheet(
                 SongOptionItem(
                     icon = Icons.Default.PlayArrow,
                     text = "Play Next",
-                    isDark = isDark,
                     onClick = {
                         onPlayNext?.invoke()
                         Toast.makeText(context, "Added to play next", Toast.LENGTH_SHORT).show()
@@ -273,7 +272,6 @@ fun SongOptionsSheet(
                 SongOptionItem(
                     icon = Icons.Default.List,
                     text = "Add to Queue",
-                    isDark = isDark,
                     onClick = {
                         onAddToQueue?.invoke()
                         Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
@@ -284,7 +282,6 @@ fun SongOptionsSheet(
             SongOptionItem(
                 icon = Icons.Default.PlaylistAdd,
                 text = "Add to Playlist",
-                isDark = isDark,
                 onClick = {
                     effectiveAddToPlaylist()
                     onDismiss()
@@ -293,7 +290,6 @@ fun SongOptionsSheet(
             SongOptionItem(
                 icon = if (isCurrentlyLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                 text = if (isCurrentlyLiked) "Remove from Liked" else "Like Song",
-                isDark = isDark,
                 onClick = {
                     effectiveOnLike()
                     onDismiss()
@@ -302,7 +298,6 @@ fun SongOptionsSheet(
             SongOptionItem(
                 icon = Icons.Default.Share,
                 text = "Share Song",
-                isDark = isDark,
                 onClick = {
                     val shareUrl = "https://21yash.online/track/${song.id}"
                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -316,7 +311,6 @@ fun SongOptionsSheet(
             SongOptionItem(
                 icon = Icons.Default.Info,
                 text = "Song Details",
-                isDark = isDark,
                 onClick = {
                     effectiveOnSongDetails()
                     onDismiss()
@@ -326,7 +320,6 @@ fun SongOptionsSheet(
                 SongOptionItem(
                     icon = Icons.Default.Album,
                     text = "Go to Album",
-                    isDark = isDark,
                     onClick = {
                         effectiveOnGoToAlbum()
                         onDismiss()
@@ -337,7 +330,6 @@ fun SongOptionsSheet(
                 SongOptionItem(
                     icon = Icons.Default.DeleteOutline,
                     text = "Remove from History",
-                    isDark = isDark,
                     onClick = {
                         onRemoveFromHistory()
                         onDismiss()
@@ -345,24 +337,25 @@ fun SongOptionsSheet(
                 )
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Spacing.s))
             
             Button(
                 onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isDark) Color(0xFF2E2436) else Color(0xFFF1F5F9)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                 ),
-                shape = RoundedCornerShape(25.dp)
+                shape = MaterialTheme.shapes.large
             ) {
                 Text(
                     text = "Close",
-                    color = if (isDark) Color.White else Color(0xFF0F172A),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelLarge
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(Spacing.xs))
         }
     }
 }
@@ -371,31 +364,29 @@ fun SongOptionsSheet(
 private fun SongOptionItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String,
-    isDark: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 8.dp)
+            .padding(vertical = Spacing.s, horizontal = Spacing.xs)
             .alpha(if (enabled) 1f else 0.38f),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = text,
-            tint = Color(0xFFFF2A5F),
-            modifier = Modifier.size(22.dp)
+            tint = PinkPrimary,
+            modifier = Modifier.size(20.dp)
         )
-        Spacer(modifier = Modifier.width(18.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = text,
-            color = if (isDark) Color.White else Color(0xFF0F172A),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium
         )
     }
 }

@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.synq.ui.components.SectionHeader
+import com.synq.ui.theme.Spacing
 import androidx.navigation.NavController
 import com.synq.RootViewModel
 import com.synq.ui.AppHeader
@@ -202,7 +204,11 @@ fun LibraryScreen(
             // 1. Liked Songs Row (if All or Liked)
             if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.LIKED) {
                 item {
-                    SectionHeader("Liked Songs", subtitle = "$likedCount songs in cloud library")
+                    SectionHeader(
+                        title = "Liked Songs",
+                        subtitle = "$likedCount songs in cloud library",
+                        contentPadding = PaddingValues(top = Spacing.sectionGap, bottom = Spacing.headerToContent)
+                    )
                     Spacer(Modifier.height(8.dp))
                     LikedSongsCard(
                         count = likedCount,
@@ -362,7 +368,11 @@ fun LibraryScreen(
             // 3. Followed Teams (if All or Teams)
             if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) {
                 item {
-                    SectionHeader("Followed Teams", subtitle = "Cricket notifications and updates")
+                    SectionHeader(
+                        title = "Followed Teams",
+                        subtitle = "Cricket notifications and updates",
+                        contentPadding = PaddingValues(top = Spacing.sectionGap, bottom = Spacing.headerToContent)
+                    )
                     Spacer(Modifier.height(8.dp))
                 }
 
@@ -393,7 +403,8 @@ fun LibraryScreen(
                     SectionHeader(
                         title = "Recently Played",
                         actionText = "See all",
-                        onAction = { onNavigateToHistory?.invoke() }
+                        onActionClick = { onNavigateToHistory?.invoke() },
+                        contentPadding = PaddingValues(top = Spacing.sectionGap, bottom = Spacing.headerToContent)
                     )
                     Spacer(Modifier.height(8.dp))
                 }
@@ -473,40 +484,7 @@ fun LibraryScreen(
 // Components
 // ─────────────────────────────────────────────────────────────
 
-@Composable
-private fun SectionHeader(
-    title: String,
-    subtitle: String? = null,
-    actionText: String? = null,
-    onAction: (() -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column {
-            Text(
-                text = title,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        if (actionText != null && onAction != null) {
-            TextButton(onClick = onAction) {
-                Text(actionText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
+
 
 
 @Composable

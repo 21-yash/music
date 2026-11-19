@@ -79,6 +79,7 @@ import androidx.compose.runtime.remember
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.ui.SynqLoadingIndicator
+import com.synq.ui.components.SectionHeader
 
 // ─────────────────────────────────────────────────────────────
 // UI models (move to a `model` package when you wire real data)
@@ -418,36 +419,7 @@ private fun greetingForNow(): String =
         else -> "Good evening"
     }
 
-// ─────────────────────────────────────────────────────────────
-// Section header
-// ─────────────────────────────────────────────────────────────
 
-@Composable
-private fun SectionHeader(
-    title: String,
-    actionText: String? = null,
-    onActionClick: () -> Unit = {}
-) {
-    val palette = LocalHomePalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title, color = palette.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-        if (actionText != null) {
-            Text(
-                text = actionText,
-                color = palette.accent,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable(onClick = onActionClick)
-            )
-        }
-    }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Live Action: match card
