@@ -26,12 +26,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.synq.R
 
-// ─── Brand Colors ─────────────────────────────────────────────────────────────
-val SynqPink = Color(0xFFFF2D55)
-val SynqPinkLight = Color(0xFFFF8FA3)
-val SynqPinkDark = Color(0xFFD0165E)
-val SynqBackground = Color(0xFF141116)
-val SynqSurface = Color(0xFF1E1822)
+// ─── Brand Colors (Aliases to theme tokens) ──────────────────────────────────
+val SynqPink = com.synq.ui.theme.PinkPrimary
+val SynqPinkLight = com.synq.ui.theme.PinkGlow
+val SynqPinkDark = com.synq.ui.theme.PinkDeep
 
 val SynqPinkGradient = Brush.linearGradient(
     listOf(SynqPinkLight, SynqPink, SynqPinkDark)

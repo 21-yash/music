@@ -29,6 +29,13 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = DarkOnSurface,
     surfaceVariant = DarkSurfaceVariant,
     onSurfaceVariant = DarkOnSurfaceVariant,
+    surfaceContainerLowest = DarkSurfaceContainerLowest,
+    surfaceContainerLow = DarkSurfaceContainerLow,
+    surfaceContainer = DarkSurfaceContainer,
+    surfaceContainerHigh = DarkSurfaceContainerHigh,
+    surfaceContainerHighest = DarkSurfaceContainerHighest,
+    outline = DarkOutline,
+    outlineVariant = DarkOutlineVariant,
     error = DarkError,
     onError = DarkOnError,
 )
@@ -52,6 +59,13 @@ private val LightColorScheme = lightColorScheme(
     onSurface = LightOnSurface,
     surfaceVariant = LightSurfaceVariant,
     onSurfaceVariant = LightOnSurfaceVariant,
+    surfaceContainerLowest = LightSurfaceContainerLowest,
+    surfaceContainerLow = LightSurfaceContainerLow,
+    surfaceContainer = LightSurfaceContainer,
+    surfaceContainerHigh = LightSurfaceContainerHigh,
+    surfaceContainerHighest = LightSurfaceContainerHighest,
+    outline = LightOutline,
+    outlineVariant = LightOutlineVariant,
     error = LightError,
     onError = LightOnError,
 )
@@ -59,8 +73,8 @@ private val LightColorScheme = lightColorScheme(
 /**
  * App-wide Material 3 theme.
  *
- * Uses dynamic color on Android 12+ (Material You), falling back to
- * the custom color scheme on older devices.
+ * Uses dynamic color on Android 12+ (Material You) only if explicitly requested,
+ * defaulting to the custom brand color scheme and shapes.
  */
 @Composable
 fun SynqTheme(
@@ -80,7 +94,7 @@ fun SynqTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = AppTypography,
+        shapes = AppShapes,
         content = content,
     )
 }
-

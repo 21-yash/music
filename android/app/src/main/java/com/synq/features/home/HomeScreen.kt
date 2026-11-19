@@ -196,7 +196,7 @@ object HomeSampleData {
 fun HomeScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
-    darkTheme: Boolean = androidx.compose.material3.MaterialTheme.colorScheme.background == Color(0xFF0F172A),
+    darkTheme: Boolean = androidx.compose.material3.MaterialTheme.colorScheme.background == com.synq.ui.theme.DarkBackground,
     contentPadding: PaddingValues = PaddingValues(bottom = 160.dp),
     onSeeAllSports: () -> Unit = {},
     onSeeAllRecentlyPlayed: () -> Unit = {},

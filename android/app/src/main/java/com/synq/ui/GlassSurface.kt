@@ -13,8 +13,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 
 // Accent colors from the HTML prototype (indigo -> pink)
-val GlassAccent = Color(0xFF6366F1)
-val GlassAccentPink = Color(0xFFEC4899)
+val GlassAccent = com.synq.ui.theme.PinkPrimary
+val GlassAccentPink = com.synq.ui.theme.PinkSoft
 val GlassProgressBrush = Brush.horizontalGradient(listOf(GlassAccent, GlassAccentPink))
 
 /** True when the current Material theme is dark (follows your in-app theme, not just the system). */
