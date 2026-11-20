@@ -519,7 +519,7 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 240.dp),
         ) {
             // User info card
             item {

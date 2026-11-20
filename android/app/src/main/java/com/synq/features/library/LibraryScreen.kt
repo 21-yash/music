@@ -160,7 +160,7 @@ fun LibraryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = 250.dp)
+            contentPadding = PaddingValues(bottom = 240.dp)
         ) {
             // ─── 1. App Header (Scrolls naturally with content, identical to MusicScreen) ───
             item(key = "library_app_header") {

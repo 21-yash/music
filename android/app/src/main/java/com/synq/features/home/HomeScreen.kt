@@ -168,7 +168,7 @@ fun HomeScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
     darkTheme: Boolean = MaterialTheme.colorScheme.background == com.synq.ui.theme.DarkBackground,
-    contentPadding: PaddingValues = PaddingValues(bottom = 160.dp),
+    contentPadding: PaddingValues = PaddingValues(bottom = 240.dp),
     onSeeAllSports: () -> Unit = {},
     onSeeAllRecentlyPlayed: () -> Unit = {},
     onMatchClick: (String) -> Unit = {},

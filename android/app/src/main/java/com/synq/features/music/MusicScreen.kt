@@ -156,7 +156,7 @@ fun MusicScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding(),
-            contentPadding = PaddingValues(bottom = 164.dp),
+            contentPadding = PaddingValues(bottom = 240.dp),
         ) {
             // ─── 1. AppHeader (scrolls away with content) ───
             item(key = "app_header") {
