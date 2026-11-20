@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -83,6 +84,7 @@ import com.synq.features.music.MusicViewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.synq.data.local.db.entity.RecentlyPlayedEntity
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.ui.SynqLoadingIndicator
@@ -99,6 +101,7 @@ import com.synq.ui.motion.pressable
 import com.synq.ui.motion.shimmer
 import com.synq.ui.motion.pressScale
 import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkSoft
 import com.synq.ui.theme.SemanticLive
 import com.synq.ui.theme.SemanticSuccess
 import com.synq.ui.theme.SemanticWarning
@@ -152,36 +155,6 @@ data class MatchUi(
 data class SongUi(val title: String, val artist: String, val imageUrl: String)
 
 // ─────────────────────────────────────────────────────────────
-// Sample data (same content as the HTML prototype)
-// ─────────────────────────────────────────────────────────────
-
-object HomeSampleData {
-    private const val STADIUM =
-        "https://images.unsplash.com/photo-1577223625816-7546f13df25d?w=800&q=80"
-
-    val matches = listOf<MatchUi>() // Handled dynamically now
-
-
-    val recentlyPlayed = listOf(
-        SongUi("Tere Hawaale", "Arijit Singh",
-            "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=500&q=80"),
-        SongUi("Softly", "Karan Aujla",
-            "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=500&q=80"),
-        SongUi("Tauba Tauba", "Karan Aujla",
-            "https://images.unsplash.com/photo-1516280440502-861111617266?w=500&q=80")
-    )
-
-    val trending = listOf(
-        SongUi("O Maahi", "Arijit Singh",
-            "https://c.saavncdn.com/955/O-Maahi-From-Dunki-Hindi-2023-20231211171007-150x150.jpg"),
-        SongUi("Chaleya", "Anirudh Ravichander",
-            "https://c.saavncdn.com/191/Chaleya-From-Jawan-Hindi-2023-20230814014337-150x150.jpg"),
-        SongUi("Husn", "Anuv Jain",
-            "https://c.saavncdn.com/712/Husn-Hindi-2023-20231129054005-150x150.jpg")
-    )
-}
-
-// ─────────────────────────────────────────────────────────────
 // Home screen
 // ─────────────────────────────────────────────────────────────
 
@@ -213,20 +186,31 @@ fun HomeScreen(
     var showJamIntro by remember { mutableStateOf(false) }
     val trending = remember(uiState.trendingSongs) { uiState.trendingSongs.distinctBy { it.id } }
     val matches = remember(sportsUiState.matches) { sportsUiState.matches.map { it.toMatchUi() }.distinctBy { it.id } }
-    val uniqueRecentlyPlayed = remember(realRecentlyPlayed) {
+    val dbRecentlyPlayed = remember(realRecentlyPlayed) {
         realRecentlyPlayed
             .sortedByDescending { it.playedAt }
             .distinctBy { it.songId }
             .take(5)
     }
+    var displayedRecentlyPlayed by remember { mutableStateOf(dbRecentlyPlayed) }
+
+    LaunchedEffect(dbRecentlyPlayed) {
+        val currentIds = displayedRecentlyPlayed.map { it.songId }
+        val newIds = dbRecentlyPlayed.map { it.songId }
+        if (currentIds != newIds) {
+            displayedRecentlyPlayed = dbRecentlyPlayed
+        }
+    }
+
     val haptic = LocalHapticFeedback.current
     val recentlyPlayedListState = rememberLazyListState()
 
-    val firstSongId = uniqueRecentlyPlayed.firstOrNull()?.songId
-    LaunchedEffect(firstSongId) {
-        if (firstSongId != null && recentlyPlayedListState.firstVisibleItemIndex == 0 && recentlyPlayedListState.firstVisibleItemScrollOffset == 0) {
-            recentlyPlayedListState.requestScrollToItem(0)
-        }
+    val firstSongId = displayedRecentlyPlayed.firstOrNull()?.songId
+    var previousFirstSongId by remember { mutableStateOf(firstSongId) }
+
+    if (firstSongId != null && previousFirstSongId != null && firstSongId != previousFirstSongId) {
+        recentlyPlayedListState.requestScrollToItem(0)
+        previousFirstSongId = firstSongId
     }
 
     Box(
@@ -307,7 +291,7 @@ fun HomeScreen(
                 item {
                     SectionHeader(
                         title = "Recently Played",
-                        actionText = "See all",
+                        actionText = if (displayedRecentlyPlayed.isNotEmpty()) "See all" else null,
                         onActionClick = onSeeAllRecentlyPlayed,
                         contentPadding = PaddingValues(
                             start = Spacing.screenHorizontal,
@@ -317,15 +301,15 @@ fun HomeScreen(
                         )
                     )
                 }
-                item {
-                    LazyRow(
-                        state = recentlyPlayedListState,
-                        contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        if (uniqueRecentlyPlayed.isNotEmpty()) {
-                            items(uniqueRecentlyPlayed, key = { it.songId }) { item ->
-                                val isFirst = item.songId == uniqueRecentlyPlayed.firstOrNull()?.songId
+                if (displayedRecentlyPlayed.isNotEmpty()) {
+                    item {
+                        LazyRow(
+                            state = recentlyPlayedListState,
+                            contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(displayedRecentlyPlayed, key = { it.songId }) { item ->
+                                val isFirst = item.songId == displayedRecentlyPlayed.firstOrNull()?.songId
                                 val song = remember(item) {
                                     Song(
                                         id = item.songId,
@@ -345,7 +329,21 @@ fun HomeScreen(
                                 }
                                 RecentSongTile(
                                     song = song,
-                                    onClick = { homeViewModel.playSong(item) },
+                                    onClick = {
+                                        val clickedIndex = displayedRecentlyPlayed.indexOfFirst { it.songId == item.songId }
+                                        if (clickedIndex > 0) {
+                                            val reordered = mutableListOf<RecentlyPlayedEntity>()
+                                            reordered.add(displayedRecentlyPlayed[clickedIndex])
+                                            for (i in displayedRecentlyPlayed.indices) {
+                                                if (i != clickedIndex) {
+                                                    reordered.add(displayedRecentlyPlayed[i])
+                                                }
+                                            }
+                                            displayedRecentlyPlayed = reordered.take(5)
+                                            recentlyPlayedListState.requestScrollToItem(0)
+                                        }
+                                        homeViewModel.playSong(item)
+                                    },
                                     onPlayNext = {
                                         haptic.performConfirm()
                                         musicViewModel.playNext(song)
@@ -355,7 +353,7 @@ fun HomeScreen(
                                         musicViewModel.addToQueue(song)
                                     },
                                     modifier = Modifier
-                                        .zIndex(if (isFirst) 1f else 0f)
+                                        .zIndex(if (isFirst) 10f else 1f)
                                         .animateItem(
                                             fadeInSpec = null,
                                             fadeOutSpec = null,
@@ -366,47 +364,39 @@ fun HomeScreen(
                                         )
                                 )
                             }
-                        } else {
-                            itemsIndexed(HomeSampleData.recentlyPlayed.take(5), key = { _, s -> s.title }) { index, sampleSong ->
-                                val isFirst = index == 0
-                                val song = remember(sampleSong) {
-                                    Song(
-                                        id = sampleSong.title.lowercase().replace(" ", "_"),
-                                        title = sampleSong.title,
-                                        artists = listOf(ArtistCredit(id = sampleSong.artist, name = sampleSong.artist, imageUrl = null)),
-                                        album = null,
-                                        durationSeconds = 180,
-                                        imageUrl = sampleSong.imageUrl,
-                                        year = "",
-                                        language = "",
-                                        hasLyrics = false,
-                                        playCount = 0,
-                                        label = "",
-                                        streamRef = sampleSong.title.lowercase().replace(" ", "_"),
-                                        providerId = "saavn"
+                        }
+                    }
+                } else {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.screenHorizontal, vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(PinkSoft.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MusicNote,
+                                        contentDescription = null,
+                                        tint = PinkSoft,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
-                                RecentSongTile(
-                                    song = song,
-                                    onClick = { onSongClick(sampleSong) },
-                                    onPlayNext = {
-                                        haptic.performConfirm()
-                                        musicViewModel.playNext(song)
-                                    },
-                                    onAddToQueue = {
-                                        haptic.performConfirm()
-                                        musicViewModel.addToQueue(song)
-                                    },
-                                    modifier = Modifier
-                                        .zIndex(if (isFirst) 1f else 0f)
-                                        .animateItem(
-                                            fadeInSpec = null,
-                                            fadeOutSpec = null,
-                                            placementSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow
-                                            )
-                                        )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = "Songs you play will appear here",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -570,6 +560,7 @@ private fun MatchCard(
     modifier: Modifier = Modifier
 ) {
     val shape = MaterialTheme.shapes.large
+    val cardBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
     val context = LocalContext.current
     val imageRequest = remember(match.image) {
         if (match.image is Int) match.image
@@ -589,7 +580,8 @@ private fun MatchCard(
             .width(264.dp)
             .height(148.dp)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .background(Color(0xFF140D18))
+            .border(1.dp, cardBorderColor, shape)
     ) {
         // Stadium image (instant synchronous render if local drawable, async if URL)
         if (match.image is Int) {
@@ -597,29 +589,24 @@ private fun MatchCard(
                 painter = painterResource(id = match.image),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = 0.75f,
+                alpha = 0.85f,
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(shape)
-                    .scale(1.05f)
-                    .blur(2.dp)
             )
         } else {
             AsyncImage(
                 model = imageRequest,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = 0.75f,
+                alpha = 0.85f,
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(shape)
-                    .scale(1.05f)
-                    .blur(2.dp)
             )
         }
 
-        // Bottom gradient
-        val bgColor = MaterialTheme.colorScheme.background
+        // Bottom gradient (always dark scrim for photo legibility regardless of light/dark theme)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -628,8 +615,8 @@ private fun MatchCard(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.45f to bgColor.copy(alpha = 0.7f),
-                        0.95f to bgColor.copy(alpha = 0.95f)
+                        0.45f to Color.Black.copy(alpha = 0.60f),
+                        0.95f to Color.Black.copy(alpha = 0.92f)
                     )
                 )
         )
@@ -644,7 +631,7 @@ private fun MatchCard(
 
             Text(
                 text = match.title,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -654,7 +641,7 @@ private fun MatchCard(
             if (match.scores.isNotEmpty()) {
                 Text(
                     text = scoreText(match.scores),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.White.copy(alpha = 0.75f),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Normal,
                     maxLines = 1,
@@ -663,7 +650,7 @@ private fun MatchCard(
             } else if (match.subtitle != null) {
                 Text(
                     text = match.subtitle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.White.copy(alpha = 0.75f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Normal,
                     maxLines = 1,
@@ -685,9 +672,9 @@ private fun MatchCard(
 
 @Composable
 private fun scoreText(scores: List<ScoreUi>): AnnotatedString {
-    val scoreColor = MaterialTheme.colorScheme.onSurface
-    val subtextColor = MaterialTheme.colorScheme.onSurfaceVariant
-    return remember(scores, scoreColor, subtextColor) {
+    val scoreColor = Color.White
+    val subtextColor = Color.White.copy(alpha = 0.70f)
+    return remember(scores) {
         buildAnnotatedString {
             scores.forEachIndexed { index, score ->
                 if (index > 0) append("  ·  ")

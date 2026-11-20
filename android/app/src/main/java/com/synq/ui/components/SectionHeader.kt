@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
 import com.synq.ui.theme.PinkDeep
 import com.synq.ui.theme.PinkPrimary
 import com.synq.ui.theme.Spacing
@@ -71,8 +73,10 @@ fun SectionHeader(
                 style = MaterialTheme.typography.labelMedium,
                 color = actionColor,
                 modifier = Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable(onClick = onActionClick)
+                    .pressable(
+                        onClick = onActionClick,
+                        pressedScale = MotionTokens.ButtonPressScale
+                    )
                     .padding(horizontal = 4.dp, vertical = 4.dp)
             )
         }
