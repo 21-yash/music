@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -80,6 +83,17 @@ import com.synq.features.music.domain.model.Song
 import com.synq.features.music.domain.model.ArtistCredit
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.components.SectionHeader
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.ReadOnlyComposable
+import com.synq.features.music.components.SongItem
+import androidx.compose.ui.platform.LocalContext
+import coil.request.ImageRequest
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.SemanticLive
+import com.synq.ui.theme.SemanticSuccess
+import com.synq.ui.theme.SemanticWarning
+import com.synq.ui.theme.SportsAccent
+import com.synq.ui.theme.Spacing
 
 // ─────────────────────────────────────────────────────────────
 // UI models (move to a `model` package when you wire real data)
@@ -87,13 +101,28 @@ import com.synq.ui.components.SectionHeader
 
 enum class MatchStatus(
     val label: String,
-    val color: Color,
-    val highlightColor: Color,
     val pulses: Boolean
 ) {
-    LIVE("LIVE", Color(0xFFFF4757), Color(0xFFFBBF24), true),
-    UPCOMING("UPCOMING", Color(0xFF3B82F6), Color(0xFFA3E635), true),
-    POST_MATCH("POST MATCH", Color(0xFF9CA3AF), Color(0xFFA3E635), false)
+    LIVE("LIVE", true),
+    UPCOMING("UPCOMING", true),
+    POST_MATCH("POST MATCH", false);
+
+    val color: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = when (this) {
+            LIVE -> SemanticLive
+            UPCOMING -> SportsAccent
+            POST_MATCH -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+    val highlightColor: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = when (this) {
+            LIVE -> SemanticWarning
+            else -> SportsAccent
+        }
 }
 
 data class ScoreUi(val runs: String, val overs: String)
@@ -111,48 +140,6 @@ data class MatchUi(
 )
 
 data class SongUi(val title: String, val artist: String, val imageUrl: String)
-
-// ─────────────────────────────────────────────────────────────
-// Theme palette (dark + light, mirrors the prototype's CSS vars)
-// ─────────────────────────────────────────────────────────────
-
-private class HomePalette(
-    val background: Color,
-    val glow: Color,
-    val surface: Color,
-    val surfaceBorder: Color,
-    val surfaceHighlight: Color,
-    val textPrimary: Color,
-    val textSecondary: Color,
-    val accent: Color
-)
-
-private val AccentIndigo = Color(0xFF6366F1)
-private val StadiumNavy = Color(0xFF0F172A)
-
-private val DarkPalette = HomePalette(
-    background = Color(0xFF09090B),
-    glow = Color(0xFF1A1A2E),
-    surface = Color.White.copy(alpha = 0.03f),
-    surfaceBorder = Color.White.copy(alpha = 0.05f),
-    surfaceHighlight = Color.White.copy(alpha = 0.10f),
-    textPrimary = Color.White,
-    textSecondary = Color(0xFFA1A1AA),
-    accent = AccentIndigo
-)
-
-private val LightPalette = HomePalette(
-    background = Color(0xFFF8FAFC),
-    glow = Color(0xFFE2E8F0),
-    surface = Color.White,
-    surfaceBorder = Color.Black.copy(alpha = 0.05f),
-    surfaceHighlight = Color.Black.copy(alpha = 0.10f),
-    textPrimary = Color(0xFF0F172A),
-    textSecondary = Color(0xFF475569),
-    accent = AccentIndigo
-)
-
-private val LocalHomePalette = staticCompositionLocalOf { DarkPalette }
 
 // ─────────────────────────────────────────────────────────────
 // Sample data (same content as the HTML prototype)
@@ -197,7 +184,7 @@ object HomeSampleData {
 fun HomeScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
-    darkTheme: Boolean = androidx.compose.material3.MaterialTheme.colorScheme.background == com.synq.ui.theme.DarkBackground,
+    darkTheme: Boolean = MaterialTheme.colorScheme.background == com.synq.ui.theme.DarkBackground,
     contentPadding: PaddingValues = PaddingValues(bottom = 160.dp),
     onSeeAllSports: () -> Unit = {},
     onSeeAllRecentlyPlayed: () -> Unit = {},
@@ -209,185 +196,211 @@ fun HomeScreen(
     sportsViewModel: com.synq.features.sports.SportsViewModel = hiltViewModel(),
     rootViewModel: RootViewModel = hiltViewModel()
 ) {
-    val palette = if (darkTheme) DarkPalette else LightPalette
     val uiState by musicViewModel.uiState.collectAsState()
     val sportsUiState by sportsViewModel.uiState.collectAsState()
     val realRecentlyPlayed by homeViewModel.recentlyPlayed.collectAsState()
     val jamState by rootViewModel.jamState.collectAsState()
     var showJamIntro by remember { mutableStateOf(false) }
-    val trending = uiState.trendingSongs
-    val matches = sportsUiState.matches.map { it.toMatchUi() }
+    val trending = remember(uiState.trendingSongs) { uiState.trendingSongs.distinctBy { it.id } }
+    val matches = remember(sportsUiState.matches) { sportsUiState.matches.map { it.toMatchUi() }.distinctBy { it.id } }
+    val uniqueRecentlyPlayed = remember(realRecentlyPlayed) {
+        realRecentlyPlayed
+            .sortedByDescending { it.playedAt }
+            .distinctBy { it.songId }
+            .take(5)
+    }
 
-    CompositionLocalProvider(LocalHomePalette provides palette) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(palette.background)
-                // radial glow from the top-right corner, like the CSS background
-                .drawBehind {
-                    drawRect(
-                        Brush.radialGradient(
-                            colors = listOf(palette.glow, Color.Transparent),
-                            center = Offset(size.width, 0f),
-                            radius = size.width * 1.3f
-                        )
-                    )
-                }
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                AppHeader(
-                    title = greetingForNow(),
-                    subtitle = "Welcome to Synq • Music & Sports",
-                    rootViewModel = rootViewModel,
-                    navController = navController,
-                    showBrandLogo = true
-                )
-                
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = contentPadding
-                ) {
-                    // Live Action — only shown when there are active/scheduled matches
-                    if (matches.isNotEmpty()) {
-                        item { SectionHeader("Live Action", actionText = "See all", onActionClick = onSeeAllSports) }
-                        item {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 24.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                items(matches) { match ->
-                                    MatchCard(match = match, onClick = { onMatchClick(match.id) })
-                                }
-                            }
-                        }
-                    }
-
-                    // Recently Played
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            AppHeader(
+                title = greetingForNow(),
+                subtitle = "Welcome to Synq • Music & Sports",
+                rootViewModel = rootViewModel,
+                navController = navController,
+                showBrandLogo = true
+            )
+            
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding
+            ) {
+                // Live Action — only shown when there are active/scheduled matches
+                if (matches.isNotEmpty()) {
                     item {
                         SectionHeader(
-                            "Recently Played",
+                            title = "Live Action",
                             actionText = "See all",
-                            onActionClick = onSeeAllRecentlyPlayed
+                            onActionClick = onSeeAllSports,
+                            contentPadding = PaddingValues(
+                                start = Spacing.screenHorizontal,
+                                end = Spacing.screenHorizontal,
+                                top = 8.dp,
+                                bottom = Spacing.headerToContent
+                            )
                         )
                     }
                     item {
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 24.dp),
+                            contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            if (realRecentlyPlayed.isNotEmpty()) {
-                                items(realRecentlyPlayed.take(5)) { item ->
-                                    val song = remember(item) {
-                                        Song(
-                                            id = item.songId,
-                                            title = item.title,
-                                            artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
-                                            album = null,
-                                            durationSeconds = item.durationSeconds,
-                                            imageUrl = item.imageUrl,
-                                            year = "",
-                                            language = "",
-                                            hasLyrics = false,
-                                            playCount = 0,
-                                            label = "",
-                                            streamRef = item.songId,
-                                            providerId = item.providerId
-                                        )
-                                    }
-                                    RecentSongTile(
-                                        song = song,
-                                        onClick = { homeViewModel.playSong(item) },
-                                        onPlayNext = { musicViewModel.playNext(song) },
-                                        onAddToQueue = { musicViewModel.addToQueue(song) }
-                                    )
-                                }
-                            } else {
-                                items(HomeSampleData.recentlyPlayed.take(5)) { sampleSong ->
-                                    val song = remember(sampleSong) {
-                                        Song(
-                                            id = sampleSong.title.lowercase().replace(" ", "_"),
-                                            title = sampleSong.title,
-                                            artists = listOf(ArtistCredit(id = sampleSong.artist, name = sampleSong.artist, imageUrl = null)),
-                                            album = null,
-                                            durationSeconds = 180,
-                                            imageUrl = sampleSong.imageUrl,
-                                            year = "",
-                                            language = "",
-                                            hasLyrics = false,
-                                            playCount = 0,
-                                            label = "",
-                                            streamRef = sampleSong.title.lowercase().replace(" ", "_"),
-                                            providerId = "saavn"
-                                        )
-                                    }
-                                    RecentSongTile(
-                                        song = song,
-                                        onClick = { onSongClick(sampleSong) },
-                                        onPlayNext = { musicViewModel.playNext(song) },
-                                        onAddToQueue = { musicViewModel.addToQueue(song) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Jam Section
-                    item { SectionHeader("Jam") }
-                    item {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 24.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            item {
-                                JamCard(
-                                    jamState = jamState,
-                                    onClick = {
-                                        if (jamState.isInJam) {
-                                            onNavigateToJam()
-                                        } else {
-                                            showJamIntro = true
-                                        }
-                                    }
+                            items(matches, key = { it.id }) { match ->
+                                MatchCard(
+                                    match = match,
+                                    onClick = { onMatchClick(match.id) }
                                 )
                             }
                         }
                     }
+                }
 
-                    // Trending Music
-                    item { SectionHeader("Trending Music") }
-
-                    if (uiState.isLoading && trending.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SynqLoadingIndicator(size = 48.dp, barCount = 5)
+                // Recently Played
+                item {
+                    SectionHeader(
+                        title = "Recently Played",
+                        actionText = "See all",
+                        onActionClick = onSeeAllRecentlyPlayed,
+                        contentPadding = PaddingValues(
+                            start = Spacing.screenHorizontal,
+                            end = Spacing.screenHorizontal,
+                            top = if (matches.isNotEmpty()) Spacing.sectionGap else 8.dp,
+                            bottom = Spacing.headerToContent
+                        )
+                    )
+                }
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        if (uniqueRecentlyPlayed.isNotEmpty()) {
+                            items(uniqueRecentlyPlayed, key = { it.songId }) { item ->
+                                val song = remember(item) {
+                                    Song(
+                                        id = item.songId,
+                                        title = item.title,
+                                        artists = listOf(ArtistCredit(id = item.artist, name = item.artist, imageUrl = null)),
+                                        album = null,
+                                        durationSeconds = item.durationSeconds,
+                                        imageUrl = item.imageUrl,
+                                        year = "",
+                                        language = "",
+                                        hasLyrics = false,
+                                        playCount = 0,
+                                        label = "",
+                                        streamRef = item.songId,
+                                        providerId = item.providerId
+                                    )
+                                }
+                                RecentSongTile(
+                                    song = song,
+                                    onClick = { homeViewModel.playSong(item) },
+                                    onPlayNext = { musicViewModel.playNext(song) },
+                                    onAddToQueue = { musicViewModel.addToQueue(song) }
+                                )
+                            }
+                        } else {
+                            itemsIndexed(HomeSampleData.recentlyPlayed.take(5), key = { _, s -> s.title }) { _, sampleSong ->
+                                val song = remember(sampleSong) {
+                                    Song(
+                                        id = sampleSong.title.lowercase().replace(" ", "_"),
+                                        title = sampleSong.title,
+                                        artists = listOf(ArtistCredit(id = sampleSong.artist, name = sampleSong.artist, imageUrl = null)),
+                                        album = null,
+                                        durationSeconds = 180,
+                                        imageUrl = sampleSong.imageUrl,
+                                        year = "",
+                                        language = "",
+                                        hasLyrics = false,
+                                        playCount = 0,
+                                        label = "",
+                                        streamRef = sampleSong.title.lowercase().replace(" ", "_"),
+                                        providerId = "saavn"
+                                    )
+                                }
+                                RecentSongTile(
+                                    song = song,
+                                    onClick = { onSongClick(sampleSong) },
+                                    onPlayNext = { musicViewModel.playNext(song) },
+                                    onAddToQueue = { musicViewModel.addToQueue(song) }
+                                )
                             }
                         }
                     }
+                }
 
-                    if (uiState.error != null && trending.isEmpty()) {
+                // Jam Section
+                item {
+                    SectionHeader(
+                        title = "Jam",
+                        contentPadding = PaddingValues(
+                            start = Spacing.screenHorizontal,
+                            end = Spacing.screenHorizontal,
+                            top = Spacing.sectionGap,
+                            bottom = Spacing.headerToContent
+                        )
+                    )
+                }
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         item {
-                            Text(
-                                text = uiState.error ?: "Failed to load trending songs",
-                                color = Color(0xFFEF4444),
-                                modifier = Modifier.padding(horizontal = 24.dp)
+                            JamCard(
+                                jamState = jamState,
+                                onClick = {
+                                    if (jamState.isInJam) {
+                                        onNavigateToJam()
+                                    } else {
+                                        showJamIntro = true
+                                    }
+                                }
                             )
                         }
                     }
+                }
 
-                    items(trending) { song ->
-                        TrendingSongRow(
-                            song = song,
-                            onClick = { musicViewModel.playSong(song) },
-                            onPlayNext = { musicViewModel.playNext(song) },
-                            onAddToQueue = { musicViewModel.addToQueue(song) },
-                            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp)
+                // Trending Music
+                item {
+                    SectionHeader(
+                        title = "Trending Music",
+                        contentPadding = PaddingValues(
+                            start = Spacing.screenHorizontal,
+                            end = Spacing.screenHorizontal,
+                            top = Spacing.sectionGap,
+                            bottom = Spacing.headerToContent
+                        )
+                    )
+                }
+
+                if (uiState.error != null && trending.isEmpty()) {
+                    item {
+                        Text(
+                            text = uiState.error ?: "Failed to load trending songs",
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = Spacing.screenHorizontal)
                         )
                     }
                 }
+
+                itemsIndexed(
+                    trending,
+                    key = { index, song -> if (song.id.isNotBlank()) "${song.id}_$index" else "trending_$index" }
+                ) { _, song ->
+                    TrendingSongRow(
+                        song = song,
+                        onClick = { musicViewModel.playSong(song) },
+                        onPlayNext = { musicViewModel.playNext(song) },
+                        onAddToQueue = { musicViewModel.addToQueue(song) }
+                    )
+                }
             }
+        }
 
             if (showJamIntro) {
                 JamIntroDialog(
@@ -406,7 +419,6 @@ fun HomeScreen(
             }
         }
     }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Header greeting helper
@@ -426,17 +438,28 @@ private fun greetingForNow(): String =
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(28.dp)
+private fun MatchCard(
+    match: MatchUi,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = MaterialTheme.shapes.large
+    val context = LocalContext.current
+    val imageRequest = remember(match.image) {
+        if (match.image is Int) match.image
+        else ImageRequest.Builder(context)
+            .data(match.image)
+            .crossfade(true)
+            .crossfade(200)
+            .build()
+    }
 
     Box(
-        modifier = Modifier
-            .width(280.dp)
-            .height(180.dp)
-            .shadow(10.dp, shape)
+        modifier = modifier
+            .width(264.dp)
+            .height(148.dp)
             .clip(shape)
-            .background(StadiumNavy)
-            .border(1.dp, Color.White.copy(alpha = 0.15f), shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clickable(onClick = onClick)
     ) {
         // Stadium image (instant synchronous render if local drawable, async if URL)
@@ -445,36 +468,39 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
                 painter = painterResource(id = match.image),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = 0.85f,
+                alpha = 0.75f,
                 modifier = Modifier
                     .fillMaxSize()
+                    .clip(shape)
                     .scale(1.05f)
-                    .blur(2.5.dp)
+                    .blur(2.dp)
             )
         } else {
             AsyncImage(
-                model = match.image,
+                model = imageRequest,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                alpha = 0.85f,
+                alpha = 0.75f,
                 modifier = Modifier
                     .fillMaxSize()
+                    .clip(shape)
                     .scale(1.05f)
-                    .blur(2.5.dp)
+                    .blur(2.dp)
             )
         }
 
         // Bottom gradient
+        val bgColor = MaterialTheme.colorScheme.background
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .fillMaxHeight(0.8f)
+                .fillMaxHeight(0.85f)
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.5f to StadiumNavy.copy(alpha = 0.6f),
-                        0.9f to StadiumNavy.copy(alpha = 0.95f)
+                        0.45f to bgColor.copy(alpha = 0.7f),
+                        0.95f to bgColor.copy(alpha = 0.95f)
                     )
                 )
         )
@@ -482,17 +508,16 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.Bottom)
         ) {
             StatusBadge(match.status)
 
             Text(
                 text = match.title,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.5.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.basicMarquee()
             )
@@ -500,18 +525,18 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
             if (match.scores.isNotEmpty()) {
                 Text(
                     text = scoreText(match.scores),
-                    color = Color(0xFF94A3B8),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal,
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
             } else if (match.subtitle != null) {
                 Text(
                     text = match.subtitle,
-                    color = Color(0xFF94A3B8),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Normal,
                     maxLines = 1,
                     modifier = Modifier.basicMarquee()
                 )
@@ -520,8 +545,8 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
             Text(
                 text = match.summary,
                 color = match.status.highlightColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 modifier = Modifier.padding(top = 2.dp).basicMarquee()
             )
@@ -529,21 +554,37 @@ private fun MatchCard(match: MatchUi, onClick: () -> Unit) {
     }
 }
 
-private fun scoreText(scores: List<ScoreUi>): AnnotatedString = buildAnnotatedString {
-    scores.forEachIndexed { index, score ->
-        if (index > 0) append("  ·  ")
-        withStyle(SpanStyle(color = Color(0xFFE2E8F0), fontWeight = FontWeight.Bold)) {
-            append(score.runs)
-        }
-        if (score.overs.isNotBlank()) {
-            append(" (${score.overs})")
+@Composable
+private fun scoreText(scores: List<ScoreUi>): AnnotatedString {
+    val scoreColor = MaterialTheme.colorScheme.onSurface
+    val subtextColor = MaterialTheme.colorScheme.onSurfaceVariant
+    return remember(scores, scoreColor, subtextColor) {
+        buildAnnotatedString {
+            scores.forEachIndexed { index, score ->
+                if (index > 0) append("  ·  ")
+                val isYetToBat = score.runs.contains("yet to bat", ignoreCase = true)
+                if (isYetToBat) {
+                    withStyle(SpanStyle(color = subtextColor, fontWeight = FontWeight.Normal, fontSize = 13.sp)) {
+                        append(score.runs)
+                    }
+                } else {
+                    withStyle(SpanStyle(color = scoreColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)) {
+                        append(score.runs)
+                    }
+                    if (score.overs.isNotBlank()) {
+                        withStyle(SpanStyle(color = subtextColor, fontWeight = FontWeight.Normal, fontSize = 12.sp)) {
+                            append(" (${score.overs})")
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun StatusBadge(status: MatchStatus) {
-    val pillShape = RoundedCornerShape(100.dp)
+    val pillShape = CircleShape
 
     val transition = rememberInfiniteTransition(label = "badgePulse")
     val pulse by transition.animateFloat(
@@ -553,12 +594,12 @@ private fun StatusBadge(status: MatchStatus) {
         label = "dotAlpha"
     )
 
+    val badgeColor = status.color
     Row(
         modifier = Modifier
             .clip(pillShape)
-            .background(status.color.copy(alpha = 0.15f))
-            .border(1.dp, status.color.copy(alpha = 0.4f), pillShape)
-            .padding(horizontal = 10.dp, vertical = 3.dp),
+            .background(badgeColor.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -566,15 +607,15 @@ private fun StatusBadge(status: MatchStatus) {
                 .size(5.dp)
                 .alpha(if (status.pulses) pulse else 1f)
                 .clip(CircleShape)
-                .background(status.color)
+                .background(badgeColor)
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(5.dp))
         Text(
             text = status.label,
-            color = status.color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.5.sp
+            color = badgeColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp
         )
     }
 }
@@ -588,69 +629,73 @@ private fun RecentSongTile(
     song: Song,
     onClick: () -> Unit,
     onPlayNext: () -> Unit = {},
-    onAddToQueue: () -> Unit = {}
+    onAddToQueue: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(20.dp)
     var showOptions by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val imageRequest = remember(song.imageUrl) {
+        ImageRequest.Builder(context)
+            .data(song.imageUrl)
+            .crossfade(true)
+            .crossfade(200)
+            .build()
+    }
 
-    Box(
-        modifier = Modifier
-            .width(140.dp)
-            .height(160.dp)
-            .clip(shape)
+    Column(
+        modifier = modifier
+            .width(128.dp)
             .clickable(onClick = onClick)
     ) {
-        AsyncImage(
-            model = song.imageUrl,
-            contentDescription = song.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-        // 3-dots button at top-end
         Box(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp)
-                .size(30.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { showOptions = true },
-            contentAlignment = Alignment.Center
+                .size(128.dp)
+                .clip(MaterialTheme.shapes.medium)
         ) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Options for ${song.title}",
-                tint = Color.White,
-                modifier = Modifier.size(18.dp)
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = song.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
-        }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f), Color.Black.copy(alpha = 0.9f))
-                    )
+            // 3-dots button at top-end
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { showOptions = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options for ${song.title}",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
                 )
-                .padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 16.dp)
-        ) {
-            Text(
-                text = song.title,
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = song.primaryArtistName,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 13.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = song.title,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = song.primaryArtistName,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Normal,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 
     if (showOptions) {
@@ -666,65 +711,61 @@ private fun RecentSongTile(
 @Composable
 private fun JamCard(
     jamState: JamState,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(20.dp)
-    val bg = Brush.verticalGradient(
-        if (jamState.isInJam) listOf(Color(0xFF059669), Color(0xFF022C22))
-        else listOf(Color(0xFF2563EB), Color(0xFF06B6D4))
-    )
-    Box(
-        modifier = Modifier
-            .width(140.dp)
-            .height(160.dp)
-            .clip(shape)
-            .background(bg)
+    val jamGradient = if (jamState.isInJam) {
+        Brush.verticalGradient(listOf(Color(0xFF059669), Color(0xFF022C22)))
+    } else {
+        Brush.verticalGradient(listOf(Color(0xFF2563EB), Color(0xFF06B6D4)))
+    }
+
+    Column(
+        modifier = modifier
+            .width(128.dp)
             .clickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
-                .align(Alignment.Center)
-                .offset(y = (-12).dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.22f)),
+                .size(128.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .background(jamGradient),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Groups,
-                contentDescription = "Jam",
-                tint = Color.White,
-                modifier = Modifier.size(26.dp)
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f), Color.Black.copy(alpha = 0.85f))
-                    )
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.22f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Groups,
+                    contentDescription = "Jam",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
                 )
-                .padding(start = 14.dp, end = 14.dp, top = 28.dp, bottom = 14.dp)
-        ) {
-            Text(
-                text = "Jam Session",
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = if (jamState.isInJam) "${jamState.participants.size} listening" else "Start or join",
-                color = if (jamState.isInJam) Color(0xFF34D399) else Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Jam Session",
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = if (jamState.isInJam) "${jamState.participants.size} listening" else "Start or join",
+            color = if (jamState.isInJam) Color(0xFF34D399) else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Normal,
+            lineHeight = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -740,71 +781,13 @@ private fun TrendingSongRow(
     onAddToQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val palette = LocalHomePalette.current
-    val shape = RoundedCornerShape(16.dp)
-    var showOptions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-
-    Row(
+    SongItem(
+        song = song,
+        onClick = onClick,
+        onPlayNext = onPlayNext,
+        onAddToQueue = onAddToQueue,
         modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(palette.surface)
-            .border(1.dp, palette.surfaceBorder, shape)
-            .clickable(onClick = onClick)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AsyncImage(
-            model = song.imageUrl,
-            contentDescription = song.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(10.dp))
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                color = palette.textPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = song.primaryArtistName,
-                color = palette.textSecondary,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(palette.surfaceHighlight)
-                .clickable { showOptions = true },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Options for ${song.title}",
-                tint = palette.textPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-
-    if (showOptions) {
-        com.synq.features.music.components.SongOptionsSheet(
-            song = song,
-            onPlayNext = onPlayNext,
-            onAddToQueue = onAddToQueue,
-            onDismiss = { showOptions = false }
-        )
-    }
+    )
 }
 
 private fun com.synq.features.sports.domain.model.MatchSummary.toMatchUi(): MatchUi {
@@ -830,9 +813,6 @@ private fun com.synq.features.sports.domain.model.MatchSummary.toMatchUi(): Matc
         com.synq.R.drawable.stadium_3,
         com.synq.R.drawable.stadium_4,
         com.synq.R.drawable.stadium_5,
-        com.synq.R.drawable.stadium_7,
-        com.synq.R.drawable.stadium_8,
-        com.synq.R.drawable.stadium_9,
     )
     val stadiumImg = stadiumDrawables[kotlin.math.abs(id.hashCode()) % stadiumDrawables.size]
 
