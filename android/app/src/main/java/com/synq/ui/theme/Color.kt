@@ -95,3 +95,20 @@ val OnSportsAccent: Color
 val SemanticLive    = Color(0xFFEF4444)
 val SemanticSuccess = Color(0xFF10B981)
 val SemanticWarning = Color(0xFFFBBF24) // match status highlight amber from HomeScreen MatchStatus
+
+// ─── Category Tile Accents (Browse Categories, vibrant multi-color palette) ──
+val CategoryColors = listOf(
+    Color(0xFFE65100), // Bollywood: Warm Saffron/Orange
+    Color(0xFF7C4DFF), // Pop: Electric Purple
+    Color(0xFFE53935), // Rock: Crimson Red
+    Color(0xFFF59E0B), // Hip-Hop: Amber Gold
+    Color(0xFF00897B), // Classical: Teal
+    Color(0xFF1E88E5), // Jazz: Deep Blue
+    Color(0xFF00ACC1), // EDM: Cyan
+    Color(0xFF43A047), // Indie: Leaf Green
+    Color(0xFF2E7D32), // Cricket: Forest Green
+    Color(0xFF1565C0), // Football: Royal Cobalt
+    Color(0xFF7CB342), // Tennis: Lime Green
+    Color(0xFFF4511E)  // Basketball: Burnt Orange
+)
+val CategoryTints = CategoryColors

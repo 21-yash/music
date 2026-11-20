@@ -107,6 +107,8 @@ fun SongItem(
             )
         }
         
+        Spacer(modifier = Modifier.width(8.dp))
+
         var showOptions by remember { mutableStateOf(false) }
 
         Row(
@@ -114,9 +116,15 @@ fun SongItem(
             horizontalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             if (onAddToPlaylist != null) {
-                IconButton(
-                    onClick = onAddToPlaylist,
-                    modifier = Modifier.size(48.dp)
+                Box(
+                    modifier = Modifier
+                        .width(34.dp)
+                        .height(48.dp)
+                        .pressable(
+                            onClick = onAddToPlaylist,
+                            pressedScale = 0.88f
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.AddCircleOutline,
@@ -127,9 +135,15 @@ fun SongItem(
                 }
             }
 
-            IconButton(
-                onClick = { showOptions = true },
-                modifier = Modifier.size(48.dp)
+            Box(
+                modifier = Modifier
+                    .width(34.dp)
+                    .height(48.dp)
+                    .pressable(
+                        onClick = { showOptions = true },
+                        pressedScale = 0.88f
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
