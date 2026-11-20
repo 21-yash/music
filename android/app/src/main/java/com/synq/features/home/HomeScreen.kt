@@ -2,9 +2,11 @@ package com.synq.features.home
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -31,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -87,7 +91,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.ReadOnlyComposable
 import com.synq.features.music.components.SongItem
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import coil.request.ImageRequest
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.performConfirm
+import com.synq.ui.motion.pressable
+import com.synq.ui.motion.shimmer
+import com.synq.ui.motion.pressScale
 import com.synq.ui.theme.PinkGradient
 import com.synq.ui.theme.SemanticLive
 import com.synq.ui.theme.SemanticSuccess
@@ -209,6 +219,15 @@ fun HomeScreen(
             .distinctBy { it.songId }
             .take(5)
     }
+    val haptic = LocalHapticFeedback.current
+    val recentlyPlayedListState = rememberLazyListState()
+
+    val firstSongId = uniqueRecentlyPlayed.firstOrNull()?.songId
+    LaunchedEffect(firstSongId) {
+        if (firstSongId != null && recentlyPlayedListState.firstVisibleItemIndex == 0 && recentlyPlayedListState.firstVisibleItemScrollOffset == 0) {
+            recentlyPlayedListState.requestScrollToItem(0)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -228,6 +247,31 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = contentPadding
             ) {
+                // Skeletons for matches when loading
+                if (sportsUiState.isLoading && matches.isEmpty()) {
+                    item {
+                        SectionHeader(
+                            title = "Live Action",
+                            contentPadding = PaddingValues(
+                                start = Spacing.screenHorizontal,
+                                end = Spacing.screenHorizontal,
+                                top = 8.dp,
+                                bottom = Spacing.headerToContent
+                            )
+                        )
+                    }
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = Spacing.screenHorizontal)
+                                .width(264.dp)
+                                .height(148.dp)
+                                .clip(MaterialTheme.shapes.large)
+                                .shimmer(MaterialTheme.shapes.large)
+                        )
+                    }
+                }
+
                 // Live Action — only shown when there are active/scheduled matches
                 if (matches.isNotEmpty()) {
                     item {
@@ -251,7 +295,8 @@ fun HomeScreen(
                             items(matches, key = { it.id }) { match ->
                                 MatchCard(
                                     match = match,
-                                    onClick = { onMatchClick(match.id) }
+                                    onClick = { onMatchClick(match.id) },
+                                    modifier = Modifier.animateItem()
                                 )
                             }
                         }
@@ -274,11 +319,13 @@ fun HomeScreen(
                 }
                 item {
                     LazyRow(
+                        state = recentlyPlayedListState,
                         contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         if (uniqueRecentlyPlayed.isNotEmpty()) {
                             items(uniqueRecentlyPlayed, key = { it.songId }) { item ->
+                                val isFirst = item.songId == uniqueRecentlyPlayed.firstOrNull()?.songId
                                 val song = remember(item) {
                                     Song(
                                         id = item.songId,
@@ -299,12 +346,29 @@ fun HomeScreen(
                                 RecentSongTile(
                                     song = song,
                                     onClick = { homeViewModel.playSong(item) },
-                                    onPlayNext = { musicViewModel.playNext(song) },
-                                    onAddToQueue = { musicViewModel.addToQueue(song) }
+                                    onPlayNext = {
+                                        haptic.performConfirm()
+                                        musicViewModel.playNext(song)
+                                    },
+                                    onAddToQueue = {
+                                        haptic.performConfirm()
+                                        musicViewModel.addToQueue(song)
+                                    },
+                                    modifier = Modifier
+                                        .zIndex(if (isFirst) 1f else 0f)
+                                        .animateItem(
+                                            fadeInSpec = null,
+                                            fadeOutSpec = null,
+                                            placementSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
                                 )
                             }
                         } else {
-                            itemsIndexed(HomeSampleData.recentlyPlayed.take(5), key = { _, s -> s.title }) { _, sampleSong ->
+                            itemsIndexed(HomeSampleData.recentlyPlayed.take(5), key = { _, s -> s.title }) { index, sampleSong ->
+                                val isFirst = index == 0
                                 val song = remember(sampleSong) {
                                     Song(
                                         id = sampleSong.title.lowercase().replace(" ", "_"),
@@ -325,8 +389,24 @@ fun HomeScreen(
                                 RecentSongTile(
                                     song = song,
                                     onClick = { onSongClick(sampleSong) },
-                                    onPlayNext = { musicViewModel.playNext(song) },
-                                    onAddToQueue = { musicViewModel.addToQueue(song) }
+                                    onPlayNext = {
+                                        haptic.performConfirm()
+                                        musicViewModel.playNext(song)
+                                    },
+                                    onAddToQueue = {
+                                        haptic.performConfirm()
+                                        musicViewModel.addToQueue(song)
+                                    },
+                                    modifier = Modifier
+                                        .zIndex(if (isFirst) 1f else 0f)
+                                        .animateItem(
+                                            fadeInSpec = null,
+                                            fadeOutSpec = null,
+                                            placementSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
                                 )
                             }
                         }
@@ -378,6 +458,43 @@ fun HomeScreen(
                     )
                 }
 
+                if (uiState.isLoading && trending.isEmpty()) {
+                    items(3) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(MaterialTheme.shapes.small)
+                                    .shimmer(MaterialTheme.shapes.small)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.6f)
+                                        .height(16.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .shimmer(MaterialTheme.shapes.small)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.35f)
+                                        .height(12.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .shimmer(MaterialTheme.shapes.small)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (uiState.error != null && trending.isEmpty()) {
                     item {
                         Text(
@@ -395,8 +512,15 @@ fun HomeScreen(
                     TrendingSongRow(
                         song = song,
                         onClick = { musicViewModel.playSong(song) },
-                        onPlayNext = { musicViewModel.playNext(song) },
-                        onAddToQueue = { musicViewModel.addToQueue(song) }
+                        onPlayNext = {
+                            haptic.performConfirm()
+                            musicViewModel.playNext(song)
+                        },
+                        onAddToQueue = {
+                            haptic.performConfirm()
+                            musicViewModel.addToQueue(song)
+                        },
+                        modifier = Modifier.animateItem(placementSpec = MotionTokens.ItemPlacementSpec)
                     )
                 }
             }
@@ -406,9 +530,11 @@ fun HomeScreen(
                 JamIntroDialog(
                     onDismiss = { showJamIntro = false },
                     onStartJam = { onComplete ->
+                        haptic.performConfirm()
                         rootViewModel.startJam(onComplete = onComplete)
                     },
                     onJoinJam = { code, onComplete ->
+                        haptic.performConfirm()
                         rootViewModel.joinJam(code, onComplete = onComplete)
                     },
                     onSuccessNav = {
@@ -456,11 +582,14 @@ private fun MatchCard(
 
     Box(
         modifier = modifier
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.CardPressScale
+            )
             .width(264.dp)
             .height(148.dp)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(onClick = onClick)
     ) {
         // Stadium image (instant synchronous render if local drawable, async if URL)
         if (match.image is Int) {
@@ -644,8 +773,11 @@ private fun RecentSongTile(
 
     Column(
         modifier = modifier
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.TilePressScale
+            )
             .width(128.dp)
-            .clickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
@@ -722,8 +854,11 @@ private fun JamCard(
 
     Column(
         modifier = modifier
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.TilePressScale
+            )
             .width(128.dp)
-            .clickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
@@ -812,7 +947,7 @@ private fun com.synq.features.sports.domain.model.MatchSummary.toMatchUi(): Matc
         com.synq.R.drawable.stadium_2,
         com.synq.R.drawable.stadium_3,
         com.synq.R.drawable.stadium_4,
-        com.synq.R.drawable.stadium_5,
+        com.synq.R.drawable.stadium_5
     )
     val stadiumImg = stadiumDrawables[kotlin.math.abs(id.hashCode()) % stadiumDrawables.size]
 

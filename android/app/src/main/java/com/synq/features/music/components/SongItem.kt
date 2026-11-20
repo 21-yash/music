@@ -4,6 +4,8 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -71,7 +73,7 @@ fun SongItem(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
-            .clickable(onClick = onClick)
+            .pressable(onClick = onClick, pressedScale = MotionTokens.RowPressScale)
             .padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
