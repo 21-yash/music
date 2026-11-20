@@ -2,13 +2,11 @@ package com.synq.features.music
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -21,7 +19,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,7 +29,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.synq.ui.SynqLoadingIndicator
+import coil.request.ImageRequest
+import com.synq.features.music.domain.model.ArtistCredit
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
+import com.synq.ui.motion.shimmer
+import com.synq.ui.theme.PinkPrimary
 
 @Composable
 fun PopularArtistsScreen(
@@ -71,29 +76,35 @@ fun PopularArtistsScreen(
                 ) {
                     IconButton(
                         onClick = onBackClick,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
-                            .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f), CircleShape)
+                        modifier = Modifier.size(48.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onBackground
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Popular Artists",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
+                    Text(
+                        text = "Popular Artists",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -103,16 +114,20 @@ fun PopularArtistsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
-                        .border(1.dp, MaterialTheme.colorScheme.onBackground.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            shape = MaterialTheme.shapes.large
+                        )
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
 
@@ -121,19 +136,18 @@ fun PopularArtistsScreen(
                     androidx.compose.foundation.text.BasicTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontSize = 15.sp
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onBackground
                         ),
                         singleLine = true,
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(BrandPink),
+                        cursorBrush = SolidColor(PinkPrimary),
                         modifier = Modifier.weight(1f),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
                                 Text(
                                     text = "Search artists...",
-                                    fontSize = 15.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             innerTextField()
@@ -159,16 +173,36 @@ fun PopularArtistsScreen(
 
         // ─── Artist Grid ───
         if (uiState.isLoading && popularArtists.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 164.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                SynqLoadingIndicator(
-                    size = 48.dp,
-                    barCount = 5
-                )
+                items(9) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(92.dp)
+                                .clip(CircleShape)
+                                .shimmer(CircleShape)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(64.dp)
+                                .height(14.dp)
+                                .clip(MaterialTheme.shapes.small)
+                                .shimmer(MaterialTheme.shapes.small)
+                        )
+                    }
+                }
             }
         } else if (searchQuery.isNotBlank() && filteredArtists.isEmpty()) {
             Box(
@@ -181,26 +215,26 @@ fun PopularArtistsScreen(
                     Icon(
                         imageVector = Icons.Default.Person,
                         contentDescription = null,
-                        tint = BrandPink.copy(alpha = 0.5f),
+                        tint = PinkPrimary.copy(alpha = 0.5f),
                         modifier = Modifier.size(56.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "No artists match \"$searchQuery\"",
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Try searching for a different name",
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { searchQuery = "" },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                        colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary)
                     ) {
                         Text("Show All Artists", color = Color.White)
                     }
@@ -223,14 +257,14 @@ fun PopularArtistsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "No artists available",
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { viewModel.loadData(forceRefresh = true) },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                        colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary)
                     ) {
                         Text("Refresh", color = Color.White)
                     }
@@ -240,64 +274,91 @@ fun PopularArtistsScreen(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 164.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 items(filteredArtists, key = { it.id }) { artist ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onNavigateToArtist(artist.id) }
-                            .padding(vertical = 6.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.BottomEnd) {
-                            AsyncImage(
-                                model = artist.imageUrl,
-                                contentDescription = artist.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(94.dp)
-                                    .clip(CircleShape)
-                                    .border(1.5.dp, BrandPink.copy(alpha = 0.35f), CircleShape)
-                            )
-                            // Verified badge
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = 2.dp, y = 2.dp)
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(BrandPink)
-                                    .border(1.5.dp, MaterialTheme.colorScheme.background, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Verified",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = artist.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 16.sp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
-                        )
-                    }
+                    ArtistGridItem(
+                        artist = artist,
+                        onClick = { onNavigateToArtist(artist.id) },
+                        modifier = Modifier.animateItem()
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ArtistGridItem(
+    artist: ArtistCredit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val imageRequest = remember(artist.imageUrl) {
+        ImageRequest.Builder(context)
+            .data(artist.imageUrl)
+            .crossfade(true)
+            .crossfade(200)
+            .build()
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxWidth()
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.TilePressScale
+            )
+            .padding(vertical = 6.dp)
+    ) {
+        Box(contentAlignment = Alignment.BottomEnd) {
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = artist.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(92.dp)
+                    .clip(CircleShape)
+            )
+            // Verified badge
+            Box(
+                modifier = Modifier
+                    .offset(x = 2.dp, y = 2.dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(PinkPrimary)
+                    .border(1.5.dp, MaterialTheme.colorScheme.background, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Verified",
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 16.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+        )
     }
 }
