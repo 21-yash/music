@@ -1,9 +1,19 @@
 package com.synq.features.music
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -29,6 +42,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -86,11 +100,14 @@ fun MusicScreen(
     val isSearchStuck by remember {
         derivedStateOf { scrollState.firstVisibleItemIndex > 0 }
     }
+    val searchBorderAlpha by animateFloatAsState(
+        targetValue = if (isSearchStuck) 1f else 0f,
+        animationSpec = tween(150),
+        label = "searchBorderAlpha"
+    )
     val outlineVariantColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
 
-    val genreList = remember {
-        listOf("Pop", "Hip-Hop", "Bollywood", "Punjabi", "Rock", "Indie", "Dance", "Lo-Fi", "Classical")
-    }
+    var isTopPlaylistsExpanded by rememberSaveable { mutableStateOf(false) }
 
     val mockFeatured = remember {
         listOf(
@@ -125,6 +142,10 @@ fun MusicScreen(
         )
     }
 
+    val topPlaylistPairs = remember(uiState.homeData?.topPlaylists) {
+        uiState.homeData?.topPlaylists?.chunked(2).orEmpty()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -132,8 +153,10 @@ fun MusicScreen(
     ) {
         LazyColumn(
             state = scrollState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 120.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+            contentPadding = PaddingValues(bottom = 164.dp),
         ) {
             // ─── 1. AppHeader (scrolls away with content) ───
             item(key = "app_header") {
@@ -145,19 +168,16 @@ fun MusicScreen(
                 )
             }
 
-            // ─── 2. Search Box (stickyHeader pinned to top) ───
+            // ─── 2. Search Box (stickyHeader pinned to top, static layout) ───
             stickyHeader(key = "sticky_search") {
-                val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
-                        .padding(top = if (isSearchStuck) statusBarTop else 0.dp)
                         .drawBehind {
-                            if (isSearchStuck) {
+                            if (searchBorderAlpha > 0f) {
                                 drawLine(
-                                    color = outlineVariantColor,
+                                    color = outlineVariantColor.copy(alpha = outlineVariantColor.alpha * searchBorderAlpha),
                                     start = Offset(0f, size.height),
                                     end = Offset(size.width, size.height),
                                     strokeWidth = 1.dp.toPx()
@@ -195,21 +215,6 @@ fun MusicScreen(
                             text = "Search JioSaavn or YouTube...",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            }
-
-            // ─── 3. Genre Chips (single row, scrollable, neutral style) ───
-            item(key = "genre_chips") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(genreList, key = { it }) { genre ->
-                        NeutralGenreChip(
-                            text = genre,
-                            onClick = onNavigateToSearch
                         )
                     }
                 }
@@ -310,7 +315,7 @@ fun MusicScreen(
                 }
             }
 
-            // ─── 5. Top Playlists (2-Column Compact Grid, chunked(2), no cap) ───
+            // ─── 5. Top Playlists (2-Column Compact Grid, chunked(2), 5x2 or 10x2) ───
             val topPlaylists = uiState.homeData?.topPlaylists
             if (!topPlaylists.isNullOrEmpty()) {
                 item(key = "top_playlists_header") {
@@ -324,8 +329,8 @@ fun MusicScreen(
                         )
                     )
                 }
-                val playlistPairs = topPlaylists.chunked(2)
-                items(playlistPairs, key = { pair -> pair.map { it.id }.joinToString("_") }) { pair ->
+                val basePairs = topPlaylistPairs.take(5)
+                items(basePairs, key = { pair -> pair.map { it.id }.joinToString("_") }) { pair ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -351,6 +356,116 @@ fun MusicScreen(
                             )
                         } else {
                             Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                if (topPlaylistPairs.size > 5) {
+                    item(key = "top_playlists_drawer") {
+                        val extraPairs = topPlaylistPairs.drop(5).take(5)
+                        AnimatedVisibility(
+                            visible = isTopPlaylistsExpanded,
+                            enter = expandVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                ),
+                                expandFrom = Alignment.Top
+                            ) + slideInVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                ),
+                                initialOffsetY = { -it / 2 }
+                            ) + fadeIn(animationSpec = tween(200)),
+                            exit = shrinkVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                ),
+                                shrinkTowards = Alignment.Top
+                            ) + slideOutVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                ),
+                                targetOffsetY = { -it / 2 }
+                            ) + fadeOut(animationSpec = tween(150))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clipToBounds()
+                            ) {
+                                extraPairs.forEach { pair ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CompactPlaylistTile(
+                                            title = pair[0].title,
+                                            imageUrl = pair[0].imageUrl ?: "",
+                                            onClick = { onNavigateToPlaylist(pair[0].id) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (pair.size > 1) {
+                                            CompactPlaylistTile(
+                                                title = pair[1].title,
+                                                imageUrl = pair[1].imageUrl ?: "",
+                                                onClick = { onNavigateToPlaylist(pair[1].id) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item(key = "top_playlists_toggle") {
+                        val actionColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) PinkPrimary else PinkDeep
+                        val arrowRotation by animateFloatAsState(
+                            targetValue = if (isTopPlaylistsExpanded) 180f else 0f,
+                            animationSpec = tween(250),
+                            label = "arrowRotation"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .pressable(
+                                        onClick = { isTopPlaylistsExpanded = !isTopPlaylistsExpanded },
+                                        pressedScale = MotionTokens.ButtonPressScale
+                                    )
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (isTopPlaylistsExpanded) "See less" else "See more",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        color = actionColor,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = actionColor,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .graphicsLayer { rotationZ = arrowRotation }
+                                )
+                            }
                         }
                     }
                 }
@@ -415,7 +530,7 @@ fun MusicScreen(
                     ) {
                         val initialArtists = popularArtists.take(10)
                         items(initialArtists, key = { it.id }) { artist ->
-                            RingedArtistAvatar(
+                            ArtistAvatarItem(
                                 name = artist.name,
                                 imageUrl = artist.imageUrl,
                                 onClick = { onNavigateToArtist(artist.id) },
@@ -440,7 +555,7 @@ fun MusicScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         items(fallbackArtists, key = { it.first }) { artist ->
-                            RingedArtistAvatar(
+                            ArtistAvatarItem(
                                 name = artist.first,
                                 imageUrl = artist.second,
                                 onClick = { onNavigateToArtist(artist.first) }
@@ -505,38 +620,6 @@ fun MusicScreen(
                 }
             }
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// Neutral Genre Chip (32dp tall, surfaceContainerHighest, 12sp Medium)
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun NeutralGenreChip(
-    text: String,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .pressable(
-                onClick = onClick,
-                pressedScale = MotionTokens.ChipPressScale
-            )
-            .height(32.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-        )
     }
 }
 
@@ -784,11 +867,11 @@ private fun CompactPlaylistTile(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Popular Artists: 80dp Avatar with 2dp gap and 1.5dp PinkPrimary ring
+// Popular Artists: Plain 80dp circular avatar (no ring/border)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun RingedArtistAvatar(
+private fun ArtistAvatarItem(
     name: String,
     imageUrl: String?,
     onClick: () -> Unit,
@@ -812,32 +895,21 @@ private fun RingedArtistAvatar(
                 pressedScale = 0.96f
             )
     ) {
-        // Outer container: 87dp with 1.5dp PinkPrimary ring (35% alpha) + 2dp gap to 80dp avatar
-        Box(
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(87.dp)
-                .border(
-                    width = 1.5.dp,
-                    color = PinkPrimary.copy(alpha = 0.35f),
-                    shape = CircleShape
-                )
-                .padding(3.5.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(CircleShape)
-            )
-        }
+                .size(88.dp)
+                .clip(CircleShape)
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = name,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            ),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -847,7 +919,7 @@ private fun RingedArtistAvatar(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Best Of SquareCard (Unchanged layout per prompt instruction)
+// Best Of SquareCard (128dp square, typography matches RecentSongTile)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -867,15 +939,15 @@ private fun SquareCard(
     }
     Column(
         modifier = modifier
-            .width(140.dp)
             .pressable(
                 onClick = onClick,
-                pressedScale = MotionTokens.CardPressScale
+                pressedScale = MotionTokens.TilePressScale
             )
+            .width(128.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(128.dp)
                 .clip(MaterialTheme.shapes.medium)
         ) {
             AsyncImage(
@@ -894,12 +966,12 @@ private fun SquareCard(
         ) {
             Text(
                 text = title,
-                color = MaterialTheme.colorScheme.onBackground,
-                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                lineHeight = 18.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines = 2
             )
         }
     }
