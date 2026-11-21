@@ -73,11 +73,10 @@ val LightError                   = Color(0xFFEF4444)
 val LightOnError                 = Color(0xFFFFFFFF)
 
 // ─── Sports Accent (Scoped: Sports tab, SportsScreen, MatchDetailsScreen) ───
-// Lime: dark #C6F135, light #4D7C0F; onSportsAccent dark #141116, light #FFFFFF
-// Commented alternative for testing: Amber #FFB020 / #B45309
-val SportsAccentDark    = Color(0xFFC6F135)
-val SportsAccentLight   = Color(0xFF4D7C0F)
-val OnSportsAccentDark  = Color(0xFF141116)
+// Vivid Crimson/Coral: dark #FF4D67, light #E11D48; onSportsAccent #FFFFFF
+val SportsAccentDark    = Color(0xFFFF4D67)
+val SportsAccentLight   = Color(0xFFE11D48)
+val OnSportsAccentDark  = Color(0xFFFFFFFF)
 val OnSportsAccentLight = Color(0xFFFFFFFF)
 
 // Dynamic accessors that follow the current theme
