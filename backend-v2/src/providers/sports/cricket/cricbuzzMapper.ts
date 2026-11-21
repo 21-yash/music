@@ -32,7 +32,7 @@ import { buildFlagUrl, buildMatchSlug, buildPlayerImageUrl } from './cricbuzzScr
  * States that indicate a match is NOT live.
  */
 const NON_LIVE_STATES = new Set([
-  'preview', 'upcoming', 'scheduled', 'complete', 'result', 'abandoned', 'stumps',
+  'preview', 'upcoming', 'scheduled', 'complete', 'result', 'abandoned',
 ]);
 
 /**
