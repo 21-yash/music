@@ -3,21 +3,25 @@ package com.synq.features.music
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,22 +52,25 @@ import com.synq.features.music.components.SongItem
 import com.synq.features.music.domain.model.Song
 import com.synq.features.music.jam.LocalIsInJam
 import com.synq.ui.SynqLoadingIndicator
-import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkPrimary
 
-private val PinkAccent = BrandPink
+private val PinkAccent = PinkPrimary
 
 private val PlaylistAccentGradient = PinkGradient
 
 private fun getCreatorAvatarGradient(name: String): Brush {
     val nonPinkGradients = listOf(
-        listOf(Color(0xFF6366F1), Color(0xFF4338CA)), // Indigo / Royal Blue
-        listOf(Color(0xFF0EA5E9), Color(0xFF0284C7)), // Sky / Ocean Blue
-        listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9)), // Violet / Purple
-        listOf(Color(0xFF10B981), Color(0xFF047857)), // Emerald Green
-        listOf(Color(0xFFF59E0B), Color(0xFFD97706)), // Amber / Gold
-        listOf(Color(0xFF06B6D4), Color(0xFF0E7490)), // Cyan / Deep Teal
-        listOf(Color(0xFF3B82F6), Color(0xFF1E40AF)), // Cobalt Blue
-        listOf(Color(0xFF14B8A6), Color(0xFF0F766E)), // Mint / Teal
+        listOf(Color(0xFF1E88E5), Color(0xFF1565C0)), // Royal Blue
+        listOf(Color(0xFF00ACC1), Color(0xFF00897B)), // Cyan / Teal
+        listOf(Color(0xFF7C4DFF), Color(0xFF651FFF)), // Deep Purple
+        listOf(Color(0xFF43A047), Color(0xFF2E7D32)), // Forest Green
+        listOf(Color(0xFFF59E0B), Color(0xFFD97706)), // Amber Gold
+        listOf(Color(0xFFE65100), Color(0xFFBF360C)), // Warm Saffron
+        listOf(Color(0xFF3949AB), Color(0xFF283593)), // Cobalt / Navy
+        listOf(Color(0xFF00897B), Color(0xFF00695C)), // Mint / Teal
     )
     if (name.equals("Curated", ignoreCase = true)) {
         return Brush.linearGradient(nonPinkGradients[0])
@@ -163,12 +170,42 @@ fun PlaylistScreen(
         stagedSongs.map { it.id } != initialSongIds
     }
 
+    val coroutineScope = rememberCoroutineScope()
+
     // Detected if scrolled past top header to show compact top-bar title and play button
     val isScrolledPastHeader by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex > 3 || (listState.firstVisibleItemIndex == 3 && listState.firstVisibleItemScrollOffset > 60)
         }
     }
+
+    // Detected if scrolled down past a limit (past header & top tracks) to show "Move to top" button
+    val showScrollToTop by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex >= 7
+        }
+    }
+
+    val playbackState by musicViewModel.playerManager.playbackState.collectAsState()
+    val isMiniPlayerPresent = playbackState.currentSong != null && !isEditMode
+
+    val scrollToTopBottomPadding by animateDpAsState(
+        targetValue = if (isMiniPlayerPresent) 88.dp else 16.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "scrollToTopBottomPadding"
+    )
+
+    val lazyBottomPadding by animateDpAsState(
+        targetValue = if (isMiniPlayerPresent) 180.dp else 110.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "lazyBottomPadding"
+    )
 
     if (showEditDialog && originalPlaylist != null && !originalPlaylist.id.equals("liked", ignoreCase = true)) {
         EditPlaylistDialog(
@@ -204,11 +241,16 @@ fun PlaylistScreen(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Failed to load playlist: ${uiState.error}", color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = "Failed to load playlist: ${uiState.error}",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = { viewModel.loadPlaylist(playlistId) },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary)
                 ) {
                     Text("Retry")
                 }
@@ -278,15 +320,15 @@ fun PlaylistScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onBackground
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .height(40.dp)
+                                    .clip(MaterialTheme.shapes.small)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                     .padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -306,10 +348,10 @@ fun PlaylistScreen(
                                         onValueChange = { searchQuery = it },
                                         singleLine = true,
                                         textStyle = TextStyle(
-                                            color = MaterialTheme.colorScheme.onBackground,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 15.sp
                                         ),
-                                        cursorBrush = SolidColor(BrandPink),
+                                        cursorBrush = SolidColor(PinkPrimary),
                                         modifier = Modifier
                                             .weight(1f)
                                             .focusRequester(searchFocusRequester),
@@ -355,29 +397,31 @@ fun PlaylistScreen(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onBackground
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
                             }
 
                             // Title fades in when scrolled past top artwork
-                            AnimatedVisibility(
-                                visible = isScrolledPastHeader,
-                                enter = fadeIn(),
-                                exit = fadeOut(),
-                                modifier = Modifier.weight(1f)
+                            val scrolledTitleAlpha by animateFloatAsState(
+                                targetValue = if (isScrolledPastHeader) 1f else 0f,
+                                animationSpec = tween(durationMillis = 200),
+                                label = "scrolledTitleAlpha"
+                            )
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
                             ) {
                                 Text(
                                     text = originalPlaylist.title,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onBackground,
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.graphicsLayer { alpha = scrolledTitleAlpha }
                                 )
-                            }
-
-                            if (!isScrolledPastHeader) {
-                                Spacer(modifier = Modifier.weight(1f))
                             }
 
                             // Small play button in top bar when scrolled (Spotify Screenshot 3)
@@ -389,22 +433,24 @@ fun PlaylistScreen(
                                 Box(
                                     modifier = Modifier
                                         .padding(end = 8.dp)
-                                        .size(42.dp)
-                                        .shadow(elevation = 8.dp, shape = CircleShape, spotColor = BrandPink.copy(alpha = 0.5f))
+                                        .size(48.dp)
+                                        .pressable(
+                                            onClick = {
+                                                if (originalPlaylist.songs.isNotEmpty()) {
+                                                    musicViewModel.playQueue(originalPlaylist.songs, 0)
+                                                }
+                                            },
+                                            pressedScale = MotionTokens.ButtonPressScale
+                                        )
                                         .clip(CircleShape)
-                                        .background(PinkGradient)
-                                        .clickable {
-                                            if (originalPlaylist.songs.isNotEmpty()) {
-                                                musicViewModel.playQueue(originalPlaylist.songs, 0)
-                                            }
-                                        },
+                                        .background(PinkGradient),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.PlayArrow,
                                         contentDescription = "Play",
                                         tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(26.dp)
                                     )
                                 }
                             }
@@ -416,7 +462,7 @@ fun PlaylistScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 120.dp)
+                    contentPadding = PaddingValues(bottom = lazyBottomPadding)
                 ) {
                     // Item 0: "Find in playlist" search bar (Spotify Screenshot 2)
                     if (!isSearchActive) {
@@ -425,10 +471,13 @@ fun PlaylistScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 20.dp, vertical = 6.dp)
-                                    .height(42.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                    .clickable { isSearchActive = true }
+                                    .height(40.dp)
+                                    .pressable(
+                                        onClick = { isSearchActive = true },
+                                        pressedScale = MotionTokens.RowPressScale
+                                    )
+                                    .clip(MaterialTheme.shapes.small)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
                                     .padding(horizontal = 12.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -478,16 +527,17 @@ fun PlaylistScreen(
                             ) {
                                 Text(
                                     text = originalPlaylist.title,
-                                    fontSize = 26.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = MaterialTheme.colorScheme.onBackground
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
 
                                 if (originalPlaylist.description.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = originalPlaylist.description,
-                                        fontSize = 13.sp,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
@@ -526,9 +576,10 @@ fun PlaylistScreen(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = creatorName,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onBackground
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
 
@@ -547,7 +598,9 @@ fun PlaylistScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "${originalPlaylist.songs.size} songs • $formattedHms",
-                                        fontSize = 13.sp,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -557,7 +610,7 @@ fun PlaylistScreen(
                         }
                     }
 
-                    // Item 3: Actions Row: Share, Shuffle, Big Green Play Button (Spotify Screenshot 1)
+                    // Item 3: Actions Row: Share, Shuffle, Big Play Button (Spotify Screenshot 1)
                     if (!isSearchActive) {
                         item(key = "playlist_action_row") {
                             Row(
@@ -578,7 +631,7 @@ fun PlaylistScreen(
                                         imageVector = Icons.Default.Share,
                                         contentDescription = "Share",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
 
@@ -593,7 +646,7 @@ fun PlaylistScreen(
                                         imageVector = Icons.Default.Shuffle,
                                         contentDescription = "Shuffle",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
 
@@ -603,21 +656,23 @@ fun PlaylistScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(56.dp)
-                                        .shadow(10.dp, CircleShape, spotColor = BrandPink.copy(alpha = 0.5f))
+                                        .pressable(
+                                            onClick = {
+                                                if (originalPlaylist.songs.isNotEmpty()) {
+                                                    musicViewModel.playQueue(originalPlaylist.songs, 0)
+                                                }
+                                            },
+                                            pressedScale = MotionTokens.ButtonPressScale
+                                        )
                                         .clip(CircleShape)
-                                        .background(PinkGradient)
-                                        .clickable {
-                                            if (originalPlaylist.songs.isNotEmpty()) {
-                                                musicViewModel.playQueue(originalPlaylist.songs, 0)
-                                            }
-                                        },
+                                        .background(PinkGradient),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Filled.PlayArrow,
                                         contentDescription = "Play",
                                         tint = Color.White,
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -686,14 +741,15 @@ fun PlaylistScreen(
                                             DropdownMenu(
                                                 expanded = showSortMenu,
                                                 onDismissRequest = { showSortMenu = false },
-                                                shape = RoundedCornerShape(12.dp)
+                                                shape = MaterialTheme.shapes.medium
                                             ) {
                                                 PlaylistSortOrder.entries.forEach { order ->
                                                     DropdownMenuItem(
                                                         text = {
                                                             Text(
                                                                 text = order.label,
-                                                                fontWeight = if (selectedSort == order) FontWeight.Bold else FontWeight.Normal
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = if (selectedSort == order) FontWeight.SemiBold else FontWeight.Normal
                                                             )
                                                         },
                                                         trailingIcon = {
@@ -701,7 +757,7 @@ fun PlaylistScreen(
                                                                 Icon(
                                                                     Icons.Default.Check,
                                                                     contentDescription = null,
-                                                                    tint = BrandPink,
+                                                                    tint = PinkPrimary,
                                                                     modifier = Modifier.size(18.dp)
                                                                 )
                                                             }
@@ -743,26 +799,28 @@ fun PlaylistScreen(
                                 Icon(
                                     imageVector = Icons.Default.MusicNote,
                                     contentDescription = null,
-                                    tint = BrandPink,
+                                    tint = PinkPrimary,
                                     modifier = Modifier.size(42.dp)
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
                                     text = if (searchQuery.isNotEmpty()) "No songs match \"$searchQuery\"" else "No songs in this playlist yet",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onBackground
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 if (searchQuery.isEmpty() && isUserMade) {
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Button(
                                         onClick = onNavigateToSearch,
-                                        shape = RoundedCornerShape(20.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                                        shape = CircleShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Add songs", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text("Add songs", color = Color.White, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -779,6 +837,20 @@ fun PlaylistScreen(
                                 val isDragging = song.id == draggingSongId
 
                                 EditModeSongRow(
+                                    modifier = Modifier.animateItem(
+                                        fadeInSpec = spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        ),
+                                        fadeOutSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        ),
+                                        placementSpec = if (isDragging) null else spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ),
                                     song = song,
                                     isDragging = isDragging,
                                     dragOffsetY = if (isDragging) dragOffsetY else 0f,
@@ -825,7 +897,7 @@ fun PlaylistScreen(
                                     },
                                     onPlayNext = { musicViewModel.playNext(song) },
                                     onAddToQueue = { musicViewModel.addToQueue(song) },
-                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
@@ -836,13 +908,46 @@ fun PlaylistScreen(
             // Floating Save Button (Visible only when in Edit Mode)
             AnimatedVisibility(
                 visible = isEditMode,
-                enter = slideInVertically(initialOffsetY = { it * 2 }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it * 2 }) + fadeOut(),
+                enter = slideInVertically(
+                    initialOffsetY = { it * 2 },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn() + scaleIn(initialScale = 0.85f),
+                exit = slideOutVertically(
+                    targetOffsetY = { it * 2 },
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                ) + fadeOut() + scaleOut(targetScale = 0.85f),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 8.dp)
+                    .padding(bottom = 12.dp)
             ) {
+                val saveButtonScale by animateFloatAsState(
+                    targetValue = if (hasChanges && !isSaving) 1f else 0.94f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "saveButtonScale"
+                )
+                val buttonContainerColor by animateColorAsState(
+                    targetValue = if (hasChanges && !isSaving) PinkPrimary else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                    animationSpec = tween(durationMillis = 200),
+                    label = "saveButtonColor"
+                )
+                val saveInteractionSource = remember { MutableInteractionSource() }
+                val isSavePressed by saveInteractionSource.collectIsPressedAsState()
+                val savePressScale by animateFloatAsState(
+                    targetValue = if (isSavePressed) 0.90f else 1.0f,
+                    animationSpec = spring(
+                        dampingRatio = if (isSavePressed) Spring.DampingRatioNoBouncy else 0.45f,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "savePressScale"
+                )
+
                 Button(
                     onClick = {
                         if (hasChanges && !isSaving) {
@@ -868,32 +973,131 @@ fun PlaylistScreen(
                         }
                     },
                     enabled = hasChanges && !isSaving,
-                    shape = RoundedCornerShape(28.dp),
+                    interactionSource = saveInteractionSource,
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = BrandPink,
+                        containerColor = buttonContainerColor,
                         contentColor = Color.White,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
                         disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp, pressedElevation = 12.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp, pressedElevation = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
+                    modifier = Modifier
+                        .graphicsLayer {
+                            val totalScale = saveButtonScale * savePressScale
+                            scaleX = totalScale
+                            scaleY = totalScale
+                        }
                 ) {
-                    if (isSaving) {
-                        SynqLoadingIndicator(
-                            size = 18.dp,
-                            barCount = 3,
-                            colors = listOf(Color.White.copy(alpha = 0.75f), Color.White)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Saving...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    } else {
+                    AnimatedContent(
+                        targetState = isSaving,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.85f)) togetherWith
+                            (fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.85f))
+                        },
+                        label = "saveButtonContent"
+                    ) { saving ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (saving) {
+                                SynqLoadingIndicator(
+                                    size = 18.dp,
+                                    barCount = 3,
+                                    colors = listOf(Color.White.copy(alpha = 0.75f), Color.White)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Saving...", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Save changes", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Floating "Move to top" Button (Visible when scrolled down and not in edit mode)
+            AnimatedVisibility(
+                visible = showScrollToTop && !isEditMode,
+                enter = slideInVertically(
+                    initialOffsetY = { it * 2 },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn() + scaleIn(initialScale = 0.8f),
+                exit = slideOutVertically(
+                    targetOffsetY = { it * 2 },
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                ) + fadeOut() + scaleOut(targetScale = 0.8f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = scrollToTopBottomPadding)
+            ) {
+                val scrollToTopInteraction = remember { MutableInteractionSource() }
+                val isScrollPressed by scrollToTopInteraction.collectIsPressedAsState()
+                val scrollBounceScale by animateFloatAsState(
+                    targetValue = if (isScrollPressed) 0.90f else 1.0f,
+                    animationSpec = spring(
+                        dampingRatio = if (isScrollPressed) Spring.DampingRatioNoBouncy else 0.45f,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "scrollBounceScale"
+                )
+
+                Surface(
+                    onClick = {
+                        coroutineScope.launch {
+                            if (!listState.isScrollInProgress) {
+                                if (listState.firstVisibleItemIndex > 6) {
+                                    listState.scrollToItem(6)
+                                }
+                                listState.animateScrollToItem(0)
+                            }
+                        }
+                    },
+                    interactionSource = scrollToTopInteraction,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shadowElevation = 6.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier.graphicsLayer {
+                        scaleX = scrollBounceScale
+                        scaleY = scrollBounceScale
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            imageVector = Icons.Default.ArrowUpward,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp),
+                            tint = PinkPrimary
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Save changes", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Move to top",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
@@ -914,10 +1118,9 @@ private fun PlaylistCoverArtwork(
 ) {
     Box(
         modifier = modifier
-            .size(210.dp)
-            .shadow(12.dp, RoundedCornerShape(10.dp))
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .size(200.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
     ) {
         if (isLikedPlaylist) {
             Box(
@@ -930,7 +1133,7 @@ private fun PlaylistCoverArtwork(
                     imageVector = Icons.Default.Favorite,
                     contentDescription = "Liked Songs",
                     tint = Color.White,
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier.size(64.dp)
                 )
             }
         } else if (!imageUrl.isNullOrBlank()) {
@@ -989,10 +1192,10 @@ private fun PlaylistCoverArtwork(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.QueueMusic,
+                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                         contentDescription = null,
                         tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(56.dp)
                     )
                 }
             }
@@ -1010,14 +1213,11 @@ private fun PillButton(
     enabled: Boolean = true,
     isAccent: Boolean = false
 ) {
-    val isDark = isAppDark()
-
     val containerColor = when {
-        isAccent && enabled -> BrandPink
-        isAccent && !enabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        isSelected -> BrandPink
-        isDark -> Color.White.copy(alpha = 0.12f)
-        else -> Color.Black.copy(alpha = 0.08f)
+        isAccent && enabled -> PinkPrimary
+        isAccent && !enabled -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+        isSelected -> PinkPrimary
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
     }
 
     val contentColor = when {
@@ -1025,31 +1225,36 @@ private fun PillButton(
         isAccent && !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         isSelected -> Color.White
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-        else -> MaterialTheme.colorScheme.onBackground
+        else -> MaterialTheme.colorScheme.onSurface
     }
 
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(20.dp),
-        color = containerColor,
-        contentColor = contentColor,
-        modifier = modifier.height(34.dp)
+    Box(
+        modifier = modifier
+            .height(32.dp)
+            .pressable(
+                onClick = if (enabled) onClick else null,
+                pressedScale = MotionTokens.ChipPressScale
+            )
+            .clip(CircleShape)
+            .background(containerColor)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
+                tint = contentColor,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = label,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                color = contentColor
             )
         }
     }
@@ -1064,40 +1269,58 @@ private fun EditModeSongRow(
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val isDark = isAppDark()
-    val titleColor = if (isDark) Color.White else Color(0xFF0F172A)
-    val artistColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val titleColor = MaterialTheme.colorScheme.onSurface
+    val artistColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    val scale by animateFloatAsState(
+        targetValue = if (isDragging) 1.03f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "editSongScale"
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (isDragging) 8.dp else 0.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "editSongElevation"
+    )
+    val handleScale by animateFloatAsState(
+        targetValue = if (isDragging) 1.2f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "editSongHandleScale"
+    )
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .zIndex(if (isDragging) 10f else 1f)
             .graphicsLayer {
-                if (isDragging) {
-                    translationY = dragOffsetY
-                    scaleX = 1.02f
-                    scaleY = 1.02f
-                    shadowElevation = 14f
-                }
+                translationY = dragOffsetY
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = elevation.toPx()
             }
-            .background(
-                if (isDragging) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f) else Color.Transparent,
-                shape = RoundedCornerShape(10.dp)
-            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Red minus icon for removing song
         IconButton(
             onClick = onRemove,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier
+                .size(36.dp)
+                .pressable(pressedScale = 0.8f)
         ) {
             Icon(
                 imageVector = Icons.Default.RemoveCircle,
                 contentDescription = "Remove song",
                 tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
 
@@ -1108,9 +1331,9 @@ private fun EditModeSongRow(
             contentDescription = "Album art for ${song.title}",
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .size(48.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         )
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -1118,16 +1341,21 @@ private fun EditModeSongRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                ),
                 color = titleColor,
-                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = song.primaryArtistName,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal
+                ),
                 color = artistColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1154,8 +1382,13 @@ private fun EditModeSongRow(
             Icon(
                 imageVector = Icons.Default.DragHandle,
                 contentDescription = "Reorder song",
-                tint = if (isDragging) BrandPink else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
+                tint = if (isDragging) PinkPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(22.dp)
+                    .graphicsLayer {
+                        scaleX = handleScale
+                        scaleY = handleScale
+                    }
             )
         }
     }
@@ -1178,8 +1411,7 @@ private fun EditPlaylistDialog(
         title = {
             Text(
                 text = "Edit Playlist",
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
@@ -1193,7 +1425,7 @@ private fun EditPlaylistDialog(
                     label = { Text("Playlist Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = MaterialTheme.shapes.medium
                 )
 
                 OutlinedTextField(
@@ -1202,7 +1434,7 @@ private fun EditPlaylistDialog(
                     label = { Text("Description (optional)") },
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = MaterialTheme.shapes.medium
                 )
 
                 OutlinedTextField(
@@ -1211,7 +1443,7 @@ private fun EditPlaylistDialog(
                     label = { Text("Cover Image URL (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = MaterialTheme.shapes.medium
                 )
 
                 if (imageUrl.isNotBlank()) {
@@ -1231,8 +1463,8 @@ private fun EditPlaylistDialog(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(48.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         )
                     }
                 }
@@ -1245,8 +1477,9 @@ private fun EditPlaylistDialog(
                     onDismiss()
                 },
                 enabled = name.isNotBlank(),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary),
+                modifier = Modifier.pressable(pressedScale = MotionTokens.ButtonPressScale)
             ) {
                 Text("Save")
             }
