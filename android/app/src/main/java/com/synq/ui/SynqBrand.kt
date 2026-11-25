@@ -25,27 +25,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.synq.R
-
-// ─── Brand Colors ─────────────────────────────────────────────────────────────
-val SynqPink = Color(0xFFFF2D55)
-val SynqPinkLight = Color(0xFFFF8FA3)
-val SynqPinkDark = Color(0xFFD0165E)
-val SynqBackground = Color(0xFF141116)
-val SynqSurface = Color(0xFF1E1822)
-
-val SynqPinkGradient = Brush.linearGradient(
-    listOf(SynqPinkLight, SynqPink, SynqPinkDark)
-)
+import com.synq.ui.theme.PinkPrimary
 
 /**
  * Builds an AnnotatedString for the Synq brand name where:
  * - "Syn" / "syn" is styled with [synColor] (default White)
- * - "q" is styled with [qColor] (default SynqPink #FF2D55)
+ * - "q" is styled with [qColor] (default PinkPrimary)
  */
 fun buildSynqAnnotatedString(
     capitalized: Boolean = true,
     synColor: Color = Color.White,
-    qColor: Color = SynqPink,
+    qColor: Color = PinkPrimary,
     suffix: String = ""
 ): AnnotatedString = buildAnnotatedString {
     withStyle(SpanStyle(color = synColor)) {
@@ -72,7 +62,7 @@ fun SynqBrandedText(
     fontWeight: FontWeight = FontWeight.Bold,
     letterSpacing: TextUnit = (-0.5).sp,
     synColor: Color = Color.White,
-    qColor: Color = SynqPink,
+    qColor: Color = PinkPrimary,
     suffix: String = "",
     style: TextStyle = MaterialTheme.typography.headlineMedium
 ) {
@@ -108,7 +98,7 @@ fun SynqLogo(
                     Modifier.drawBehind {
                         drawCircle(
                             brush = Brush.radialGradient(
-                                colors = listOf(SynqPink.copy(alpha = 0.40f), Color.Transparent),
+                                colors = listOf(PinkPrimary.copy(alpha = 0.40f), Color.Transparent),
                                 center = center,
                                 radius = size.toPx() * 0.85f
                             )

@@ -3,7 +3,7 @@ package com.synq.features.music.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -12,6 +12,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.synq.ui.theme.PinkPrimary
 
 /**
  * Animated audio spectrum equalizer bars for currently playing tracks.
@@ -20,7 +21,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AnimatedEqualizerBars(
     modifier: Modifier = Modifier,
-    color: Color = Color(0xFFEC4899),
+    color: Color = PinkPrimary,
     isPlaying: Boolean = true,
     barCount: Int = 3,
     barWidth: Dp = 3.dp,
@@ -114,7 +115,7 @@ private fun ActiveEqualizerBars(
                 modifier = Modifier
                     .width(barWidth)
                     .fillMaxHeight(fraction.coerceIn(0.15f, 1f))
-                    .clip(RoundedCornerShape(barWidth / 2))
+                    .clip(CircleShape)
                     .background(color)
             )
         }
@@ -145,7 +146,7 @@ private fun StaticEqualizerBars(
                 modifier = Modifier
                     .width(barWidth)
                     .fillMaxHeight(fraction.coerceIn(0.15f, 1f))
-                    .clip(RoundedCornerShape(barWidth / 2))
+                    .clip(CircleShape)
                     .background(color)
             )
         }

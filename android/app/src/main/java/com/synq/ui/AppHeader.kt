@@ -30,16 +30,18 @@ import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import com.synq.RootViewModel
 import com.synq.navigation.Screen
-
-private val AvatarGradient = Brush.linearGradient(
-    listOf(SynqPinkLight, SynqPink, SynqPinkDark)
-)
+import com.synq.ui.theme.PinkGradientHero
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.SemanticLive
+import com.synq.ui.theme.Spacing
 
 /**
- * Unified Header for Home, Music, Sports, and Library screens.
- * Displays the Synq app logo (which triggers the quick options menu when clicked)
- * alongside the title and subtitle. The user profile logo has been removed from the header
- * and moved directly into the bottom navigation bar.
+ * Unified Header for Home, Music, Sports, and Library screens (§4.6, UI-B).
+ *
+ * - Screen title: headlineMedium (24sp Bold)
+ * - Subtitle: bodySmall (13sp Normal, onSurfaceVariant)
+ * - Header padding: 20dp horizontal, 12dp top, 8dp bottom
+ * - Logo size: 44dp unchanged (§3.2)
  */
 @Composable
 fun AppHeader(
@@ -58,7 +60,12 @@ fun AppHeader(
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 12.dp),
+            .padding(
+                start = Spacing.screenHorizontal,
+                end = Spacing.screenHorizontal,
+                top = Spacing.headerTop,
+                bottom = Spacing.headerBottom
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showBrandLogo) {
@@ -114,15 +121,15 @@ fun AppHeader(
             if (title.equals("synq", ignoreCase = true)) {
                 SynqBrandedText(
                     capitalized = title.firstOrNull()?.isUpperCase() ?: true,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = (-0.5).sp
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    style = MaterialTheme.typography.headlineMedium
                 )
             } else {
                 Text(
                     text = title,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     letterSpacing = (-0.5).sp,
                     maxLines = 1,
@@ -130,11 +137,10 @@ fun AppHeader(
                 )
             }
             if (!subtitle.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -164,8 +170,8 @@ private fun AppLogoMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
         offset = DpOffset(0.dp, 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = modifier.width(230.dp)
     ) {
         // Header row: tapping it opens the Profile screen
@@ -173,25 +179,23 @@ private fun AppLogoMenu(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onDismiss(); onProfileClick() }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = Spacing.m, vertical = Spacing.s),
             verticalAlignment = Alignment.CenterVertically
         ) {
             GradientAvatar(initial = initial)
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.s))
             Column {
                 Text(
                     text = userName,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = planLabel,
-                    color = SynqPink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = PinkPrimary,
+                    style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -199,12 +203,12 @@ private fun AppLogoMenu(
         }
         Box(
             Modifier
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = Spacing.m)
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Spacing.xxs))
 
         ProfileMenuItem(
             label = if (isDarkTheme) "Light Mode" else "Dark Mode",
@@ -213,7 +217,7 @@ private fun AppLogoMenu(
 
         ProfileMenuItem("Settings", Icons.Default.Settings) { onDismiss(); onSettingsClick() }
         ProfileMenuItem("Listening History", Icons.Default.Refresh) { onDismiss(); onHistoryClick() }
-        ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = Color(0xFFEF4444)) {
+        ProfileMenuItem("Log Out", Icons.Default.ExitToApp, tint = SemanticLive) {
             onDismiss()
             onLogoutClick()
         }
@@ -232,7 +236,7 @@ private fun ProfileMenuItem(
             Text(
                 text = label,
                 color = tint ?: MaterialTheme.colorScheme.onSurface,
-                fontSize = 15.sp
+                style = MaterialTheme.typography.bodyMedium
             )
         },
         leadingIcon = {
@@ -240,7 +244,7 @@ private fun ProfileMenuItem(
                 imageVector = icon,
                 contentDescription = null,
                 tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(20.dp)
             )
         },
         onClick = onClick
@@ -253,16 +257,15 @@ private fun GradientAvatar(initial: String, onClick: (() -> Unit)? = null) {
         modifier = Modifier
             .size(44.dp)
             .clip(CircleShape)
-            .background(AvatarGradient)
-            .border(2.dp, Color.White.copy(alpha = 0.1f), CircleShape)
+            .background(PinkGradientHero)
+            .border(1.5.dp, Color.White.copy(alpha = 0.15f), CircleShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = initial,
             color = Color.White,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold
+            style = MaterialTheme.typography.titleLarge
         )
     }
 }

@@ -599,9 +599,7 @@ class MusicPlayerManager @Inject constructor(
                 isPlaying = false
             ) 
         }
-        withContext(Dispatchers.Main) {
-            android.widget.Toast.makeText(context, errorMsg, android.widget.Toast.LENGTH_SHORT).show()
-        }
+        com.synq.ui.toast.SynqToastManager.show(errorMsg, com.synq.ui.toast.SynqToastType.ERROR)
     }
 
     private fun playMediaUri(song: Song, uri: String, initialPositionMs: Long = 0L, playWhenReady: Boolean = true) {

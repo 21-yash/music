@@ -1,11 +1,11 @@
 package com.synq.features.profile
 
+import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -18,20 +18,67 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.synq.ui.SynqBrandedText
 import com.synq.ui.SynqLogo
-import com.synq.ui.SynqPink
-import com.synq.ui.SynqPinkLight
-import com.synq.ui.SynqPinkDark
-import com.synq.ui.SynqPinkGradient
+import com.synq.ui.components.SectionHeader
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.Spacing
 
-private val AvatarBrandGradient = Brush.linearGradient(
-    listOf(SynqPinkLight, SynqPink, SynqPinkDark)
-)
+private enum class AvatarColorPalette(
+    val label: String,
+    val gradient: Brush,
+    val primaryColor: Color
+) {
+    OCEAN_BLUE(
+        label = "Ocean Blue",
+        gradient = Brush.linearGradient(listOf(Color(0xFF0EA5E9), Color(0xFF1D4ED8))),
+        primaryColor = Color(0xFF0EA5E9)
+    ),
+    ROYAL_INDIGO(
+        label = "Royal Indigo",
+        gradient = Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF3730A3))),
+        primaryColor = Color(0xFF6366F1)
+    ),
+    EMERALD(
+        label = "Emerald",
+        gradient = Brush.linearGradient(listOf(Color(0xFF10B981), Color(0xFF047857))),
+        primaryColor = Color(0xFF10B981)
+    ),
+    SUNSET_ORANGE(
+        label = "Sunset Orange",
+        gradient = Brush.linearGradient(listOf(Color(0xFFF97316), Color(0xFFC2410C))),
+        primaryColor = Color(0xFFF97316)
+    ),
+    CYBER_PURPLE(
+        label = "Cyber Purple",
+        gradient = Brush.linearGradient(listOf(Color(0xFFA855F7), Color(0xFF6B21A8))),
+        primaryColor = Color(0xFFA855F7)
+    ),
+    NEON_ROSE(
+        label = "Neon Rose",
+        gradient = Brush.linearGradient(listOf(Color(0xFFFF2D7A), Color(0xFFBE185D))),
+        primaryColor = Color(0xFFFF2D7A)
+    )
+}
+
+private enum class AvatarIconType(
+    val label: String,
+    val icon: ImageVector?
+) {
+    INITIAL("Initial", null),
+    HEADPHONES("Headphones", Icons.Default.Headphones),
+    MUSIC("Music", Icons.Default.MusicNote),
+    SPARKLE("Sparkles", Icons.Default.AutoAwesome),
+    STAR("Star", Icons.Default.Star)
+}
 
 @Composable
 fun ProfileScreen(
@@ -41,16 +88,203 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
+
+    val profilePrefs = remember(context) {
+        context.getSharedPreferences("synq_profile_prefs", Context.MODE_PRIVATE)
+    }
+
+    var selectedPaletteIndex by remember {
+        mutableIntStateOf(profilePrefs.getInt("avatar_palette_index", 0)) // 0 = Ocean Blue (non-pink default)
+    }
+    var selectedIconTypeIndex by remember {
+        mutableIntStateOf(profilePrefs.getInt("avatar_icon_index", 0))
+    }
+
+    val currentPalette = AvatarColorPalette.entries.getOrElse(selectedPaletteIndex) { AvatarColorPalette.OCEAN_BLUE }
+    val currentIconType = AvatarIconType.entries.getOrElse(selectedIconTypeIndex) { AvatarIconType.INITIAL }
 
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var showCacheDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+    var showAvatarCustomizer by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadCacheSize()
+    }
+
+    // ─── Avatar Customizer Dialog ───
+    if (showAvatarCustomizer) {
+        AlertDialog(
+            onDismissRequest = { showAvatarCustomizer = false },
+            title = {
+                Text(
+                    text = "Customize Avatar",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Live Avatar Preview
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(currentPalette.gradient),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (currentIconType.icon != null) {
+                            Icon(
+                                imageVector = currentIconType.icon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        } else {
+                            Text(
+                                text = (user?.username ?: "U").take(1).uppercase(),
+                                color = Color.White,
+                                style = MaterialTheme.typography.headlineMedium.copy(
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    // Palette Selection
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Color Theme",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AvatarColorPalette.entries.forEachIndexed { index, palette ->
+                                val isSelected = index == selectedPaletteIndex
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .pressable(
+                                            onClick = {
+                                                selectedPaletteIndex = index
+                                                profilePrefs.edit().putInt("avatar_palette_index", index).apply()
+                                            },
+                                            pressedScale = MotionTokens.ChipPressScale
+                                        )
+                                        .clip(CircleShape)
+                                        .background(palette.gradient)
+                                        .then(
+                                            if (isSelected) {
+                                                Modifier.border(2.5.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                            } else Modifier
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Icon / Initial Style Selection
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Display Style",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AvatarIconType.entries.forEachIndexed { index, type ->
+                                val isSelected = index == selectedIconTypeIndex
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .pressable(
+                                            onClick = {
+                                                selectedIconTypeIndex = index
+                                                profilePrefs.edit().putInt("avatar_icon_index", index).apply()
+                                            },
+                                            pressedScale = MotionTokens.ChipPressScale
+                                        )
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(
+                                            if (isSelected) currentPalette.primaryColor.copy(alpha = 0.2f)
+                                            else MaterialTheme.colorScheme.surfaceContainerHighest
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) currentPalette.primaryColor else Color.Transparent,
+                                            MaterialTheme.shapes.small
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (type.icon != null) {
+                                        Icon(
+                                            imageVector = type.icon,
+                                            contentDescription = type.label,
+                                            tint = if (isSelected) currentPalette.primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = (user?.username ?: "U").take(1).uppercase(),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = if (isSelected) currentPalette.primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAvatarCustomizer = false }) {
+                    Text("Done", color = PinkPrimary)
+                }
+            }
+        )
     }
 
     if (showSignOutDialog) {
@@ -59,8 +293,11 @@ fun ProfileScreen(
             title = {
                 Text(
                     text = "Sign Out",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
@@ -78,7 +315,7 @@ fun ProfileScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Sign Out", fontWeight = FontWeight.Bold)
+                    Text("Sign Out")
                 }
             },
             dismissButton = {
@@ -95,8 +332,11 @@ fun ProfileScreen(
             title = {
                 Text(
                     text = "Clear Music Cache?",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
@@ -111,16 +351,15 @@ fun ProfileScreen(
                     onClick = {
                         showClearCacheDialog = false
                         viewModel.clearCache { success ->
-                            android.widget.Toast.makeText(
-                                context,
+                            com.synq.ui.toast.SynqToastManager.show(
                                 if (success) "Music cache cleared" else "Failed to clear cache",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
+                                if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                            )
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Clear Cache", fontWeight = FontWeight.Bold)
+                    Text("Clear Cache")
                 }
             },
             dismissButton = {
@@ -140,14 +379,17 @@ fun ProfileScreen(
                     Icon(
                         imageVector = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = PinkPrimary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = "Appearance",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
@@ -161,36 +403,48 @@ fun ProfileScreen(
                     Spacer(Modifier.height(4.dp))
 
                     // Dark Theme Option
-                    Surface(
-                        onClick = {
-                            viewModel.setDarkTheme(true)
-                            showAppearanceDialog = false
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent,
-                        border = if (isDarkTheme) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pressable(
+                                onClick = {
+                                    viewModel.setDarkTheme(true)
+                                    showAppearanceDialog = false
+                                },
+                                pressedScale = MotionTokens.RowPressScale
+                            )
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(
+                                if (isDarkTheme) MaterialTheme.colorScheme.surfaceContainerHigh
+                                else MaterialTheme.colorScheme.surfaceContainerLow
+                            )
+                            .border(
+                                1.dp,
+                                if (isDarkTheme) PinkPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                MaterialTheme.shapes.medium
+                            )
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.DarkMode,
                                 contentDescription = null,
-                                tint = if (isDarkTheme) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = if (isDarkTheme) PinkPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     text = "Dark Theme",
-                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Sleek dark theme optimized for OLED",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -199,42 +453,55 @@ fun ProfileScreen(
                                 onClick = {
                                     viewModel.setDarkTheme(true)
                                     showAppearanceDialog = false
-                                }
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = PinkPrimary)
                             )
                         }
                     }
 
                     // Light Theme Option
-                    Surface(
-                        onClick = {
-                            viewModel.setDarkTheme(false)
-                            showAppearanceDialog = false
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (!isDarkTheme) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent,
-                        border = if (!isDarkTheme) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pressable(
+                                onClick = {
+                                    viewModel.setDarkTheme(false)
+                                    showAppearanceDialog = false
+                                },
+                                pressedScale = MotionTokens.RowPressScale
+                            )
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(
+                                if (!isDarkTheme) MaterialTheme.colorScheme.surfaceContainerHigh
+                                else MaterialTheme.colorScheme.surfaceContainerLow
+                            )
+                            .border(
+                                1.dp,
+                                if (!isDarkTheme) PinkPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                MaterialTheme.shapes.medium
+                            )
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.LightMode,
                                 contentDescription = null,
-                                tint = if (!isDarkTheme) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = if (!isDarkTheme) PinkPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     text = "Light Theme",
-                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Crisp and clear high-contrast look",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -243,7 +510,8 @@ fun ProfileScreen(
                                 onClick = {
                                     viewModel.setDarkTheme(false)
                                     showAppearanceDialog = false
-                                }
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = PinkPrimary)
                             )
                         }
                     }
@@ -251,7 +519,7 @@ fun ProfileScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showAppearanceDialog = false }) {
-                    Text("Close")
+                    Text("Close", color = PinkPrimary)
                 }
             }
         )
@@ -266,8 +534,8 @@ fun ProfileScreen(
                     Box(
                         modifier = Modifier
                             .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AvatarBrandGradient),
+                            .clip(MaterialTheme.shapes.small)
+                            .background(currentPalette.gradient),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -280,26 +548,30 @@ fun ProfileScreen(
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = "Offline Stream Cache",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(
                         text = "Cached songs are stored locally on your device for instant offline playback with zero data consumption.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(14.dp)
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -312,31 +584,30 @@ fun ProfileScreen(
                                 )
                                 Text(
                                     text = "${formatCacheBytes(cacheSizeBytes)} / 2.0 GB",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(10.dp))
                             val progress = (cacheSizeBytes.toFloat() / (2L * 1024 * 1024 * 1024)).coerceIn(0.01f, 1f)
                             LinearProgressIndicator(
                                 progress = { progress },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp)),
-                                color = SynqPink,
-                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                    .height(6.dp)
+                                    .clip(CircleShape),
+                                color = PinkPrimary,
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerLow
                             )
                         }
                     }
 
                     OutlinedButton(
-                        onClick = {
-                            showClearCacheDialog = true
-                        },
+                        onClick = { showClearCacheDialog = true },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = MaterialTheme.shapes.medium,
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error
                         ),
@@ -357,7 +628,7 @@ fun ProfileScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showCacheDialog = false }) {
-                    Text("Done")
+                    Text("Done", color = PinkPrimary)
                 }
             }
         )
@@ -369,15 +640,15 @@ fun ProfileScreen(
             onDismissRequest = { showAboutDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SynqLogo(
-                        size = 32.dp,
-                        showGlow = false
-                    )
+                    SynqLogo(size = 32.dp, showGlow = false)
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = "About Synq",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
@@ -391,14 +662,14 @@ fun ProfileScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest
                         ) {
                             Text(
                                 text = "v0.1.0 Beta",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -411,14 +682,15 @@ fun ProfileScreen(
                     )
 
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
 
                     Text(
                         text = "Key Features",
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -429,33 +701,39 @@ fun ProfileScreen(
                     )
 
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
 
                     Text(
-                        text = "Crafted with ❤️ by Yash",
+                        text = "Designed by Yash",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = PinkPrimary
                     )
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showAboutDialog = false }) {
-                    Text("Got It")
+                    Text("Got It", color = PinkPrimary)
                 }
             }
         )
     }
 
-    val settingsItems = remember(isDarkTheme, cacheSizeBytes) {
+    val settingsItems = remember(isDarkTheme, cacheSizeBytes, selectedPaletteIndex, selectedIconTypeIndex) {
         listOf(
             SettingsItem(
                 title = "Appearance",
                 subtitle = if (isDarkTheme) "Dark Theme" else "Light Theme",
                 icon = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
                 onClick = { showAppearanceDialog = true }
+            ),
+            SettingsItem(
+                title = "Customize Avatar",
+                subtitle = "${currentPalette.label} • ${currentIconType.label}",
+                icon = Icons.Filled.Palette,
+                onClick = { showAvatarCustomizer = true }
             ),
             SettingsItem(
                 title = "Cache",
@@ -468,7 +746,10 @@ fun ProfileScreen(
                 subtitle = "Score alerts & release updates",
                 icon = Icons.Filled.Notifications,
                 onClick = {
-                    android.widget.Toast.makeText(context, "Notifications are active for match & music updates", android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        "Notifications are active for match & music updates",
+                        com.synq.ui.toast.SynqToastType.INFO
+                    )
                 }
             ),
             SettingsItem(
@@ -476,7 +757,10 @@ fun ProfileScreen(
                 subtitle = "Local storage & app permissions",
                 icon = Icons.Filled.Security,
                 onClick = {
-                    android.widget.Toast.makeText(context, "All streaming data is stored securely on device", android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        "All streaming data is stored securely on device",
+                        com.synq.ui.toast.SynqToastType.INFO
+                    )
                 }
             ),
             SettingsItem(
@@ -494,21 +778,26 @@ fun ProfileScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBackClick) {
+                IconButton(
+                    onClick = onBackClick,
+                    modifier = Modifier.size(48.dp)
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = "Profile",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold
+                    ),
                     color = MaterialTheme.colorScheme.onBackground,
                 )
             }
@@ -519,37 +808,81 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 240.dp),
         ) {
-            // User info card
+            // ─── User Info Card with Customizable Non-Pink Avatar ───
             item {
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    )
+                        .padding(horizontal = 20.dp)
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            MaterialTheme.shapes.large
+                        )
+                        .padding(18.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Avatar with Synq Brand Pink Gradient
+                        // Avatar (Customizable gradient + icon/initial with edit badge)
                         Box(
                             modifier = Modifier
-                                .size(60.dp)
-                                .clip(CircleShape)
-                                .background(AvatarBrandGradient),
-                            contentAlignment = Alignment.Center
+                                .size(62.dp)
+                                .pressable(
+                                    onClick = { showAvatarCustomizer = true },
+                                    pressedScale = MotionTokens.CardPressScale
+                                )
                         ) {
-                            Text(
-                                text = (user?.username ?: "U").take(1).uppercase(),
-                                color = Color.White,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(currentPalette.gradient),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (currentIconType.icon != null) {
+                                    Icon(
+                                        imageVector = currentIconType.icon,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = (user?.username ?: "U").take(1).uppercase(),
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.headlineMedium.copy(
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Subtle edit indicator badge
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                    .padding(2.dp)
+                                    .clip(CircleShape)
+                                    .background(currentPalette.primaryColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit avatar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))
@@ -557,13 +890,16 @@ fun ProfileScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = user?.username ?: "User",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = user?.email ?: "Account",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -571,63 +907,74 @@ fun ProfileScreen(
                 }
             }
 
-            // Settings header
+            // ─── Settings Section Header ───
             item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "Settings",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                SectionHeader(
+                    title = "Settings",
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = Spacing.sectionGap,
+                        bottom = Spacing.headerToContent
+                    )
                 )
-                Spacer(modifier = Modifier.height(8.dp))
             }
 
+            // ─── Settings Rows ───
             items(settingsItems.size) { index ->
                 SettingsRow(item = settingsItems[index])
                 if (index < settingsItems.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 20.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                     )
                 }
             }
 
-            // Logout button row
+            // ─── Logout Row ───
             item {
                 Spacer(modifier = Modifier.height(24.dp))
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
-                        .clickable { showSignOutDialog = true },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
+                        .pressable(
+                            onClick = { showSignOutDialog = true },
+                            pressedScale = MotionTokens.CardPressScale
+                        )
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.16f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.error.copy(alpha = 0.25f),
+                            MaterialTheme.shapes.large
+                        )
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Logout,
                             contentDescription = "Sign out",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
                             text = "Sign Out",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
             }
 
+            // ─── Branding Footer ───
             item {
                 Spacer(modifier = Modifier.height(32.dp))
                 Row(
@@ -643,7 +990,6 @@ fun ProfileScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
@@ -661,21 +1007,24 @@ private fun SettingsRow(item: SettingsItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = item.onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .pressable(
+                onClick = item.onClick,
+                pressedScale = MotionTokens.RowPressScale
+            )
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                .size(40.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = item.icon,
                 contentDescription = item.title,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = PinkPrimary,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -683,20 +1032,26 @@ private fun SettingsRow(item: SettingsItem) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (!item.subtitle.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = item.subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         Icon(
-            imageVector = Icons.Filled.ChevronRight,
+            imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             modifier = Modifier.size(20.dp),
@@ -713,4 +1068,3 @@ private fun formatCacheBytes(bytes: Long): String {
         String.format(java.util.Locale.US, "%.1f MB", mb)
     }
 }
-

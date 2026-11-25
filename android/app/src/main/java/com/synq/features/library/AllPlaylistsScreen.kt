@@ -1,14 +1,13 @@
 package com.synq.features.library
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -24,6 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,9 +31,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.features.music.components.CreatePlaylistDialog
-import com.synq.ui.SynqPink
-import com.synq.ui.SynqPinkGradient
-import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkPrimary
 
 private enum class PlaylistsSortMode(val label: String) {
     RECENTLY_UPDATED("Recently updated"),
@@ -42,7 +43,6 @@ private enum class PlaylistsSortMode(val label: String) {
     SONG_COUNT("Most songs")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AllPlaylistsScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
@@ -50,7 +50,6 @@ fun AllPlaylistsScreen(
     onPlaylistClick: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val isDark = isAppDark()
     val playlists by viewModel.playlists.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
@@ -83,8 +82,10 @@ fun AllPlaylistsScreen(
             title = {
                 Text(
                     text = "Delete Playlist",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 )
             },
             text = {
@@ -99,11 +100,11 @@ fun AllPlaylistsScreen(
                     onClick = {
                         viewModel.deletePlaylist(playlist.serverId)
                         playlistToDelete = null
-                        Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
+                        com.synq.ui.toast.SynqToastManager.show("Playlist deleted", com.synq.ui.toast.SynqToastType.SUCCESS)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Delete", fontWeight = FontWeight.Bold)
+                    Text("Delete")
                 }
             },
             dismissButton = {
@@ -121,7 +122,7 @@ fun AllPlaylistsScreen(
             onCreate = { name, desc ->
                 viewModel.createPlaylist(name, desc)
                 showCreateDialog = false
-                Toast.makeText(context, "Playlist created", Toast.LENGTH_SHORT).show()
+                com.synq.ui.toast.SynqToastManager.show("Playlist created", com.synq.ui.toast.SynqToastType.SUCCESS)
             }
         )
     }
@@ -132,35 +133,44 @@ fun AllPlaylistsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBackClick) {
+                IconButton(
+                    onClick = onBackClick,
+                    modifier = Modifier.size(48.dp)
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(4.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Playlists",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
                         text = "${playlists.size} playlists",
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = { showCreateDialog = true }) {
+                IconButton(
+                    onClick = { showCreateDialog = true },
+                    modifier = Modifier.size(48.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Create Playlist",
-                        tint = SynqPink
+                        tint = PinkPrimary,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -183,13 +193,13 @@ fun AllPlaylistsScreen(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(42.dp)
-                        .clip(RoundedCornerShape(21.dp))
-                        .background(if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f))
+                        .height(44.dp)
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         .border(
                             1.dp,
-                            MaterialTheme.colorScheme.onBackground.copy(alpha = 0.06f),
-                            RoundedCornerShape(21.dp)
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            MaterialTheme.shapes.large
                         )
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -197,26 +207,26 @@ fun AllPlaylistsScreen(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
                     BasicTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        textStyle = TextStyle(
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
                             color = MaterialTheme.colorScheme.onBackground,
                             fontSize = 14.sp
                         ),
                         singleLine = true,
-                        cursorBrush = SolidColor(SynqPink),
+                        cursorBrush = SolidColor(PinkPrimary),
                         modifier = Modifier.weight(1f),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
                                 Text(
                                     text = "Search playlists...",
                                     fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             innerTextField()
@@ -225,7 +235,7 @@ fun AllPlaylistsScreen(
                     if (searchQuery.isNotEmpty()) {
                         IconButton(
                             onClick = { searchQuery = "" },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
@@ -241,29 +251,40 @@ fun AllPlaylistsScreen(
 
                 // Sort Button & Dropdown
                 Box {
-                    Surface(
-                        shape = RoundedCornerShape(21.dp),
-                        color = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+                    Box(
                         modifier = Modifier
-                            .height(42.dp)
-                            .clickable { showSortMenu = true }
+                            .height(44.dp)
+                            .pressable(
+                                onClick = { showSortMenu = true },
+                                pressedScale = MotionTokens.ChipPressScale
+                            )
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                CircleShape
+                            )
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Sort,
                                 contentDescription = "Sort",
-                                tint = SynqPink,
+                                tint = PinkPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = "Sort",
-                                color = MaterialTheme.colorScheme.onBackground,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             )
                         }
                     }
@@ -271,15 +292,17 @@ fun AllPlaylistsScreen(
                     DropdownMenu(
                         expanded = showSortMenu,
                         onDismissRequest = { showSortMenu = false },
-                        shape = RoundedCornerShape(14.dp)
+                        shape = MaterialTheme.shapes.medium
                     ) {
                         PlaylistsSortMode.entries.forEach { mode ->
                             DropdownMenuItem(
                                 text = {
                                     Text(
                                         text = mode.label,
-                                        fontWeight = if (sortMode == mode) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (sortMode == mode) SynqPink else MaterialTheme.colorScheme.onSurface
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (sortMode == mode) FontWeight.SemiBold else FontWeight.Normal
+                                        ),
+                                        color = if (sortMode == mode) PinkPrimary else MaterialTheme.colorScheme.onSurface
                                     )
                                 },
                                 trailingIcon = if (sortMode == mode) {
@@ -287,7 +310,7 @@ fun AllPlaylistsScreen(
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = null,
-                                            tint = SynqPink,
+                                            tint = PinkPrimary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -318,39 +341,42 @@ fun AllPlaylistsScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(72.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(SynqPink.copy(alpha = 0.15f)),
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlaylistPlay,
                                 contentDescription = null,
-                                tint = SynqPink,
-                                modifier = Modifier.size(36.dp)
+                                tint = PinkPrimary,
+                                modifier = Modifier.size(32.dp)
                             )
                         }
                         Spacer(Modifier.height(16.dp))
                         Text(
                             text = "No playlists created",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = "Create customized playlists to organize your favorite music",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(20.dp))
                         Button(
                             onClick = { showCreateDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = SynqPink),
-                            shape = RoundedCornerShape(20.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary),
+                            shape = MaterialTheme.shapes.medium
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
                             Spacer(Modifier.width(6.dp))
-                            Text("Create Playlist", fontWeight = FontWeight.Bold)
+                            Text("Create Playlist")
                         }
                     }
                 }
@@ -364,90 +390,109 @@ fun AllPlaylistsScreen(
                     Text(
                         text = "No playlists found for \"$searchQuery\"",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
                     )
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(filteredPlaylists, key = { it.serverId }) { playlist ->
-                        Card(
+                    itemsIndexed(filteredPlaylists, key = { _, it -> it.serverId }) { index, playlist ->
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPlaylistClick(playlist.serverId) },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                .heightIn(min = 56.dp)
+                                .pressable(
+                                    onClick = { onPlaylistClick(playlist.serverId) },
+                                    pressedScale = MotionTokens.RowPressScale
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (!playlist.imageUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = playlist.imageUrl,
-                                        contentDescription = playlist.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(52.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(52.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(SynqPinkGradient),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.QueueMusic,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                }
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fontFeatureSettings = "tnum"
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.width(26.dp),
+                                textAlign = TextAlign.Start
+                            )
+                            Spacer(Modifier.width(4.dp))
 
-                                Spacer(Modifier.width(14.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = playlist.name,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 15.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = "${playlist.songCount} songs",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                IconButton(
-                                    onClick = { playlistToDelete = playlist },
-                                    modifier = Modifier.size(36.dp)
+                            if (!playlist.imageUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = playlist.imageUrl,
+                                    contentDescription = playlist.name,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(PinkGradient),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = "Delete playlist",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
+                                        imageVector = Icons.Default.QueueMusic,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
+                            }
+
+                            Spacer(Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = playlist.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        lineHeight = 18.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = "${playlist.songCount} songs",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .pressable(
+                                        onClick = { playlistToDelete = playlist },
+                                        pressedScale = 0.88f
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Delete playlist",
+                                    tint = MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
 
                     item {
-                        Spacer(Modifier.height(100.dp))
+                        Spacer(Modifier.height(180.dp))
                     }
                 }
             }

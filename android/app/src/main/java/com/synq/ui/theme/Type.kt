@@ -15,49 +15,61 @@ val InterFontFamily = FontFamily(
     Font(R.font.inter_bold, FontWeight.Bold)
 )
 
-
-
 /**
  * App typography.
  *
  * Uses Inter universally for a unified, clean, and highly legible interface.
+ * Implements Spotify-like hierarchy (§4.5): hierarchy comes from size and color,
+ * not from excessive font weight.
  */
 val AppTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 57.sp,
-        lineHeight = 64.sp,
+        fontSize = 40.sp,
+        lineHeight = 48.sp,
+    ),
+    displayMedium = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 34.sp,
+        lineHeight = 42.sp,
+    ),
+    displaySmall = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 30.sp,
+        lineHeight = 38.sp,
     ),
     headlineLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        lineHeight = 40.sp,
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
     ),
     headlineMedium = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 28.sp,
-        lineHeight = 36.sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 24.sp,
+        lineHeight = 30.sp,
     ),
     headlineSmall = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 24.sp,
-        lineHeight = 32.sp,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
     ),
     titleLarge = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
     ),
     titleMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
+        fontSize = 15.sp,
+        lineHeight = 20.sp,
     ),
     titleSmall = TextStyle(
         fontFamily = InterFontFamily,
@@ -80,12 +92,12 @@ val AppTypography = Typography(
     bodySmall = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
     ),
     labelLarge = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
         lineHeight = 20.sp,
     ),
@@ -99,6 +111,6 @@ val AppTypography = Typography(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
-        lineHeight = 16.sp,
+        lineHeight = 14.sp,
     ),
 )

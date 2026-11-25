@@ -1,7 +1,9 @@
 package com.synq.features.music
 
 import android.content.Intent
-import android.widget.Toast
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,10 +12,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -25,9 +28,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -36,27 +41,46 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.synq.features.music.components.LocalAddToPlaylist
 import com.synq.features.music.domain.model.Song
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkPrimary
 import java.text.NumberFormat
 import java.util.Locale
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongDetailScreen(
     songId: String,
     provider: String? = null,
     viewModel: SongDetailViewModel = hiltViewModel(),
+    musicViewModel: MusicViewModel = hiltViewModel(),
     onBackClick: () -> Unit,
     onNavigateToArtist: (String) -> Unit = {},
     onNavigateToAlbum: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
     val uiState by viewModel.uiState.collectAsState()
     val isDark = isAppDark()
     val localAddToPlaylist = LocalAddToPlaylist.current
+
+    val playbackState by musicViewModel.playerManager.playbackState.collectAsState()
+    val isMiniPlayerPresent = playbackState.currentSong != null
+    val lazyBottomPadding by animateDpAsState(
+        targetValue = if (isMiniPlayerPresent) 160.dp else 100.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "lazyBottomPadding"
+    )
 
     LaunchedEffect(songId, provider) {
         viewModel.loadSong(songId, provider)
@@ -75,29 +99,54 @@ fun SongDetailScreen(
                 title = {
                     Text(
                         text = "Song Info",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .pressable(
+                                onClick = onBackClick,
+                                pressedScale = MotionTokens.ButtonPressScale
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 },
                 actions = {
                     if (song != null) {
-                        IconButton(onClick = {
-                            val shareUrl = "https://21yash.online/track/${song.id}"
-                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                putExtra(Intent.EXTRA_TEXT, "${song.title} by ${song.primaryArtistName}\n$shareUrl")
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Share Song"))
-                        }) {
-                            Icon(imageVector = Icons.Default.Share, contentDescription = "Share")
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .pressable(
+                                    onClick = {
+                                        val shareUrl = "https://21yash.online/track/${song.id}"
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            putExtra(Intent.EXTRA_TEXT, "${song.title} by ${song.primaryArtistName}\n$shareUrl")
+                                            type = "text/plain"
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share Song"))
+                                    },
+                                    pressedScale = MotionTokens.ButtonPressScale
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
                     }
                 },
@@ -135,28 +184,35 @@ fun SongDetailScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Unable to load song details",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = uiState.error ?: "Unknown error",
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { viewModel.loadSong(songId) },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandPink)
+                        colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary),
+                        shape = CircleShape,
+                        modifier = Modifier.pressable(pressedScale = MotionTokens.ButtonPressScale)
                     ) {
-                        Text("Retry", fontWeight = FontWeight.Bold)
+                        Text("Retry", style = MaterialTheme.typography.labelLarge, color = Color.White)
                     }
                 }
             } else if (song != null) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = 8.dp,
+                        bottom = lazyBottomPadding
+                    ),
                     verticalArrangement = Arrangement.spacedBy(22.dp)
                 ) {
                     // 1. Hero Artwork with Ambient Glow & Title
@@ -174,22 +230,25 @@ fun SongDetailScreen(
                                     modifier = Modifier
                                         .size(180.dp)
                                         .blur(32.dp)
-                                        .background(BrandPink.copy(alpha = 0.22f), CircleShape)
+                                        .background(PinkPrimary.copy(alpha = 0.22f), CircleShape)
                                 )
                                 Box(
                                     modifier = Modifier
                                         .size(200.dp)
-                                        .clip(RoundedCornerShape(24.dp))
-                                        .background(if (isDark) Color(0xFF1E1624) else Color(0xFFF3E8EE))
+                                        .clip(MaterialTheme.shapes.extraLarge)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                         .border(
                                             width = 1.dp,
-                                            color = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.08f),
-                                            shape = RoundedCornerShape(24.dp)
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                            shape = MaterialTheme.shapes.extraLarge
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     AsyncImage(
-                                        model = song.imageUrl,
+                                        model = ImageRequest.Builder(context)
+                                            .data(song.imageUrl)
+                                            .crossfade(true)
+                                            .build(),
                                         contentDescription = song.title,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
@@ -201,8 +260,10 @@ fun SongDetailScreen(
 
                             Text(
                                 text = song.title,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
@@ -227,64 +288,121 @@ fun SongDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Button(
-                                onClick = { viewModel.playSong(song) },
+                            // Big Play Button
+                            Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(24.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = BrandPink,
-                                    contentColor = Color.White
-                                )
+                                    .height(48.dp)
+                                    .pressable(
+                                        onClick = { viewModel.playSong(song) },
+                                        pressedScale = MotionTokens.ButtonPressScale
+                                    )
+                                    .clip(CircleShape)
+                                    .background(PinkGradient),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Play", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Play",
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = Color.White
+                                    )
+                                }
                             }
 
-                            FilledTonalIconButton(
-                                onClick = { viewModel.toggleLike(song) },
-                                modifier = Modifier.size(48.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                    containerColor = if (isLiked) BrandPink.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant
-                                )
+                            // Like Button
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .pressable(
+                                        onClick = {
+                                            viewModel.toggleLike(song)
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        pressedScale = MotionTokens.ButtonPressScale
+                                    )
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isLiked) PinkPrimary.copy(alpha = 0.16f)
+                                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isLiked) PinkPrimary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                     contentDescription = "Like",
-                                    tint = if (isLiked) BrandPink else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (isLiked) PinkPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
-                            FilledTonalIconButton(
-                                onClick = { localAddToPlaylist(song) },
-                                modifier = Modifier.size(48.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
+                            // Add to Playlist Button
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .pressable(
+                                        onClick = { localAddToPlaylist(song) },
+                                        pressedScale = MotionTokens.ButtonPressScale
+                                    )
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PlaylistAdd,
+                                    imageVector = Icons.Outlined.AddCircleOutline,
                                     contentDescription = "Add to playlist",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
 
-                            FilledTonalIconButton(
-                                onClick = {
-                                    viewModel.addToQueue(song)
-                                    Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(48.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
+                            // Add to Queue Button
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .pressable(
+                                        onClick = {
+                                            viewModel.addToQueue(song)
+                                            com.synq.ui.toast.SynqToastManager.show("Added to queue", com.synq.ui.toast.SynqToastType.SUCCESS)
+                                        },
+                                        pressedScale = MotionTokens.ButtonPressScale
+                                    )
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.QueueMusic,
+                                    imageVector = Icons.AutoMirrored.Filled.List,
                                     contentDescription = "Add to queue",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
@@ -296,19 +414,22 @@ fun SongDetailScreen(
                             Column {
                                 Text(
                                     text = "Artists (${song.artists.size})",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    items(song.artists) { artist ->
+                                    itemsIndexed(
+                                        song.artists,
+                                        key = { index, artist -> "${artist.id.ifBlank { artist.name }}_$index" }
+                                    ) { _, artist ->
                                         ArtistChip(
                                             name = artist.name,
                                             imageUrl = artist.imageUrl,
-                                            isDark = isDark,
                                             onClick = {
                                                 val target = if (artist.id.isNotBlank()) artist.id else artist.name
                                                 if (target.isNotBlank()) {
@@ -328,27 +449,31 @@ fun SongDetailScreen(
                             Column {
                                 Text(
                                     text = "Album",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            val targetAlbum = if (song.album.id.isNotBlank()) song.album.id else song.album.title
-                                            if (targetAlbum.isNotBlank()) {
-                                                onNavigateToAlbum(targetAlbum)
-                                            }
-                                        },
+                                        .pressable(
+                                            onClick = {
+                                                val targetAlbum = if (song.album.id.isNotBlank()) song.album.id else song.album.title
+                                                if (targetAlbum.isNotBlank()) {
+                                                    onNavigateToAlbum(targetAlbum)
+                                                }
+                                            },
+                                            pressedScale = MotionTokens.CardPressScale
+                                        ),
+                                    shape = MaterialTheme.shapes.large,
                                     colors = CardDefaults.cardColors(
-                                        containerColor = if (isDark) Color(0xFF1E1724).copy(alpha = 0.8f) else Color(0xFFFBF4F7)
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
                                     ),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
                                     )
                                 ) {
                                     Row(
@@ -358,35 +483,42 @@ fun SongDetailScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         AsyncImage(
-                                            model = song.album.imageUrl ?: song.imageUrl,
+                                            model = ImageRequest.Builder(context)
+                                                .data(song.album.imageUrl ?: song.imageUrl)
+                                                .crossfade(true)
+                                                .build(),
                                             contentDescription = song.album.title,
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier
                                                 .size(52.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(if (isDark) Color(0xFF2A2030) else Color(0xFFEDE0E5))
+                                                .clip(MaterialTheme.shapes.medium)
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                         )
                                         Spacer(modifier = Modifier.width(14.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = song.album.title,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 15.sp,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
                                                 text = "View Album",
-                                                color = BrandPink,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                color = PinkPrimary,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
                                             )
                                         }
                                         Icon(
                                             imageVector = Icons.Default.ChevronRight,
                                             contentDescription = null,
-                                            tint = BrandPink.copy(alpha = 0.7f)
+                                            tint = PinkPrimary.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }
@@ -399,20 +531,21 @@ fun SongDetailScreen(
                         Column {
                             Text(
                                 text = "Track Details",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                             Spacer(modifier = Modifier.height(10.dp))
 
                             Card(
-                                shape = RoundedCornerShape(18.dp),
+                                shape = MaterialTheme.shapes.large,
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (isDark) Color(0xFF1E1724).copy(alpha = 0.75f) else Color(0xFFFBF4F7)
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
                                 ),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
                                 )
                             ) {
                                 Column(
@@ -426,7 +559,7 @@ fun SongDetailScreen(
                                         label = "Duration",
                                         value = "${song.formattedDuration} (${song.durationSeconds}s)"
                                     )
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                                     if (song.year.isNotBlank()) {
                                         MetadataRow(
@@ -434,7 +567,7 @@ fun SongDetailScreen(
                                             label = "Release Year",
                                             value = song.year
                                         )
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                     }
 
                                     if (song.language.isNotBlank()) {
@@ -443,7 +576,7 @@ fun SongDetailScreen(
                                             label = "Language",
                                             value = song.language.replaceFirstChar { it.uppercase() }
                                         )
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                     }
 
                                     if (song.label.isNotBlank()) {
@@ -452,7 +585,7 @@ fun SongDetailScreen(
                                             label = "Record Label",
                                             value = song.label
                                         )
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                     }
 
                                     if (song.playCount > 0) {
@@ -464,7 +597,7 @@ fun SongDetailScreen(
                                             label = "Play Count",
                                             value = "$formattedPlays plays"
                                         )
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                     }
 
                                     // Lyrics row with custom pink badge
@@ -480,13 +613,13 @@ fun SongDetailScreen(
                                             Icon(
                                                 imageVector = Icons.Outlined.Subtitles,
                                                 contentDescription = null,
-                                                tint = BrandPink.copy(alpha = 0.85f),
+                                                tint = PinkPrimary.copy(alpha = 0.85f),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
                                                 text = "Lyrics",
-                                                fontSize = 14.sp,
+                                                style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
@@ -494,34 +627,36 @@ fun SongDetailScreen(
                                         if (song.hasLyrics) {
                                             Box(
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(BrandPink.copy(alpha = 0.15f))
+                                                    .clip(MaterialTheme.shapes.small)
+                                                    .background(PinkPrimary.copy(alpha = 0.15f))
                                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                                             ) {
                                                 Text(
                                                     text = "Synchronized LRC",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = BrandPink
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    color = PinkPrimary
                                                 )
                                             }
                                         } else {
                                             Text(
                                                 text = "Searchable",
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                         }
                                     }
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                                     MetadataRow(
                                         icon = Icons.Outlined.CloudQueue,
                                         label = "Audio Provider",
                                         value = song.providerId.replaceFirstChar { it.uppercase() }
                                     )
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                                     // Song ID Row with pink copy button
                                     Row(
@@ -533,33 +668,48 @@ fun SongDetailScreen(
                                             Icon(
                                                 imageVector = Icons.Outlined.Fingerprint,
                                                 contentDescription = null,
-                                                tint = BrandPink.copy(alpha = 0.85f),
+                                                tint = PinkPrimary.copy(alpha = 0.85f),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
                                                 text = "Song ID",
-                                                fontSize = 14.sp,
+                                                style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        TextButton(
-                                            onClick = {
-                                                clipboardManager.setText(AnnotatedString(song.id))
-                                                Toast.makeText(context, "Copied ID: ${song.id}", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.textButtonColors(contentColor = BrandPink),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .pressable(
+                                                    onClick = {
+                                                        clipboardManager.setText(AnnotatedString(song.id))
+                                                        com.synq.ui.toast.SynqToastManager.show(
+                                                            "Copied ID: ${song.id}",
+                                                            com.synq.ui.toast.SynqToastType.SUCCESS
+                                                        )
+                                                    },
+                                                    pressedScale = MotionTokens.ButtonPressScale
+                                                )
+                                                .clip(MaterialTheme.shapes.small)
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text(
                                                 text = song.id,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = PinkPrimary,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(14.dp))
+                                            Icon(
+                                                imageVector = Icons.Outlined.ContentCopy,
+                                                contentDescription = "Copy",
+                                                tint = PinkPrimary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -580,36 +730,41 @@ fun SongDetailScreen(
 private fun ArtistChip(
     name: String,
     imageUrl: String?,
-    isDark: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.ChipPressScale
+            )
+            .clip(CircleShape)
             .border(
                 width = 1.dp,
-                color = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.06f),
-                shape = RoundedCornerShape(20.dp)
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                shape = CircleShape
             ),
-        shape = RoundedCornerShape(20.dp),
-        color = if (isDark) Color(0xFF1E1724) else Color(0xFFFBF4F7),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
         tonalElevation = 1.dp
     ) {
         Row(
-            modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = 5.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .background(PinkGradient),
                 contentAlignment = Alignment.Center
             ) {
                 if (!imageUrl.isNullOrBlank()) {
                     AsyncImage(
-                        model = imageUrl,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(imageUrl)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -620,24 +775,27 @@ private fun ArtistChip(
                     Text(
                         text = name.firstOrNull()?.uppercase() ?: "A",
                         color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        )
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(7.dp))
             Text(
                 text = name,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                ),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(3.dp))
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = BrandPink.copy(alpha = 0.7f),
+                tint = PinkPrimary.copy(alpha = 0.7f),
                 modifier = Modifier.size(16.dp)
             )
         }
@@ -656,31 +814,33 @@ private fun MetadataRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f, fill = false)
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = BrandPink.copy(alpha = 0.85f),
+                tint = PinkPrimary.copy(alpha = 0.85f),
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = label,
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
             )
         }
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = value,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.SemiBold
+            ),
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End,
             maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
     }
 }

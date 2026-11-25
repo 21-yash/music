@@ -1,13 +1,20 @@
 package com.synq.features.music.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -18,24 +25,28 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.synq.ui.SynqPink
-import com.synq.ui.SynqPinkDark
-import com.synq.ui.SynqPinkGradient
 import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.performConfirm
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkDeep
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.Spacing
 
 @Composable
 fun CreatePlaylistDialog(
@@ -44,6 +55,8 @@ fun CreatePlaylistDialog(
     onCreate: (name: String, desc: String) -> Unit
 ) {
     val isDark = isAppDark()
+    val haptic = LocalHapticFeedback.current
+    val pinkAccent = if (isDark) PinkPrimary else PinkDeep
 
     var nameValue by remember(defaultName) {
         mutableStateOf(
@@ -57,31 +70,40 @@ fun CreatePlaylistDialog(
     var isNameFocused by remember { mutableStateOf(false) }
     var isDescFocused by remember { mutableStateOf(false) }
 
+    val entranceScale = remember { Animatable(0.92f) }
+    val entranceAlpha = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        entranceScale.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
+    }
+    LaunchedEffect(Unit) {
+        entranceAlpha.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+        )
+    }
+
     val isValid = nameValue.text.isNotBlank()
     val handleCreate = {
-        if (isValid) onCreate(nameValue.text.trim(), description.trim())
+        if (isValid) {
+            haptic.performConfirm()
+            onCreate(nameValue.text.trim(), description.trim())
+        }
     }
 
-    val dialogShape = RoundedCornerShape(28.dp)
-    val cardBg = if (isDark) {
-        Brush.verticalGradient(
-            listOf(Color(0xFF22172A), Color(0xFF15101B))
-        )
-    } else {
-        Brush.verticalGradient(
-            listOf(Color(0xFFFFFFFF), Color(0xFFFBF8FA))
-        )
-    }
-
-    val cardBorder = if (isDark) {
-        Brush.linearGradient(
-            listOf(SynqPink.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f))
-        )
-    } else {
-        Brush.linearGradient(
-            listOf(SynqPink.copy(alpha = 0.30f), Color.Black.copy(alpha = 0.06f))
-        )
-    }
+    val dialogShape = MaterialTheme.shapes.extraLarge
+    val dialogBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val fieldBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
+    val cardBorder = Brush.linearGradient(
+        listOf(PinkPrimary.copy(alpha = 0.30f), MaterialTheme.colorScheme.outlineVariant)
+    )
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -94,47 +116,54 @@ fun CreatePlaylistDialog(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = Spacing.xl)
+                .graphicsLayer {
+                    scaleX = entranceScale.value
+                    scaleY = entranceScale.value
+                    alpha = entranceAlpha.value
+                },
             contentAlignment = Alignment.Center
         ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(elevation = 24.dp, shape = dialogShape, ambientColor = SynqPinkDark.copy(alpha = 0.2f), spotColor = SynqPink.copy(alpha = 0.3f))
                     .clip(dialogShape)
-                    .background(cardBg)
+                    .background(dialogBg)
                     .border(1.dp, cardBorder, dialogShape),
-                color = Color.Transparent,
+                color = dialogBg,
                 shape = dialogShape
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 24.dp),
+                        .padding(horizontal = Spacing.xl, vertical = Spacing.xl),
                     horizontalAlignment = Alignment.Start
                 ) {
                     Text(
                         text = "New Playlist",
-                        fontSize = 20.sp,
+                        style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = textPrimary
                     )
 
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(Spacing.l))
 
                     // ─── Playlist Name Field ───
                     Column(modifier = Modifier.fillMaxWidth()) {
+                        val nameLabelColor by animateColorAsState(
+                            targetValue = if (isNameFocused) pinkAccent else textSecondary.copy(alpha = 0.75f),
+                            label = "nameLabelColor"
+                        )
                         Text(
                             text = "PLAYLIST NAME",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.5.sp),
                             fontWeight = FontWeight.Bold,
-                            color = if (isNameFocused) SynqPink else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            letterSpacing = 0.5.sp
+                            color = nameLabelColor
                         )
                         Spacer(Modifier.height(6.dp))
 
                         val nameBorderColor by animateColorAsState(
-                            targetValue = if (isNameFocused) SynqPink else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                            targetValue = if (isNameFocused) PinkPrimary else MaterialTheme.colorScheme.outlineVariant,
                             label = "nameBorder"
                         )
 
@@ -142,22 +171,20 @@ fun CreatePlaylistDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f))
-                                .border(1.5.dp, nameBorderColor, RoundedCornerShape(16.dp))
-                                .padding(horizontal = 16.dp),
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(fieldBg)
+                                .border(1.5.dp, nameBorderColor, MaterialTheme.shapes.medium)
+                                .padding(horizontal = Spacing.m),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             BasicTextField(
                                 value = nameValue,
                                 onValueChange = { nameValue = it },
-                                textStyle = TextStyle(
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                    color = textPrimary
                                 ),
                                 singleLine = true,
-                                cursorBrush = SolidColor(SynqPink),
+                                cursorBrush = SolidColor(PinkPrimary),
                                 keyboardOptions = KeyboardOptions(
                                     imeAction = ImeAction.Done
                                 ),
@@ -169,29 +196,41 @@ fun CreatePlaylistDialog(
                                     if (nameValue.text.isEmpty()) {
                                         Text(
                                             text = "Playlist name",
-                                            fontSize = 15.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = textSecondary.copy(alpha = 0.5f)
                                         )
                                     }
                                     innerTextField()
                                 }
                             )
 
-                            if (nameValue.text.isNotEmpty()) {
+                            AnimatedVisibility(
+                                visible = nameValue.text.isNotEmpty(),
+                                enter = scaleIn(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                ) + fadeIn(),
+                                exit = scaleOut() + fadeOut()
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(24.dp)
+                                        .size(28.dp)
                                         .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
-                                        .clickable {
-                                            nameValue = TextFieldValue(text = "", selection = TextRange(0))
-                                        },
+                                        .pressable(
+                                            pressedScale = MotionTokens.ChipPressScale,
+                                            onClick = {
+                                                nameValue = TextFieldValue(text = "", selection = TextRange(0))
+                                            }
+                                        )
+                                        .background(textSecondary.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "Clear",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = textSecondary,
                                         modifier = Modifier.size(14.dp)
                                     )
                                 }
@@ -199,21 +238,24 @@ fun CreatePlaylistDialog(
                         }
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(Spacing.m))
 
                     // ─── Optional Description Field ───
                     Column(modifier = Modifier.fillMaxWidth()) {
+                        val descLabelColor by animateColorAsState(
+                            targetValue = if (isDescFocused) pinkAccent else textSecondary.copy(alpha = 0.75f),
+                            label = "descLabelColor"
+                        )
                         Text(
                             text = "DESCRIPTION (OPTIONAL)",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.5.sp),
                             fontWeight = FontWeight.Bold,
-                            color = if (isDescFocused) SynqPink else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            letterSpacing = 0.5.sp
+                            color = descLabelColor
                         )
                         Spacer(Modifier.height(6.dp))
 
                         val descBorderColor by animateColorAsState(
-                            targetValue = if (isDescFocused) SynqPink else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f),
+                            targetValue = if (isDescFocused) PinkPrimary else MaterialTheme.colorScheme.outlineVariant,
                             label = "descBorder"
                         )
 
@@ -221,24 +263,19 @@ fun CreatePlaylistDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(64.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.04f))
-                                .border(1.5.dp, descBorderColor, RoundedCornerShape(16.dp))
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(fieldBg)
+                                .border(1.5.dp, descBorderColor, MaterialTheme.shapes.medium)
+                                .padding(horizontal = Spacing.m, vertical = Spacing.s)
                         ) {
                             BasicTextField(
                                 value = description,
                                 onValueChange = { description = it },
-                                textStyle = TextStyle(
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    fontSize = 13.5.sp
-                                ),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = textPrimary),
                                 maxLines = 2,
-                                cursorBrush = SolidColor(SynqPink),
+                                cursorBrush = SolidColor(PinkPrimary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = {
-                                    if (isValid) onCreate(nameValue.text.trim(), description.trim())
-                                }),
+                                keyboardActions = KeyboardActions(onDone = { handleCreate() }),
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .onFocusChanged { isDescFocused = it.isFocused },
@@ -246,8 +283,8 @@ fun CreatePlaylistDialog(
                                     if (description.isEmpty()) {
                                         Text(
                                             text = "Add an optional description...",
-                                            fontSize = 13.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = textSecondary.copy(alpha = 0.5f)
                                         )
                                     }
                                     innerTextField()
@@ -256,58 +293,63 @@ fun CreatePlaylistDialog(
                         }
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(Spacing.xl))
 
                     // ─── Action Buttons ───
-                    Button(
-                        onClick = { handleCreate() },
-                        enabled = isValid,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
-                            .shadow(
-                                elevation = if (isValid) 8.dp else 0.dp,
-                                shape = RoundedCornerShape(24.dp),
-                                spotColor = SynqPink.copy(alpha = 0.5f)
-                            ),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent,
-                            disabledContainerColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f)
-                        ),
-                        contentPadding = PaddingValues()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    if (isValid) SynqPinkGradient else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Create",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isValid) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            .then(
+                                if (isValid) {
+                                    Modifier.pressable(
+                                        pressedScale = MotionTokens.ButtonPressScale,
+                                        onClick = { handleCreate() }
+                                    )
+                                } else {
+                                    Modifier
+                                }
                             )
-                        }
+                            .clip(CircleShape)
+                            .then(
+                                if (isValid) {
+                                    Modifier.background(PinkGradient)
+                                } else {
+                                    Modifier.background(textSecondary.copy(alpha = 0.14f))
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val createTextColor by animateColorAsState(
+                            targetValue = if (isValid) Color.White else textSecondary.copy(alpha = 0.45f),
+                            label = "createTextColor"
+                        )
+                        Text(
+                            text = "Create",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = createTextColor
+                        )
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(Spacing.xs))
 
-                    TextButton(
-                        onClick = onDismiss,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(42.dp),
-                        shape = RoundedCornerShape(21.dp)
+                            .height(42.dp)
+                            .clip(CircleShape)
+                            .pressable(
+                                pressedScale = MotionTokens.ButtonPressScale,
+                                onClick = onDismiss
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "Cancel",
-                            fontSize = 14.sp,
+                            style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = textSecondary
                         )
                     }
                 }

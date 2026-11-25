@@ -1,21 +1,26 @@
 package com.synq.features.music.jam
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,17 +33,14 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.outlined.AddCircleOutline
 import com.synq.features.music.util.SeekHold
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,14 +48,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,19 +65,24 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.synq.RootViewModel
 import com.synq.features.music.components.AnimatedEqualizerBars
 import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.performConfirm
+import com.synq.ui.motion.performToggle
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkDeep
+import com.synq.ui.theme.PinkGradient
+import com.synq.ui.theme.PinkGradientHero
+import com.synq.ui.theme.PinkPrimary
+import com.synq.ui.theme.SemanticLive
+import com.synq.ui.theme.SemanticSuccess
+import com.synq.ui.theme.SemanticWarning
+import com.synq.ui.theme.Spacing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-
-private val PinkBrush = Brush.linearGradient(
-    listOf(Color(0xFFFF2D7A), Color(0xFFFF6584))
-)
-private val Accent = Color(0xFFFF2D7A)
-private val Danger = Color(0xFFEF4444)
-private val OnlineGreen = Color(0xFF22C55E)
-private val WarningAmber = Color(0xFFF59E0B)
 
 /**
  * Spotify-Jam-like screen backed exclusively by authoritative JamStateStore.uiState,
@@ -102,16 +108,34 @@ fun JamScreen(
     val isDark = isAppDark()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
 
-    val bgColor = if (isDark) Color(0xFF0F0C13) else Color(0xFFF8FAFC)
-    val cardBg = if (isDark) Color(0xFF181320) else Color(0xFFFFFFFF)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+    val bgColor = MaterialTheme.colorScheme.background
+    val cardBg = MaterialTheme.colorScheme.surfaceContainerLow
+    val dialogBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val subtleBorder = MaterialTheme.colorScheme.outlineVariant
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
+    val pinkText = if (isDark) PinkPrimary else PinkDeep
 
     var showIntroDialog by remember { mutableStateOf(false) }
     var showConfirmEndDialog by remember { mutableStateOf(false) }
     var showPeopleSheet by remember { mutableStateOf(false) }
     var isHistoryExpanded by remember { mutableStateOf(false) }
+    var showReconnectingChip by remember { mutableStateOf(false) }
+
+    LaunchedEffect(clientState, hasPendingCommand) {
+        if (clientState is JamClientState.Reconnecting) {
+            if (hasPendingCommand) {
+                showReconnectingChip = true
+            } else if (!showReconnectingChip) {
+                kotlinx.coroutines.delay(2000L)
+                showReconnectingChip = true
+            }
+        } else {
+            showReconnectingChip = false
+        }
+    }
 
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
@@ -133,9 +157,12 @@ fun JamScreen(
     if (showConfirmEndDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmEndDialog = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = dialogBg,
             title = {
                 Text(
                     text = "End Jam Session?",
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
                 )
@@ -143,26 +170,35 @@ fun JamScreen(
             text = {
                 Text(
                     text = "This will end the session and stop playback for everyone.",
-                    color = textSecondary,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textSecondary
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        haptic.performConfirm()
                         showConfirmEndDialog = false
                         rootViewModel.endJam()
                     }
                 ) {
-                    Text("End Jam", color = Danger, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "End Jam",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = SemanticLive,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showConfirmEndDialog = false }) {
-                    Text("Cancel", color = textSecondary)
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = textSecondary
+                    )
                 }
-            },
-            containerColor = cardBg
+            }
         )
     }
 
@@ -173,9 +209,12 @@ fun JamScreen(
                 rootViewModel.jamPreferences.setSeenBatteryTip(true)
                 showBatteryOptimizationDialog = false
             },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = dialogBg,
             title = {
                 Text(
                     text = "Smooth Background Jam",
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
                 )
@@ -183,8 +222,8 @@ fun JamScreen(
             text = {
                 Text(
                     text = "To keep Jam sessions smoothly in sync when your phone is locked or another app is open, Synq works best with unrestricted battery usage.",
-                    color = textSecondary,
-                    fontSize = 14.sp
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textSecondary
                 )
             },
             confirmButton = {
@@ -195,7 +234,12 @@ fun JamScreen(
                         BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(context)
                     }
                 ) {
-                    Text("Optimize", color = Accent, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Optimize",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = pinkText,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
@@ -205,10 +249,13 @@ fun JamScreen(
                         showBatteryOptimizationDialog = false
                     }
                 ) {
-                    Text("Dismiss", color = textSecondary)
+                    Text(
+                        text = "Dismiss",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = textSecondary
+                    )
                 }
-            },
-            containerColor = cardBg
+            }
         )
     }
 
@@ -265,12 +312,15 @@ fun JamScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = Spacing.screenHorizontal, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onBackClick,
-                    modifier = Modifier.size(48.dp)
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .pressable(pressedScale = MotionTokens.ChipPressScale, onClick = onBackClick),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -279,12 +329,12 @@ fun JamScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(Spacing.xxs))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Jam",
-                        fontSize = 20.sp,
+                        style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = textPrimary
                     )
@@ -294,7 +344,7 @@ fun JamScreen(
                         } else {
                             "No active session"
                         },
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                         color = textSecondary
                     )
                 }
@@ -304,16 +354,20 @@ fun JamScreen(
 
                     // Code Chip (Tap to copy)
                     Surface(
-                        onClick = {
-                            clipboardManager.setText(AnnotatedString(code))
-                            Toast.makeText(context, "Code copied: $code", Toast.LENGTH_SHORT).show()
-                        },
-                        shape = RoundedCornerShape(100.dp),
-                        color = Accent.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.35f)),
+                        shape = CircleShape,
+                        color = PinkPrimary.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, PinkPrimary.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .height(36.dp)
                             .defaultMinSize(minWidth = 48.dp)
+                            .pressable(
+                                pressedScale = MotionTokens.ChipPressScale,
+                                onClick = {
+                                    haptic.performConfirm()
+                                    clipboardManager.setText(AnnotatedString(code))
+                                    com.synq.ui.toast.SynqToastManager.show("Code copied: $code", com.synq.ui.toast.SynqToastType.SUCCESS)
+                                }
+                            )
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -321,39 +375,48 @@ fun JamScreen(
                         ) {
                             Text(
                                 text = code,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Accent,
-                                letterSpacing = 1.sp
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontFeatureSettings = "tnum",
+                                    letterSpacing = 1.sp
+                                ),
+                                fontWeight = FontWeight.Bold,
+                                color = pinkText
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(Spacing.xxs))
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copy code $code",
-                                tint = Accent,
+                                tint = pinkText,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(Spacing.xs))
 
                     // Share Button (Android share sheet)
-                    IconButton(
-                        onClick = {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, "Join my Synq Jam — code $code")
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Join my Synq Jam — code $code"))
-                        },
-                        modifier = Modifier.size(48.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .pressable(
+                                pressedScale = MotionTokens.ChipPressScale,
+                                onClick = {
+                                    haptic.performConfirm()
+                                    val sendIntent = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(Intent.EXTRA_TEXT, "Join my Synq Jam — code $code")
+                                        type = "text/plain"
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Join my Synq Jam — code $code"))
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Share invite code",
-                            tint = Accent
+                            tint = pinkText
                         )
                     }
                 }
@@ -371,8 +434,8 @@ fun JamScreen(
                     Box(
                         modifier = Modifier
                             .size(80.dp)
-                            .shadow(20.dp, CircleShape, ambientColor = Accent, spotColor = Accent)
-                            .background(PinkBrush, CircleShape),
+                            .clip(CircleShape)
+                            .background(PinkGradientHero),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -383,60 +446,58 @@ fun JamScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(Spacing.l))
 
                     Text(
                         text = "No Active Jam",
-                        fontSize = 24.sp,
+                        style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = textPrimary
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xs))
 
                     Text(
                         text = "Start a Jam session to listen with friends or enter a 4-letter invite code.",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = textSecondary,
                         textAlign = TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    Button(
-                        onClick = { showIntroDialog = true },
-                        shape = RoundedCornerShape(100.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth(0.7f)
                             .height(50.dp)
+                            .pressable(
+                                pressedScale = MotionTokens.ButtonPressScale,
+                                onClick = {
+                                    haptic.performConfirm()
+                                    showIntroDialog = true
+                                }
+                            )
+                            .clip(CircleShape)
+                            .background(PinkGradient),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("Start or Join Jam", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            text = "Start or Join Jam",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
                 }
             } else {
                 // ── Active Jam Content ──
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal)
                 ) {
-                    // Status Pill
-                    var showReconnectingChip by remember { mutableStateOf(false) }
-                    LaunchedEffect(clientState, hasPendingCommand) {
-                        if (clientState is JamClientState.Reconnecting) {
-                            if (hasPendingCommand) {
-                                showReconnectingChip = true
-                            } else if (!showReconnectingChip) {
-                                kotlinx.coroutines.delay(2000L)
-                                showReconnectingChip = true
-                            }
-                        } else {
-                            showReconnectingChip = false
-                        }
-                    }
-
+                    item(key = "jam_top_section") {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            // Status Pill
                     val isStepOut = localPlaybackState is LocalPlaybackState.LocalStepOut
                     val isCatchingUp = localPlaybackState is LocalPlaybackState.CatchingUp
                     val isReconnecting = showReconnectingChip && (clientState is JamClientState.Reconnecting)
@@ -447,92 +508,101 @@ fun JamScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
-                            onClick = {
-                                if (isStepOut) {
-                                    rootViewModel.resumeFromLocalStepOut()
-                                }
-                            },
-                            shape = RoundedCornerShape(100.dp),
+                            shape = CircleShape,
                             color = when {
-                                isStepOut -> WarningAmber.copy(alpha = 0.16f)
-                                isReconnecting -> WarningAmber.copy(alpha = 0.12f)
-                                isCatchingUp -> Accent.copy(alpha = 0.12f)
-                                else -> OnlineGreen.copy(alpha = 0.12f)
+                                isStepOut -> SemanticWarning.copy(alpha = 0.16f)
+                                isReconnecting -> SemanticWarning.copy(alpha = 0.12f)
+                                isCatchingUp -> PinkPrimary.copy(alpha = 0.12f)
+                                else -> SemanticSuccess.copy(alpha = 0.12f)
                             },
-                            border = androidx.compose.foundation.BorderStroke(
+                            border = BorderStroke(
                                 1.dp,
                                 when {
-                                    isStepOut -> WarningAmber.copy(alpha = 0.5f)
-                                    isReconnecting -> WarningAmber.copy(alpha = 0.4f)
-                                    isCatchingUp -> Accent.copy(alpha = 0.4f)
-                                    else -> OnlineGreen.copy(alpha = 0.4f)
+                                    isStepOut -> SemanticWarning.copy(alpha = 0.5f)
+                                    isReconnecting -> SemanticWarning.copy(alpha = 0.4f)
+                                    isCatchingUp -> PinkPrimary.copy(alpha = 0.4f)
+                                    else -> SemanticSuccess.copy(alpha = 0.4f)
                                 }
                             ),
-                            modifier = Modifier.height(32.dp)
+                            modifier = Modifier
+                                .height(32.dp)
+                                .then(
+                                    if (isStepOut) {
+                                        Modifier.pressable(
+                                            pressedScale = MotionTokens.ChipPressScale,
+                                            onClick = {
+                                                haptic.performConfirm()
+                                                rootViewModel.resumeFromLocalStepOut()
+                                            }
+                                        )
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 12.dp)
+                                modifier = Modifier.padding(horizontal = Spacing.s)
                             ) {
                                 when {
                                     isStepOut -> {
                                         Icon(
                                             imageVector = Icons.Default.PlayArrow,
                                             contentDescription = "Resume for me",
-                                            tint = WarningAmber,
+                                            tint = SemanticWarning,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "Paused for you only • Tap to resume",
-                                            fontSize = 11.5.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = WarningAmber
+                                            color = SemanticWarning
                                         )
                                     }
                                     isReconnecting -> {
                                         Icon(
                                             imageVector = Icons.Default.Sync,
                                             contentDescription = "Reconnecting",
-                                            tint = WarningAmber,
+                                            tint = SemanticWarning,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "Reconnecting…",
-                                            fontSize = 11.5.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = WarningAmber
+                                            color = SemanticWarning
                                         )
                                     }
                                     isCatchingUp -> {
                                         Icon(
                                             imageVector = Icons.Default.FastForward,
                                             contentDescription = "Catching up",
-                                            tint = Accent,
+                                            tint = pinkText,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "Catching up…",
-                                            fontSize = 11.5.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Accent
+                                            color = pinkText
                                         )
                                     }
                                     else -> {
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = "Synced",
-                                            tint = OnlineGreen,
+                                            tint = SemanticSuccess,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "Synced ✓",
-                                            fontSize = 11.5.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = OnlineGreen
+                                            color = SemanticSuccess
                                         )
                                     }
                                 }
@@ -542,10 +612,9 @@ fun JamScreen(
                         // Host / Guest indicator badge
                         Text(
                             text = if (uiState.isHost) "HOST" else "GUEST",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Accent,
-                            letterSpacing = 1.sp
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.8.sp),
+                            fontWeight = FontWeight.SemiBold,
+                            color = pinkText
                         )
                     }
 
@@ -553,14 +622,15 @@ fun JamScreen(
 
                     // Participant Avatars Row (Tap to open People sheet D2)
                     Surface(
-                        onClick = { showPeopleSheet = true },
-                        shape = RoundedCornerShape(18.dp),
+                        shape = MaterialTheme.shapes.large,
                         color = cardBg,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        border = BorderStroke(1.dp, subtleBorder),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pressable(
+                                pressedScale = MotionTokens.CardPressScale,
+                                onClick = { showPeopleSheet = true }
+                            )
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Row(
@@ -570,15 +640,15 @@ fun JamScreen(
                             ) {
                                 Text(
                                     text = "People in Jam (${uiState.members.size})",
-                                    fontSize = 13.sp,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                                     fontWeight = FontWeight.SemiBold,
                                     color = textPrimary
                                 )
                                 Text(
                                     text = if (uiState.isHost) "Manage >" else "View all >",
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Accent
+                                    color = pinkText
                                 )
                             }
 
@@ -588,21 +658,20 @@ fun JamScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
                                 verticalAlignment = Alignment.Top
                             ) {
                                 uiState.members.forEach { member ->
                                     JamMemberAvatarPill(
                                         member = member,
-                                        isHost = member.userId == uiState.hostUserId,
-                                        isDark = isDark
+                                        isHost = member.userId == uiState.hostUserId
                                     )
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(Spacing.m))
 
                     // ── Now Playing Card ──
                     val nowPlaying = uiState.nowPlaying
@@ -611,41 +680,35 @@ fun JamScreen(
                     if (nowPlayingItem != null) {
                         val hostName = uiState.hostName.ifBlank { "Host" }
                         val addedByMember = uiState.members.find { it.userId == nowPlayingItem.addedByUserId }
-                        val addedByName = addedByMember?.username ?: if (nowPlayingItem.recommended) "Auto-recommended" else "Host"
                         val isPlaying = nowPlaying.status == JamPlaybackStatus.PLAYING
 
                         Card(
-                            shape = RoundedCornerShape(22.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
                             colors = CardDefaults.cardColors(containerColor = cardBg),
-                            border = androidx.compose.foundation.BorderStroke(
+                            border = BorderStroke(
                                 1.dp,
                                 Brush.verticalGradient(
                                     listOf(
-                                        Accent.copy(alpha = 0.35f),
-                                        if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.05f)
+                                        PinkPrimary.copy(alpha = 0.35f),
+                                        subtleBorder
                                     )
                                 )
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .shadow(
-                                    elevation = if (isDark) 10.dp else 4.dp,
-                                    shape = RoundedCornerShape(22.dp),
-                                    ambientColor = Accent.copy(alpha = 0.20f),
-                                    spotColor = Accent.copy(alpha = 0.20f)
-                                )
+                                .animateContentSize()
                         ) {
                             Column(
                                 modifier = Modifier
                                     .background(
                                         Brush.verticalGradient(
                                             listOf(
-                                                Accent.copy(alpha = 0.07f),
+                                                PinkPrimary.copy(alpha = 0.06f),
                                                 Color.Transparent
                                             )
                                         )
                                     )
-                                    .padding(horizontal = 16.dp, vertical = 13.dp)
+                                    .padding(horizontal = Spacing.m, vertical = 14.dp)
                             ) {
                                 // Top Header: Equalizer + NOW PLAYING + Added By Tag
                                 Row(
@@ -655,35 +718,34 @@ fun JamScreen(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         AnimatedEqualizerBars(
-                                            color = Accent,
+                                            color = PinkPrimary,
                                             isPlaying = isPlaying && !isStepOut,
                                             barCount = 3,
                                             modifier = Modifier.padding(end = 6.dp)
                                         )
                                         Text(
                                             text = "NOW PLAYING",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Accent,
-                                            letterSpacing = 1.sp
+                                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.8.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = pinkText
                                         )
                                     }
 
                                     if (!nowPlayingItem.recommended) {
                                         Surface(
-                                            shape = RoundedCornerShape(100.dp),
-                                            color = Accent.copy(alpha = 0.12f),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, Accent.copy(alpha = 0.25f))
+                                            shape = CircleShape,
+                                            color = PinkPrimary.copy(alpha = 0.12f),
+                                            border = BorderStroke(1.dp, PinkPrimary.copy(alpha = 0.25f))
                                         ) {
                                             val displayName = addedByMember?.username ?: "Host"
                                             Text(
                                                 text = "Added by $displayName",
-                                                fontSize = 10.5.sp,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = Accent,
+                                                color = pinkText,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                modifier = Modifier.padding(horizontal = Spacing.xs, vertical = 2.dp)
                                             )
                                         }
                                     }
@@ -696,18 +758,21 @@ fun JamScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     AsyncImage(
-                                        model = nowPlayingItem.song.imageUrl,
+                                        model = ImageRequest.Builder(context)
+                                            .data(nowPlayingItem.song.imageUrl)
+                                            .crossfade(true)
+                                            .build(),
                                         contentDescription = "Artwork for ${nowPlayingItem.song.title}",
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier
                                             .size(56.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .clip(MaterialTheme.shapes.medium)
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Spacer(modifier = Modifier.width(Spacing.s))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = nowPlayingItem.song.title,
-                                            fontSize = 16.sp,
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = textPrimary,
                                             maxLines = 1,
@@ -716,7 +781,7 @@ fun JamScreen(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = nowPlayingItem.song.primaryArtistName,
-                                            fontSize = 13.sp,
+                                            style = MaterialTheme.typography.bodySmall,
                                             color = textSecondary,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -735,11 +800,10 @@ fun JamScreen(
                                     clockSync = clockSync,
                                     canControlPlayback = uiState.canControlPlayback,
                                     hostName = hostName,
-                                    isDark = isDark,
                                     onSeekTo = { targetMs -> rootViewModel.jamSeekTo(targetMs) }
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(Spacing.xs))
 
                                 // Transport Row
                                 Row(
@@ -748,17 +812,23 @@ fun JamScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Previous
-                                    IconButton(
-                                        onClick = {
-                                            if (!uiState.canControlPlayback) {
-                                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                rootViewModel.jamPreviousTrack()
-                                            }
-                                        },
+                                    Box(
                                         modifier = Modifier
-                                            .size(42.dp)
+                                            .size(48.dp)
                                             .alpha(if (uiState.canControlPlayback) 1f else 0.38f)
+                                            .clip(CircleShape)
+                                            .pressable(
+                                                pressedScale = MotionTokens.ButtonPressScale,
+                                                onClick = {
+                                                    if (!uiState.canControlPlayback) {
+                                                        com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
+                                                    } else {
+                                                        haptic.performConfirm()
+                                                        rootViewModel.jamPreviousTrack()
+                                                    }
+                                                }
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.SkipPrevious,
@@ -772,20 +842,24 @@ fun JamScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(54.dp)
-                                            .shadow(10.dp, CircleShape, ambientColor = Accent, spotColor = Accent)
-                                            .background(PinkBrush, CircleShape)
-                                            .clickable {
-                                                if (uiState.canControlPlayback) {
-                                                    rootViewModel.toggleJamPlayPause()
-                                                } else {
-                                                    // Guest without playback controls: toggle pause for me only
-                                                    if (isStepOut) {
-                                                        rootViewModel.resumeFromLocalStepOut()
+                                            .pressable(
+                                                pressedScale = MotionTokens.ButtonPressScale,
+                                                onClick = {
+                                                    haptic.performConfirm()
+                                                    if (uiState.canControlPlayback) {
+                                                        rootViewModel.toggleJamPlayPause()
                                                     } else {
-                                                        rootViewModel.stepOutLocally()
+                                                        // Guest without playback controls: toggle pause for me only
+                                                        if (isStepOut) {
+                                                            rootViewModel.resumeFromLocalStepOut()
+                                                        } else {
+                                                            rootViewModel.stepOutLocally()
+                                                        }
                                                     }
                                                 }
-                                            },
+                                            )
+                                            .clip(CircleShape)
+                                            .background(PinkGradient),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         val displayPlaying = if (isStepOut) false else isPlaying
@@ -798,17 +872,23 @@ fun JamScreen(
                                     }
 
                                     // Next
-                                    IconButton(
-                                        onClick = {
-                                            if (!uiState.canControlPlayback) {
-                                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                rootViewModel.jamNextTrack()
-                                            }
-                                        },
+                                    Box(
                                         modifier = Modifier
-                                            .size(42.dp)
+                                            .size(48.dp)
                                             .alpha(if (uiState.canControlPlayback) 1f else 0.38f)
+                                            .clip(CircleShape)
+                                            .pressable(
+                                                pressedScale = MotionTokens.ButtonPressScale,
+                                                onClick = {
+                                                    if (!uiState.canControlPlayback) {
+                                                        com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
+                                                    } else {
+                                                        haptic.performConfirm()
+                                                        rootViewModel.jamNextTrack()
+                                                    }
+                                                }
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.SkipNext,
@@ -825,27 +905,27 @@ fun JamScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Danger.copy(alpha = 0.12f))
-                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                            .clip(MaterialTheme.shapes.small)
+                                            .background(SemanticLive.copy(alpha = 0.12f))
+                                            .padding(horizontal = Spacing.s, vertical = 6.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             text = "Can't play on this device",
-                                            fontSize = 12.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Medium,
-                                            color = Danger
+                                            color = SemanticLive
                                         )
                                         TextButton(
                                             onClick = { rootViewModel.retryJamPlayback() },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                            contentPadding = PaddingValues(horizontal = Spacing.xs, vertical = 0.dp)
                                         ) {
                                             Text(
                                                 text = "Retry",
-                                                fontSize = 12.sp,
+                                                style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Danger
+                                                color = SemanticLive
                                             )
                                         }
                                     }
@@ -861,7 +941,7 @@ fun JamScreen(
                                     ) {
                                         Text(
                                             text = if (isStepOut) "Paused for your phone only • " else "Playback controlled by host • ",
-                                            fontSize = 11.5.sp,
+                                            style = MaterialTheme.typography.labelMedium,
                                             color = textSecondary
                                         )
                                         TextButton(
@@ -872,9 +952,9 @@ fun JamScreen(
                                         ) {
                                             Text(
                                                 text = if (isStepOut) "Resume for me" else "Pause for me only",
-                                                fontSize = 12.sp,
+                                                style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Accent
+                                                color = pinkText
                                             )
                                         }
                                     }
@@ -884,43 +964,49 @@ fun JamScreen(
                     } else {
                         // Empty Now Playing Card
                         Card(
-                            shape = RoundedCornerShape(20.dp),
+                            shape = MaterialTheme.shapes.large,
                             colors = CardDefaults.cardColors(containerColor = cardBg),
+                            border = BorderStroke(1.dp, subtleBorder),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(24.dp),
+                                    .padding(Spacing.xl),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = "No track currently playing",
-                                    fontSize = 15.sp,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = textPrimary
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.height(Spacing.xxs))
                                 Text(
                                     text = "Add songs to start listening together!",
-                                    fontSize = 13.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = textSecondary
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
                                 Button(
                                     onClick = onNavigateToSearch,
-                                    shape = RoundedCornerShape(100.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary),
+                                    modifier = Modifier.pressable(pressedScale = MotionTokens.ButtonPressScale)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Add the first song", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "Add the first song",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(Spacing.l))
 
                     // ── Up Next Section ──
                     Row(
@@ -931,14 +1017,14 @@ fun JamScreen(
                         Column {
                             Text(
                                 text = "Up Next (${uiState.userQueue.size})",
-                                fontSize = 15.sp,
+                                style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
                                 fontWeight = FontWeight.Bold,
                                 color = textPrimary
                             )
                             if (!uiState.canManageQueue) {
                                 Text(
                                     text = "Host controls order",
-                                    fontSize = 11.sp,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = textSecondary.copy(alpha = 0.7f)
                                 )
                             }
@@ -946,98 +1032,126 @@ fun JamScreen(
 
                         TextButton(
                             onClick = onNavigateToSearch,
-                            colors = ButtonDefaults.textButtonColors(contentColor = Accent)
+                            colors = ButtonDefaults.textButtonColors(contentColor = pinkText)
                         ) {
                             Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Add Song", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(Spacing.xxs))
+                            Text(
+                                text = "Add Song",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(Spacing.xs))
 
                     if (uiState.userQueue.isEmpty()) {
                         Text(
                             text = "No upcoming songs added yet.",
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = textSecondary,
-                            modifier = Modifier.padding(vertical = 12.dp)
+                            modifier = Modifier.padding(vertical = Spacing.s)
                         )
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            uiState.userQueue.forEachIndexed { index, queueItem ->
-                                val isOwnSong = queueItem.addedByUserId == uiState.myUserId
-                                val canRemove = isOwnSong || uiState.canManageQueue
-                                val canReorder = uiState.canManageQueue
-                                val addedBy = uiState.members.find { it.userId == queueItem.addedByUserId }?.username ?: "Guest"
-
-                                JamQueueItemRow(
-                                    key = queueItem.qid,
-                                    song = queueItem.song,
-                                    addedByName = addedBy,
-                                    isDark = isDark,
-                                    canRemove = canRemove,
-                                    canMoveUp = canReorder && index > 0,
-                                    canMoveDown = canReorder && index < uiState.userQueue.size - 1,
-                                    onClick = {
-                                        if (uiState.canControlPlayback) {
-                                            rootViewModel.playItemByQid(queueItem.qid)
-                                        } else {
-                                            Toast.makeText(context, "Ask ${uiState.hostName.ifBlank { "Host" }} for playback control", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    onMoveUp = { rootViewModel.moveByQid(queueItem.qid, index - 1) },
-                                    onMoveDown = { rootViewModel.moveByQid(queueItem.qid, index + 1) },
-                                    onRemove = { rootViewModel.removeByQid(queueItem.qid) }
-                                )
-                            }
+                    }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    if (uiState.userQueue.isNotEmpty()) {
+                        itemsIndexed(
+                            items = uiState.userQueue,
+                            key = { _, queueItem -> "queue_${queueItem.qid}" }
+                        ) { index, queueItem ->
+                            val isOwnSong = queueItem.addedByUserId == uiState.myUserId
+                            val canRemove = isOwnSong || uiState.canManageQueue
+                            val canReorder = uiState.canManageQueue
+                            val addedBy = uiState.members.find { it.userId == queueItem.addedByUserId }?.username ?: "Guest"
+
+                            JamQueueItemRow(
+                                key = queueItem.qid,
+                                song = queueItem.song,
+                                addedByName = addedBy,
+                                pinkText = pinkText,
+                                canRemove = canRemove,
+                                canMoveUp = canReorder && index > 0,
+                                canMoveDown = canReorder && index < uiState.userQueue.size - 1,
+                                onClick = {
+                                    if (uiState.canControlPlayback) {
+                                        rootViewModel.playItemByQid(queueItem.qid)
+                                    } else {
+                                        com.synq.ui.toast.SynqToastManager.show(
+                                            "Ask ${uiState.hostName.ifBlank { "Host" }} for playback control",
+                                            com.synq.ui.toast.SynqToastType.WARNING
+                                        )
+                                    }
+                                },
+                                onMoveUp = { rootViewModel.moveByQid(queueItem.qid, index - 1) },
+                                onMoveDown = { rootViewModel.moveByQid(queueItem.qid, index + 1) },
+                                onRemove = { rootViewModel.removeByQid(queueItem.qid) },
+                                modifier = jamQueueItemAnimateModifier()
+                            )
+                        }
+                    }
 
                     // ── Recommended Section Below Up Next ──
                     if (uiState.recommendedQueue.isNotEmpty()) {
-                        Text(
-                            text = "Recommended for this Jam",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textPrimary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            uiState.recommendedQueue.forEach { recItem ->
-                                JamRecommendedRow(
-                                    key = recItem.qid,
-                                    song = recItem.song,
-                                    isDark = isDark,
-                                    canAdd = uiState.canAddSongs,
-                                    canDismiss = canDismissRecommendation(uiState.isHost, uiState.myPerms),
-                                    onAdd = {
-                                        if (uiState.canAddSongs) {
-                                            rootViewModel.promoteRecommended(recItem.qid)
-                                        } else {
-                                            Toast.makeText(context, "Ask ${uiState.hostName.ifBlank { "Host" }} to add songs", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    onDismiss = {
-                                        rootViewModel.removeByQid(recItem.qid)
-                                    }
+                        item(key = "recommended_header") {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Spacer(modifier = Modifier.height(Spacing.l))
+                                Text(
+                                    text = "Recommended for this Jam",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textPrimary
                                 )
+                                Spacer(modifier = Modifier.height(Spacing.xs))
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        items(
+                            items = uiState.recommendedQueue,
+                            key = { recItem -> "rec_${recItem.qid}" }
+                        ) { recItem ->
+                            JamRecommendedRow(
+                                key = recItem.qid,
+                                song = recItem.song,
+                                canAdd = uiState.canAddSongs,
+                                canDismiss = canDismissRecommendation(uiState.isHost, uiState.myPerms),
+                                onAdd = {
+                                    if (uiState.canAddSongs) {
+                                        rootViewModel.promoteRecommended(recItem.qid)
+                                    } else {
+                                        com.synq.ui.toast.SynqToastManager.show(
+                                            "Ask ${uiState.hostName.ifBlank { "Host" }} to add songs",
+                                            com.synq.ui.toast.SynqToastType.WARNING
+                                        )
+                                    }
+                                },
+                                onDismiss = {
+                                    rootViewModel.removeByQid(recItem.qid)
+                                },
+                                modifier = jamQueueItemAnimateModifier()
+                            )
+                        }
                     }
+
+                    item(key = "jam_bottom_section") {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Spacer(modifier = Modifier.height(Spacing.l))
 
                     // ── History Section (Collapsible) ──
                     if (uiState.history.isNotEmpty()) {
                         Surface(
-                            onClick = { isHistoryExpanded = !isHistoryExpanded },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = MaterialTheme.shapes.large,
                             color = cardBg,
-                            modifier = Modifier.fillMaxWidth()
+                            border = BorderStroke(1.dp, subtleBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize()
+                                .pressable(
+                                    pressedScale = MotionTokens.CardPressScale,
+                                    onClick = { isHistoryExpanded = !isHistoryExpanded }
+                                )
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Row(
@@ -1047,7 +1161,7 @@ fun JamScreen(
                                 ) {
                                     Text(
                                         text = "Played (${uiState.history.size})",
-                                        fontSize = 14.sp,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontFeatureSettings = "tnum"),
                                         fontWeight = FontWeight.Bold,
                                         color = textPrimary
                                     )
@@ -1064,37 +1178,39 @@ fun JamScreen(
                                     exit = shrinkVertically() + fadeOut()
                                 ) {
                                     Column(
-                                        modifier = Modifier.padding(top = 10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        modifier = Modifier.padding(top = 10.dp)
                                     ) {
                                         uiState.history.forEach { historyItem ->
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
+                                                    .heightIn(min = 56.dp)
+                                                    .padding(vertical = Spacing.xs),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 AsyncImage(
-                                                    model = historyItem.song.imageUrl,
+                                                    model = ImageRequest.Builder(context)
+                                                        .data(historyItem.song.imageUrl)
+                                                        .crossfade(true)
+                                                        .build(),
                                                     contentDescription = null,
                                                     contentScale = ContentScale.Crop,
                                                     modifier = Modifier
-                                                        .size(38.dp)
-                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .size(48.dp)
+                                                        .clip(MaterialTheme.shapes.small)
                                                 )
-                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Spacer(modifier = Modifier.width(16.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(
                                                         text = historyItem.song.title,
-                                                        fontSize = 13.5.sp,
-                                                        fontWeight = FontWeight.Medium,
+                                                        style = MaterialTheme.typography.titleMedium.copy(lineHeight = 18.sp),
                                                         color = textPrimary,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                     Text(
                                                         text = historyItem.song.primaryArtistName,
-                                                        fontSize = 11.5.sp,
+                                                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 15.sp),
                                                         color = textSecondary,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
@@ -1107,85 +1223,138 @@ fun JamScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xl))
                     }
 
                     // ── Leave / End Jam Action Buttons ──
-                    val actionButtonShape = RoundedCornerShape(16.dp)
+                    val actionButtonShape = MaterialTheme.shapes.large
 
-                    // Leave Button (Host passes on; Jam continues)
-                    Surface(
-                        onClick = { rootViewModel.leaveJam() },
-                        shape = actionButtonShape,
-                        color = if (uiState.isHost) {
-                            if (isDark) Color(0xFF1E1724) else Color(0xFFF1F5F9)
-                        } else {
-                            Danger.copy(alpha = 0.10f)
-                        },
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (uiState.isHost) {
-                                if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-                            } else {
-                                Danger.copy(alpha = 0.25f)
-                            }
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    if (uiState.isHost) {
                         Row(
-                            modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                                contentDescription = "Leave Jam",
-                                tint = if (uiState.isHost) textPrimary else Danger,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Leave Jam",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (uiState.isHost) textPrimary else Danger
-                            )
-                        }
-                    }
-
-                    // Host-Only: End Jam for Everyone
-                    if (uiState.isHost) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            onClick = { showConfirmEndDialog = true },
-                            shape = actionButtonShape,
-                            color = Danger.copy(alpha = 0.10f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Danger.copy(alpha = 0.25f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                            // Leave Button (Host passes on; Jam continues)
+                            Surface(
+                                shape = actionButtonShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, subtleBorder),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .pressable(
+                                        pressedScale = MotionTokens.ButtonPressScale,
+                                        onClick = {
+                                            haptic.performConfirm()
+                                            rootViewModel.leaveJam()
+                                        }
+                                    )
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "End Jam for Everyone",
-                                    tint = Danger,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "End Jam",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Danger
-                                )
+                                Row(
+                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = Spacing.s),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                        contentDescription = "Leave Jam",
+                                        tint = textPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(Spacing.xs))
+                                    Text(
+                                        text = "Leave Jam",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = textPrimary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            // Host-Only: End Jam for Everyone
+                            Surface(
+                                shape = actionButtonShape,
+                                color = SemanticLive.copy(alpha = 0.10f),
+                                border = BorderStroke(1.dp, SemanticLive.copy(alpha = 0.25f)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .pressable(
+                                        pressedScale = MotionTokens.ButtonPressScale,
+                                        onClick = { showConfirmEndDialog = true }
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = Spacing.s),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "End Jam for Everyone",
+                                        tint = SemanticLive,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(Spacing.xs))
+                                    Text(
+                                        text = "End Jam",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SemanticLive,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = actionButtonShape,
+                                color = SemanticLive.copy(alpha = 0.10f),
+                                border = BorderStroke(1.dp, SemanticLive.copy(alpha = 0.25f)),
+                                modifier = Modifier
+                                    .fillMaxWidth(0.55f)
+                                    .pressable(
+                                        pressedScale = MotionTokens.ButtonPressScale,
+                                        onClick = {
+                                            haptic.performConfirm()
+                                            rootViewModel.leaveJam()
+                                        }
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 14.dp, horizontal = Spacing.m),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                        contentDescription = "Leave Jam",
+                                        tint = SemanticLive,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(Spacing.xs))
+                                    Text(
+                                        text = "Leave Jam",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SemanticLive,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(96.dp)) // Mini-player breathing space
+                        }
+                    }
                 }
             }
         }
@@ -1195,10 +1364,12 @@ fun JamScreen(
 @Composable
 private fun JamMemberAvatarPill(
     member: JamMember,
-    isHost: Boolean,
-    isDark: Boolean
+    isHost: Boolean
 ) {
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val isDark = isAppDark()
+    val context = LocalContext.current
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val pinkText = if (isDark) PinkPrimary else PinkDeep
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1212,19 +1383,28 @@ private fun JamMemberAvatarPill(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(if (isHost) Accent else Accent.copy(alpha = 0.25f)),
+                        .then(
+                            if (isHost) {
+                                Modifier.background(PinkGradientHero)
+                            } else {
+                                Modifier.background(PinkPrimary.copy(alpha = 0.20f))
+                            }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = member.username.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (isHost) Color.White else textPrimary,
-                        fontSize = 16.sp
+                        color = if (isHost) Color.White else textPrimary
                     )
                 }
             } else {
                 AsyncImage(
-                    model = member.avatarUrl,
+                    model = ImageRequest.Builder(context)
+                        .data(member.avatarUrl)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = member.username,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -1238,9 +1418,12 @@ private fun JamMemberAvatarPill(
                 modifier = Modifier
                     .size(11.dp)
                     .align(Alignment.BottomEnd)
-                    .background(Color.Black, CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)
                     .padding(1.5.dp)
-                    .background(if (member.online) OnlineGreen else Color(0xFF94A3B8), CircleShape)
+                    .background(
+                        if (member.online) SemanticSuccess else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        CircleShape
+                    )
             )
         }
 
@@ -1248,7 +1431,7 @@ private fun JamMemberAvatarPill(
 
         Text(
             text = member.username,
-            fontSize = 11.sp,
+            style = MaterialTheme.typography.labelSmall,
             color = textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1257,12 +1440,12 @@ private fun JamMemberAvatarPill(
         if (isHost) {
             Text(
                 text = "HOST",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Accent
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = pinkText
             )
         } else {
-            Spacer(modifier = Modifier.height(13.dp))
+            Spacer(modifier = Modifier.height(14.dp))
         }
     }
 }
@@ -1272,64 +1455,78 @@ private fun JamQueueItemRow(
     key: String,
     song: com.synq.features.music.domain.model.Song,
     addedByName: String,
-    isDark: Boolean,
+    pinkText: Color,
     canRemove: Boolean,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onClick: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(if (isDark) Color(0xFF181320) else Color.White)
-            .border(
-                1.dp,
-                if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.05f),
-                shape
+            .heightIn(min = 56.dp)
+            .pressable(
+                pressedScale = MotionTokens.RowPressScale,
+                onClick = onClick
             )
-            .clickable(onClick = onClick)
-            .padding(10.dp),
+            .padding(vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = song.imageUrl,
+            model = ImageRequest.Builder(context)
+                .data(song.imageUrl)
+                .crossfade(true)
+                .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(48.dp)
+                .clip(MaterialTheme.shapes.small)
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium.copy(lineHeight = 18.sp),
                 color = textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = "Added by $addedByName",
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = Accent,
+                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 15.sp),
+                color = pinkText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
+        Spacer(modifier = Modifier.width(Spacing.xs))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (canMoveUp) {
-                IconButton(onClick = onMoveUp, modifier = Modifier.size(36.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .pressable(
+                            pressedScale = MotionTokens.ChipPressScale,
+                            onClick = {
+                                haptic.performConfirm()
+                                onMoveUp()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowUp,
                         contentDescription = "Move Up",
@@ -1339,7 +1536,19 @@ private fun JamQueueItemRow(
                 }
             }
             if (canMoveDown) {
-                IconButton(onClick = onMoveDown, modifier = Modifier.size(36.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .pressable(
+                            pressedScale = MotionTokens.ChipPressScale,
+                            onClick = {
+                                haptic.performConfirm()
+                                onMoveDown()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
                         contentDescription = "Move Down",
@@ -1349,7 +1558,19 @@ private fun JamQueueItemRow(
                 }
             }
             if (canRemove) {
-                IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .pressable(
+                            pressedScale = MotionTokens.ChipPressScale,
+                            onClick = {
+                                haptic.performConfirm()
+                                onRemove()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Remove",
@@ -1366,77 +1587,98 @@ private fun JamQueueItemRow(
 private fun JamRecommendedRow(
     key: String,
     song: com.synq.features.music.domain.model.Song,
-    isDark: Boolean,
     canAdd: Boolean,
     canDismiss: Boolean,
     onAdd: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(if (isDark) Color(0xFF181320) else Color.White)
-            .border(
-                1.dp,
-                if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.05f),
-                shape
+            .heightIn(min = 56.dp)
+            .pressable(
+                pressedScale = MotionTokens.RowPressScale,
+                onClick = {
+                    if (canAdd) haptic.performConfirm()
+                    onAdd()
+                }
             )
-            .padding(10.dp),
+            .padding(vertical = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = song.imageUrl,
+            model = ImageRequest.Builder(context)
+                .data(song.imageUrl)
+                .crossfade(true)
+                .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .size(48.dp)
+                .clip(MaterialTheme.shapes.small)
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleMedium.copy(lineHeight = 18.sp),
                 color = textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = song.primaryArtistName,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 15.sp),
                 color = textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
+        Spacer(modifier = Modifier.width(Spacing.xs))
+
         // Add Button (Promote)
-        IconButton(
-            onClick = onAdd,
-            modifier = Modifier.size(36.dp),
-            enabled = canAdd
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .pressable(
+                    pressedScale = MotionTokens.ChipPressScale,
+                    onClick = {
+                        if (canAdd) haptic.performConfirm()
+                        onAdd()
+                    }
+                ),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Outlined.AddCircleOutline,
+                imageVector = Icons.Default.Add,
                 contentDescription = "Add to Jam Queue",
-                tint = if (canAdd) {
-                    if (isDark) Color.White.copy(alpha = 0.75f) else Color(0xFF64748B)
-                } else {
-                    if (isDark) Color.White.copy(alpha = 0.35f) else Color(0xFF64748B).copy(alpha = 0.35f)
-                },
+                tint = if (canAdd) textSecondary else textSecondary.copy(alpha = 0.35f),
                 modifier = Modifier.size(20.dp)
             )
         }
 
         if (canDismiss) {
-            IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .pressable(
+                        pressedScale = MotionTokens.ChipPressScale,
+                        onClick = {
+                            haptic.performConfirm()
+                            onDismiss()
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Dismiss",
@@ -1447,6 +1689,19 @@ private fun JamRecommendedRow(
         }
     }
 }
+
+private fun LazyItemScope.jamQueueItemAnimateModifier(): Modifier =
+    Modifier.animateItem(
+        fadeInSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        fadeOutSpec = tween(220, easing = FastOutSlowInEasing),
+        placementSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        )
+    )
 
 // ─────────────────────────────────────────────────────────────
 // D2. People Sheet (Bottom Sheet for Members & Permissions)
@@ -1464,8 +1719,13 @@ fun PeopleSheet(
     onKickMember: (userId: String) -> Unit
 ) {
     val isDark = isAppDark()
-    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
-    val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val sheetBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val subtleBorder = MaterialTheme.colorScheme.outlineVariant
+    val textPrimary = MaterialTheme.colorScheme.onSurface
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
+    val pinkText = if (isDark) PinkPrimary else PinkDeep
 
     var memberToMakeHost by remember { mutableStateOf<JamMember?>(null) }
     var memberToKick by remember { mutableStateOf<JamMember?>(null) }
@@ -1474,21 +1734,46 @@ fun PeopleSheet(
     memberToMakeHost?.let { target ->
         AlertDialog(
             onDismissRequest = { memberToMakeHost = null },
-            title = { Text("Transfer Host?", fontWeight = FontWeight.Bold, color = textPrimary) },
-            text = { Text("Make ${target.username} the host? You will become a regular member.", color = textSecondary) },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = sheetBg,
+            title = {
+                Text(
+                    text = "Transfer Host?",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Make ${target.username} the host? You will become a regular member.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textSecondary
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        haptic.performConfirm()
                         onMakeHost(target.userId)
                         memberToMakeHost = null
                     }
                 ) {
-                    Text("Make Host", fontWeight = FontWeight.Bold, color = Accent)
+                    Text(
+                        text = "Make Host",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = pinkText
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { memberToMakeHost = null }) {
-                    Text("Cancel", color = textSecondary)
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = textSecondary
+                    )
                 }
             }
         )
@@ -1498,21 +1783,46 @@ fun PeopleSheet(
     memberToKick?.let { target ->
         AlertDialog(
             onDismissRequest = { memberToKick = null },
-            title = { Text("Remove Listener?", fontWeight = FontWeight.Bold, color = textPrimary) },
-            text = { Text("Remove ${target.username} from this Jam session?", color = textSecondary) },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = sheetBg,
+            title = {
+                Text(
+                    text = "Remove Listener?",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = textPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "Remove ${target.username} from this Jam session?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textSecondary
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
+                        haptic.performConfirm()
                         onKickMember(target.userId)
                         memberToKick = null
                     }
                 ) {
-                    Text("Remove", fontWeight = FontWeight.Bold, color = Danger)
+                    Text(
+                        text = "Remove",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = SemanticLive
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { memberToKick = null }) {
-                    Text("Cancel", color = textSecondary)
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = textSecondary
+                    )
                 }
             }
         )
@@ -1520,13 +1830,13 @@ fun PeopleSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = if (isDark) Color(0xFF1E1624) else Color(0xFFFFFFFF),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        containerColor = sheetBg,
+        shape = MaterialTheme.shapes.extraLarge
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = Spacing.m, vertical = Spacing.xs)
                 .verticalScroll(rememberScrollState())
         ) {
             Row(
@@ -1536,67 +1846,105 @@ fun PeopleSheet(
             ) {
                 Text(
                     text = "People in this Jam (${room.members.size})",
-                    fontSize = 18.sp,
+                    style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Bold,
                     color = textPrimary
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .pressable(pressedScale = MotionTokens.ChipPressScale, onClick = onDismiss),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = textSecondary)
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(Spacing.s))
 
             // Host Only: "Everyone can…" Defaults Section
             if (isHost) {
                 Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Accent.copy(alpha = 0.08f)),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = PinkPrimary.copy(alpha = 0.08f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = Spacing.s, vertical = Spacing.s)) {
                         Text(
                             text = "Everyone can…",
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = Accent
+                            color = pinkText
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(Spacing.xs))
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)
                         ) {
                             FilterChip(
                                 selected = room.defaults.queueAdd,
                                 onClick = {
-                                    onUpdateDefaults(room.defaults.copy(queueAdd = !room.defaults.queueAdd))
+                                    val next = !room.defaults.queueAdd
+                                    haptic.performToggle(next)
+                                    onUpdateDefaults(room.defaults.copy(queueAdd = next))
                                 },
-                                label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                shape = CircleShape,
+                                label = {
+                                    Text(
+                                        text = "Add songs",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Accent,
+                                    selectedContainerColor = PinkPrimary,
                                     selectedLabelColor = Color.White
                                 )
                             )
                             FilterChip(
                                 selected = room.defaults.playback,
                                 onClick = {
-                                    onUpdateDefaults(room.defaults.copy(playback = !room.defaults.playback))
+                                    val next = !room.defaults.playback
+                                    haptic.performToggle(next)
+                                    onUpdateDefaults(room.defaults.copy(playback = next))
                                 },
-                                label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                shape = CircleShape,
+                                label = {
+                                    Text(
+                                        text = "Playback",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Accent,
+                                    selectedContainerColor = PinkPrimary,
                                     selectedLabelColor = Color.White
                                 )
                             )
                             FilterChip(
                                 selected = room.defaults.queueManage,
                                 onClick = {
-                                    onUpdateDefaults(room.defaults.copy(queueManage = !room.defaults.queueManage))
+                                    val next = !room.defaults.queueManage
+                                    haptic.performToggle(next)
+                                    onUpdateDefaults(room.defaults.copy(queueManage = next))
                                 },
-                                label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                shape = CircleShape,
+                                label = {
+                                    Text(
+                                        text = "Manage queue",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Accent,
+                                    selectedContainerColor = PinkPrimary,
                                     selectedLabelColor = Color.White
                                 )
                             )
@@ -1604,13 +1952,13 @@ fun PeopleSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(Spacing.m))
             }
 
             // Member Rows
             Text(
                 text = "Members",
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = textSecondary
             )
@@ -1624,7 +1972,7 @@ fun PeopleSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
+                        .padding(vertical = Spacing.xs)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1637,18 +1985,28 @@ fun PeopleSheet(
                                     modifier = Modifier
                                         .size(40.dp)
                                         .clip(CircleShape)
-                                        .background(if (isMemberHost) Accent else Accent.copy(alpha = 0.25f)),
+                                        .then(
+                                            if (isMemberHost) {
+                                                Modifier.background(PinkGradientHero)
+                                            } else {
+                                                Modifier.background(PinkPrimary.copy(alpha = 0.20f))
+                                            }
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = member.username.take(1).uppercase(),
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isMemberHost) Color.White else textPrimary
                                     )
                                 }
                             } else {
                                 AsyncImage(
-                                    model = member.avatarUrl,
+                                    model = ImageRequest.Builder(context)
+                                        .data(member.avatarUrl)
+                                        .crossfade(true)
+                                        .build(),
                                     contentDescription = member.username,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
@@ -1660,32 +2018,35 @@ fun PeopleSheet(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .align(Alignment.BottomEnd)
-                                    .background(Color.Black, CircleShape)
+                                    .background(sheetBg, CircleShape)
                                     .padding(1.dp)
-                                    .background(if (member.online) OnlineGreen else Color(0xFF94A3B8), CircleShape)
+                                    .background(
+                                        if (member.online) SemanticSuccess else textSecondary.copy(alpha = 0.45f),
+                                        CircleShape
+                                    )
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(Spacing.s))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = member.username + if (isMe) " (You)" else "",
-                                    fontSize = 14.5.sp,
+                                    style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = textPrimary
                                 )
                                 if (isMemberHost) {
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
-                                        shape = RoundedCornerShape(100.dp),
-                                        color = Accent
+                                        shape = CircleShape,
+                                        color = PinkPrimary
                                     ) {
                                         Text(
                                             text = "HOST",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
                                             color = Color.White,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
@@ -1694,26 +2055,44 @@ fun PeopleSheet(
                             }
                             Text(
                                 text = if (member.online) "Online" else "Away",
-                                fontSize = 11.5.sp,
-                                color = if (member.online) OnlineGreen else textSecondary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (member.online) SemanticSuccess else textSecondary
                             )
                         }
 
                         // Host action buttons for other members
                         if (isHost && !isMemberHost) {
-                            IconButton(onClick = { memberToMakeHost = member }, modifier = Modifier.size(36.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .pressable(
+                                        pressedScale = MotionTokens.ChipPressScale,
+                                        onClick = { memberToMakeHost = member }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.SupervisorAccount,
                                     contentDescription = "Make Host",
-                                    tint = Accent,
+                                    tint = pinkText,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            IconButton(onClick = { memberToKick = member }, modifier = Modifier.size(36.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .pressable(
+                                        pressedScale = MotionTokens.ChipPressScale,
+                                        onClick = { memberToKick = member }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.PersonRemove,
                                     contentDescription = "Remove Listener",
-                                    tint = Danger,
+                                    tint = SemanticLive,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -1724,41 +2103,73 @@ fun PeopleSheet(
                     if (!isMemberHost) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)
                         ) {
                             if (isHost) {
                                 // Editable Chips for Host
                                 FilterChip(
                                     selected = member.perms.queueAdd,
                                     onClick = {
-                                        onUpdateMemberPerms(member.userId, member.perms.copy(queueAdd = !member.perms.queueAdd))
+                                        val next = !member.perms.queueAdd
+                                        haptic.performToggle(next)
+                                        onUpdateMemberPerms(member.userId, member.perms.copy(queueAdd = next))
                                     },
-                                    label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                    shape = CircleShape,
+                                    label = {
+                                        Text(
+                                            text = "Add songs",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Accent,
+                                        selectedContainerColor = PinkPrimary,
                                         selectedLabelColor = Color.White
                                     )
                                 )
                                 FilterChip(
                                     selected = member.perms.playback,
                                     onClick = {
-                                        onUpdateMemberPerms(member.userId, member.perms.copy(playback = !member.perms.playback))
+                                        val next = !member.perms.playback
+                                        haptic.performToggle(next)
+                                        onUpdateMemberPerms(member.userId, member.perms.copy(playback = next))
                                     },
-                                    label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                    shape = CircleShape,
+                                    label = {
+                                        Text(
+                                            text = "Playback",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Accent,
+                                        selectedContainerColor = PinkPrimary,
                                         selectedLabelColor = Color.White
                                     )
                                 )
                                 FilterChip(
                                     selected = member.perms.queueManage,
                                     onClick = {
-                                        onUpdateMemberPerms(member.userId, member.perms.copy(queueManage = !member.perms.queueManage))
+                                        val next = !member.perms.queueManage
+                                        haptic.performToggle(next)
+                                        onUpdateMemberPerms(member.userId, member.perms.copy(queueManage = next))
                                     },
-                                    label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) },
+                                    shape = CircleShape,
+                                    label = {
+                                        Text(
+                                            text = "Manage queue",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = Accent,
+                                        selectedContainerColor = PinkPrimary,
                                         selectedLabelColor = Color.White
                                     )
                                 )
@@ -1767,19 +2178,43 @@ fun PeopleSheet(
                                 if (member.perms.queueAdd) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Add songs", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
+                                        shape = CircleShape,
+                                        label = {
+                                            Text(
+                                                text = "Add songs",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     )
                                 }
                                 if (member.perms.playback) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Playback", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
+                                        shape = CircleShape,
+                                        label = {
+                                            Text(
+                                                text = "Playback",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     )
                                 }
                                 if (member.perms.queueManage) {
                                     AssistChip(
                                         onClick = {},
-                                        label = { Text("Manage queue", fontSize = 10.5.sp, maxLines = 1, softWrap = false) }
+                                        shape = CircleShape,
+                                        label = {
+                                            Text(
+                                                text = "Manage queue",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     )
                                 }
                             }
@@ -1787,12 +2222,13 @@ fun PeopleSheet(
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
-                    HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.05f))
+                    HorizontalDivider(color = subtleBorder.copy(alpha = 0.5f))
                 }
             }
 
             Spacer(modifier = Modifier.height(40.dp))
         }
+        com.synq.ui.toast.SynqToastModalOverlay(bottomOffset = 20.dp)
     }
 }
 
@@ -1806,13 +2242,13 @@ private fun JamTrackProgressBar(
     clockSync: ClockSync,
     canControlPlayback: Boolean,
     hostName: String,
-    isDark: Boolean,
     onSeekTo: (Long) -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var liveExpectedPos by remember { mutableLongStateOf(0L) }
     val isPlaying = nowPlaying.status == JamPlaybackStatus.PLAYING
     val context = LocalContext.current
+    val textSecondary = MaterialTheme.colorScheme.onSurfaceVariant
 
     LaunchedEffect(nowPlaying, localPlaybackState, isPlaying) {
         liveExpectedPos = clockSync.expectedPosition(nowPlaying, clockSync.serverNow())
@@ -1876,7 +2312,7 @@ private fun JamTrackProgressBar(
             val target = dragProgressRatio
             dragProgressRatio = null
             if (!canControlPlayback) {
-                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
             } else if (jamProgress.canSeek && target != null) {
                 val targetMs = (target * durationMs).toLong()
                 seekHold = SeekHold(
@@ -1896,19 +2332,19 @@ private fun JamTrackProgressBar(
                 drawStopIndicator = null,
                 thumbTrackGapSize = 0.dp,
                 colors = SliderDefaults.colors(
-                    activeTrackColor = Accent,
-                    inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
-                    disabledActiveTrackColor = Accent.copy(alpha = 0.4f),
-                    disabledInactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.05f)
+                    activeTrackColor = PinkPrimary,
+                    inactiveTrackColor = textSecondary.copy(alpha = 0.22f),
+                    disabledActiveTrackColor = PinkPrimary.copy(alpha = 0.4f),
+                    disabledInactiveTrackColor = textSecondary.copy(alpha = 0.12f)
                 )
             )
         },
         colors = SliderDefaults.colors(
-            thumbColor = Accent,
-            activeTrackColor = Accent,
-            inactiveTrackColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
-            disabledThumbColor = Accent.copy(alpha = 0.4f),
-            disabledActiveTrackColor = Accent.copy(alpha = 0.4f)
+            thumbColor = PinkPrimary,
+            activeTrackColor = PinkPrimary,
+            inactiveTrackColor = textSecondary.copy(alpha = 0.22f),
+            disabledThumbColor = PinkPrimary.copy(alpha = 0.4f),
+            disabledActiveTrackColor = PinkPrimary.copy(alpha = 0.4f)
         ),
         modifier = Modifier
             .fillMaxWidth()
@@ -1924,13 +2360,13 @@ private fun JamTrackProgressBar(
     ) {
         Text(
             text = formatTime(displayPos),
-            fontSize = 11.sp,
-            color = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+            color = textSecondary
         )
         Text(
             text = if (durationMs > 0L) formatTime(durationMs) else "--:--",
-            fontSize = 11.sp,
-            color = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+            color = textSecondary
         )
     }
 }

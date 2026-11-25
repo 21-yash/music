@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.synq.features.sports.domain.model.MatchSummary
 import com.synq.features.sports.domain.repository.SportsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,7 @@ class SportsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(SportsUiState())
     val uiState: StateFlow<SportsUiState> = _uiState.asStateFlow()
+    private var fetchJob: Job? = null
 
     init {
         fetchMatches("live")
@@ -43,8 +45,9 @@ class SportsViewModel @Inject constructor(
     }
 
     private fun fetchMatches(filter: String) {
+        fetchJob?.cancel()
         _uiState.update { it.copy(isLoading = true, error = null) }
-        viewModelScope.launch {
+        fetchJob = viewModelScope.launch {
             repository.getMatches(filter).collect { result ->
                 result.fold(
                     onSuccess = { matches ->
