@@ -110,4 +110,3 @@ val CategoryColors = listOf(
     Color(0xFF7CB342), // Tennis: Lime Green
     Color(0xFFF4511E)  // Basketball: Burnt Orange
 )
-val CategoryTints = CategoryColors

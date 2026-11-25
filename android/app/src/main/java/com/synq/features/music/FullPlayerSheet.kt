@@ -1741,7 +1741,7 @@ private fun RealLyricsContent(
                         text = line.text.ifBlank { "♪" },
                         fontSize = if (isActive) 22.sp else 18.sp,
                         lineHeight = 32.sp,
-                        fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
                         textAlign = TextAlign.Center,
                         color = if (isActive) Accent else textSecondary.copy(alpha = 0.5f),
                         modifier = Modifier

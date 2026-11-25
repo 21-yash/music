@@ -359,7 +359,7 @@ fun ArtistScreen(
                                         Text(
                                             text = artist.name.firstOrNull()?.uppercase() ?: "A",
                                             fontSize = 80.sp,
-                                            fontWeight = FontWeight.Black,
+                                            fontWeight = FontWeight.Bold,
                                             color = Color.White.copy(alpha = 0.9f)
                                         )
                                     }
@@ -503,7 +503,7 @@ fun ArtistScreen(
                                         text = artist.name,
                                         style = MaterialTheme.typography.headlineMedium.copy(
                                             fontSize = 34.sp,
-                                            fontWeight = FontWeight.ExtraBold
+                                            fontWeight = FontWeight.Bold
                                         ),
                                         color = MaterialTheme.colorScheme.onBackground,
                                         lineHeight = 38.sp,

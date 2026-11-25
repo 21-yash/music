@@ -460,7 +460,7 @@ fun AlbumScreen(
                                     Text(
                                         text = "ALBUM",
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.ExtraBold,
+                                            fontWeight = FontWeight.Bold,
                                             letterSpacing = 1.2.sp
                                         ),
                                         color = PinkPrimary

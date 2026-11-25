@@ -25,6 +25,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.synq.ui.theme.PinkDeep
+import com.synq.ui.theme.PinkGlow
+import com.synq.ui.theme.PinkPrimary
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
@@ -67,7 +70,7 @@ fun SynqLoadingIndicator(
     modifier: Modifier = Modifier,
     size: Dp = 48.dp,
     barCount: Int = 5,
-    colors: List<Color> = listOf(SynqPinkLight, SynqPink, SynqPinkDark),
+    colors: List<Color> = listOf(PinkGlow, PinkPrimary, PinkDeep),
     contentDescription: String = "Loading"
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "SynqEqualizerWave")
