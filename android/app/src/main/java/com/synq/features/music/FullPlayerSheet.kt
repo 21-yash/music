@@ -5,19 +5,27 @@ import androidx.activity.compose.BackHandler
 import com.synq.features.music.components.SongOptionsSheet
 import com.synq.features.music.jam.canDismissRecommendation
 import com.synq.features.music.util.SeekHold
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -30,6 +38,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -39,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,6 +67,7 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -64,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -85,6 +97,7 @@ import android.widget.Toast
 import com.synq.features.music.components.AnimatedEqualizerBars
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
+import com.synq.ui.motion.pressable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -361,7 +374,10 @@ fun FullPlayerSheet(
                     // Album art
                     val artScale by animateFloatAsState(
                         targetValue = if (playbackState.isPlaying) 1.02f else 1f,
-                        animationSpec = tween(400),
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
                         label = "artScale"
                     )
                     Box(
@@ -372,36 +388,109 @@ fun FullPlayerSheet(
                         contentAlignment = Alignment.Center
                     ) {
                         val artShape = RoundedCornerShape(24.dp)
-                        AsyncImage(
-                            model = song.imageUrl,
-                            contentDescription = "Album art for ${song.title}",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxHeight(1f)
-                                .aspectRatio(1f)
-                                .graphicsLayer { scaleX = artScale; scaleY = artScale }
-                                .shadow(
-                                    elevation = 20.dp,
-                                    shape = artShape,
-                                    ambientColor = if (isDark) Color.Black else Color(0x33000000),
-                                    spotColor = if (isDark) Color.Black else Color(0x33000000)
-                                )
-                                .clip(artShape)
-                                .background(surfaceChip)
-                        )
+                        AnimatedContent(
+                            targetState = song.id,
+                            transitionSpec = {
+                                (fadeIn(tween(260)) + scaleIn(initialScale = 0.96f))
+                                    .togetherWith(fadeOut(tween(180)))
+                            },
+                            label = "albumArtCrossfade"
+                        ) { _ ->
+                            AsyncImage(
+                                model = song.imageUrl,
+                                contentDescription = "Album art for ${song.title}",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxHeight(1f)
+                                    .aspectRatio(1f)
+                                    .graphicsLayer { scaleX = artScale; scaleY = artScale }
+                                    .shadow(
+                                        elevation = 20.dp,
+                                        shape = artShape,
+                                        ambientColor = if (isDark) Color.Black else Color(0x33000000),
+                                        spotColor = if (isDark) Color.Black else Color(0x33000000)
+                                    )
+                                    .clip(artShape)
+                                    .background(surfaceChip)
+                            )
+                        }
                     }
 
                     // Song info + like
+                    val haptic = LocalHapticFeedback.current
+                    val likeScale = remember { Animatable(1f) }
+                    val likeBurstProgress = remember { Animatable(0f) }
+                    var previousLikedState by remember(song.id) { mutableStateOf(isLiked) }
+
+                    LaunchedEffect(isLiked, song.id) {
+                        if (isLiked != previousLikedState) {
+                            previousLikedState = isLiked
+                            if (isLiked) {
+                                launch {
+                                    likeBurstProgress.snapTo(0f)
+                                    likeBurstProgress.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+                                    likeBurstProgress.snapTo(0f)
+                                }
+                                likeScale.snapTo(0.70f)
+                                likeScale.animateTo(
+                                    targetValue = 1.28f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.45f,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                                likeScale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.55f,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                            } else {
+                                likeScale.snapTo(0.80f)
+                                likeScale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.55f,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    val likeTint by animateColorAsState(
+                        targetValue = if (isLiked) Accent else textSecondary,
+                        animationSpec = tween(220),
+                        label = "likeTint"
+                    )
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                                .drawWithContent {
+                                    drawContent()
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            0f to Color.Black,
+                                            0.88f to Color.Black,
+                                            1f to Color.Transparent
+                                        ),
+                                        blendMode = BlendMode.DstIn
+                                    )
+                                }
+                                .padding(end = 8.dp)
+                        ) {
                             Text(
                                 text = song.title,
-                                fontSize = 23.sp,
+                                fontSize = 21.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textPrimary,
                                 maxLines = 1,
@@ -410,7 +499,7 @@ fun FullPlayerSheet(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = song.primaryArtistName,
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = textSecondary,
                                 maxLines = 1,
@@ -418,15 +507,63 @@ fun FullPlayerSheet(
                             )
                         }
 
-                        IconButton(
-                            onClick = onLikeClick,
-                            modifier = Modifier.size(44.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .pressable(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onAddToPlaylist(song)
+                                    },
+                                    pressedScale = 0.84f
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AddCircleOutline,
+                                contentDescription = "Add to playlist",
+                                tint = textSecondary,
+                                modifier = Modifier.size(25.dp)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onLikeClick()
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val burst = likeBurstProgress.value
+                            if (burst > 0f && burst < 1f) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .graphicsLayer {
+                                            val s = 0.65f + burst * 0.95f
+                                            scaleX = s
+                                            scaleY = s
+                                            alpha = (1f - burst) * 0.7f
+                                        }
+                                        .border(2.dp, Accent, CircleShape)
+                                )
+                            }
                             Icon(
                                 imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                 contentDescription = if (isLiked) "Unlike" else "Like",
-                                tint = if (isLiked) Accent else textSecondary,
-                                modifier = Modifier.size(28.dp)
+                                tint = likeTint,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .graphicsLayer {
+                                        scaleX = likeScale.value
+                                        scaleY = likeScale.value
+                                    }
                             )
                         }
                     }
@@ -521,44 +658,64 @@ fun FullPlayerSheet(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
                     // Controls (Shuffle, Previous, Play/Pause, Next, Repeat-One)
+                    val shuffleTint by animateColorAsState(
+                        targetValue = if (isShuffle && canShuffle) Accent else textSecondary,
+                        animationSpec = tween(220),
+                        label = "shuffleTint"
+                    )
+                    val repeatTint by animateColorAsState(
+                        targetValue = if (isRepeatOne && canRepeat) Accent else textSecondary,
+                        animationSpec = tween(220),
+                        label = "repeatTint"
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
-                            onClick = {
-                                if (!canShuffle) {
-                                    Toast.makeText(context, "Shuffle is managed by the Jam session", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val willBeShuffle = !isShuffle
-                                    onToggleShuffle()
-                                    Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.alpha(if (canShuffle) 1f else 0.38f)
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .pressable(
+                                    onClick = {
+                                        if (!canShuffle) {
+                                            Toast.makeText(context, "Shuffle is managed by the Jam session", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val willBeShuffle = !isShuffle
+                                            onToggleShuffle()
+                                            Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    pressedScale = 0.84f
+                                )
+                                .alpha(if (canShuffle) 1f else 0.38f),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.Shuffle,
+                                painter = painterResource(id = com.synq.R.drawable.ic_shuffle_rounded),
                                 contentDescription = "Shuffle",
-                                tint = if (isShuffle && canShuffle) Accent else textSecondary,
+                                tint = shuffleTint,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                if (!canControlPlayback) {
-                                    Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    onPreviousClick()
-                                }
-                            },
+                        Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .alpha(if (canControlPlayback) 1f else 0.38f)
+                                .pressable(
+                                    onClick = {
+                                        if (!canControlPlayback) {
+                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            onPreviousClick()
+                                        }
+                                    },
+                                    pressedScale = 0.85f
+                                )
+                                .alpha(if (canControlPlayback) 1f else 0.38f),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.SkipPrevious,
@@ -570,6 +727,20 @@ fun FullPlayerSheet(
                         Box(
                             modifier = Modifier
                                 .size(68.dp)
+                                .pressable(
+                                    onClick = {
+                                        if (canControlPlayback) {
+                                            onPlayPauseClick()
+                                        } else {
+                                            if (isStepOut) {
+                                                onResumeFromLocalStepOut()
+                                            } else {
+                                                onStepOutLocally()
+                                            }
+                                        }
+                                    },
+                                    pressedScale = 0.91f
+                                )
                                 .shadow(
                                     elevation = 16.dp,
                                     shape = CircleShape,
@@ -577,41 +748,43 @@ fun FullPlayerSheet(
                                     spotColor = Accent.copy(alpha = 0.5f)
                                 )
                                 .clip(CircleShape)
-                                .background(PinkBrush)
-                                .clickable {
-                                    if (canControlPlayback) {
-                                        onPlayPauseClick()
-                                    } else {
-                                        if (isStepOut) {
-                                            onResumeFromLocalStepOut()
-                                        } else {
-                                            onStepOutLocally()
-                                        }
-                                    }
-                                },
+                                .background(PinkBrush),
                             contentAlignment = Alignment.Center
                         ) {
                             val displayPlaying = if (isStepOut) false else playbackState.isPlaying
-                            Icon(
-                                imageVector = if (displayPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (displayPlaying) "Pause" else "Play",
-                                tint = Color.White,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .offset(x = if (displayPlaying) 0.dp else 2.dp)
-                            )
+                            AnimatedContent(
+                                targetState = displayPlaying,
+                                transitionSpec = {
+                                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.78f))
+                                        .togetherWith(fadeOut(tween(140)) + scaleOut(targetScale = 0.78f))
+                                },
+                                label = "playPauseIcon"
+                            ) { playing ->
+                                Icon(
+                                    imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (playing) "Pause" else "Play",
+                                    tint = Color.White,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .offset(x = if (playing) 0.dp else 2.dp)
+                                )
+                            }
                         }
-                        IconButton(
-                            onClick = {
-                                if (!canControlPlayback) {
-                                    Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    onNextClick()
-                                }
-                            },
+                        Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .alpha(if (canControlPlayback) 1f else 0.38f)
+                                .pressable(
+                                    onClick = {
+                                        if (!canControlPlayback) {
+                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            onNextClick()
+                                        }
+                                    },
+                                    pressedScale = 0.85f
+                                )
+                                .alpha(if (canControlPlayback) 1f else 0.38f),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.SkipNext,
@@ -621,28 +794,34 @@ fun FullPlayerSheet(
                             )
                         }
                         // Repeat toggle: binary OFF vs ON (loops current song)
-                        IconButton(
-                            onClick = {
-                                if (!canRepeat) {
-                                    Toast.makeText(context, "Repeat is disabled during a Jam session", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val willBeRepeat = !isRepeatOne
-                                    onToggleRepeat()
-                                    Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.alpha(if (canRepeat) 1f else 0.38f)
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .pressable(
+                                    onClick = {
+                                        if (!canRepeat) {
+                                            Toast.makeText(context, "Repeat is disabled during a Jam session", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val willBeRepeat = !isRepeatOne
+                                            onToggleRepeat()
+                                            Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    pressedScale = 0.84f
+                                )
+                                .alpha(if (canRepeat) 1f else 0.38f),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.RepeatOne,
+                                painter = painterResource(id = com.synq.R.drawable.ic_repeat_one_rounded),
                                 contentDescription = "Repeat",
-                                tint = if (isRepeatOne && canRepeat) Accent else textSecondary,
+                                tint = repeatTint,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Redesigned Floating Bottom Nav Dock (Lyrics, Sleep, Jam, Queue)
                     FloatingBottomDock(
@@ -686,7 +865,14 @@ fun FullPlayerSheet(
                             Text("Jam queue is empty", color = textSecondary, fontSize = 15.sp)
                         }
                     } else {
+                        val jamListState = rememberLazyListState()
+                        LaunchedEffect(openPanel) {
+                            if (openPanel == PlayerPanel.Queue) {
+                                jamListState.scrollToItem(0)
+                            }
+                        }
                         LazyColumn(
+                            state = jamListState,
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -698,6 +884,7 @@ fun FullPlayerSheet(
                                         song = nowPlayingItem.song,
                                         active = true,
                                         isDark = isDark,
+                                        modifier = queueItemAnimateModifier(),
                                         isPlaying = playbackState.isPlaying,
                                         isRecommended = nowPlayingItem.recommended,
                                         canMoveUp = false,
@@ -726,6 +913,7 @@ fun FullPlayerSheet(
                                     song = item.song,
                                     active = isPlayingThis,
                                     isDark = isDark,
+                                    modifier = queueItemAnimateModifier(),
                                     isPlaying = isPlayingThis && playbackState.isPlaying,
                                     isRecommended = false,
                                     canMoveUp = canReorder && index > 0,
@@ -754,7 +942,7 @@ fun FullPlayerSheet(
                             if (jamUiState.recommendedQueue.isNotEmpty()) {
                                 item(key = "rec_jam_separator") {
                                     Row(
-                                        modifier = Modifier
+                                        modifier = queueItemAnimateModifier()
                                             .fillMaxWidth()
                                             .padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -781,6 +969,7 @@ fun FullPlayerSheet(
                                         song = item.song,
                                         active = isPlayingThis,
                                         isDark = isDark,
+                                        modifier = queueItemAnimateModifier(),
                                         isPlaying = isPlayingThis && playbackState.isPlaying,
                                         isRecommended = true,
                                         canMoveUp = false,
@@ -810,53 +999,80 @@ fun FullPlayerSheet(
                     }
                 } else {
                     val firstRecommendedIdx = queue.indexOfFirst { it.id in recommendedSongIds }
+                    val safeCurrentIndex = currentIndex.coerceIn(0, (queue.size - 1).coerceAtLeast(0))
+                    val queueListState = rememberLazyListState(initialFirstVisibleItemIndex = safeCurrentIndex)
+                    val queueKeys = remember(queue) {
+                        val seen = HashMap<String, Int>(queue.size)
+                        queue.map { songItem ->
+                            val count = seen.getOrDefault(songItem.id, 0)
+                            seen[songItem.id] = count + 1
+                            if (count == 0) songItem.id else "${songItem.id}#$count"
+                        }
+                    }
+
+                    LaunchedEffect(openPanel) {
+                        if (openPanel == PlayerPanel.Queue && currentIndex in queue.indices) {
+                            queueListState.scrollToItem(currentIndex)
+                        }
+                    }
+
                     LazyColumn(
+                        state = queueListState,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(bottom = navBarBottom + 24.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        itemsIndexed(queue) { index, item ->
+                        itemsIndexed(queue, key = { index, _ -> queueKeys[index] }) { index, item ->
                             val isPlayingThis = index == currentIndex
                             val isRec = item.id in recommendedSongIds
+                            val itemAnimModifier = queueItemAnimateModifier()
+
+                            val rowContent: @Composable (Modifier) -> Unit = { rowMod ->
+                                QueueItemRow(
+                                    song = item,
+                                    active = isPlayingThis,
+                                    isDark = isDark,
+                                    modifier = rowMod,
+                                    isPlaying = isPlayingThis && playbackState.isPlaying,
+                                    isRecommended = isRec,
+                                    canMoveUp = index > 0 && queue[index - 1].id !in recommendedSongIds,
+                                    canMoveDown = index < queue.size - 1 && queue[index + 1].id !in recommendedSongIds,
+                                    onClick = { onPlayQueueIndex(index) },
+                                    onMoveUp = { onReorderQueue(index, index - 1) },
+                                    onMoveDown = { onReorderQueue(index, index + 1) },
+                                    onRemove = { onRemoveQueueItem(index) },
+                                    onOptionsClick = { selectedQueueSongForOptions = item }
+                                )
+                            }
 
                             // Visual separator before first recommended song
                             if (index == firstRecommendedIdx) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "RECOMMENDED",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Accent,
-                                        letterSpacing = 1.sp
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    HorizontalDivider(
-                                        modifier = Modifier.weight(1f),
-                                        color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
-                                    )
+                                Column(modifier = itemAnimModifier) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "RECOMMENDED",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Accent,
+                                            letterSpacing = 1.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        HorizontalDivider(
+                                            modifier = Modifier.weight(1f),
+                                            color = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    rowContent(Modifier)
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
+                            } else {
+                                rowContent(itemAnimModifier)
                             }
-
-                            QueueItemRow(
-                                song = item,
-                                active = isPlayingThis,
-                                isDark = isDark,
-                                isPlaying = isPlayingThis && playbackState.isPlaying,
-                                isRecommended = isRec,
-                                canMoveUp = index > 0 && queue[index - 1].id !in recommendedSongIds,
-                                canMoveDown = index < queue.size - 1 && queue[index + 1].id !in recommendedSongIds,
-                                onClick = { onPlayQueueIndex(index) },
-                                onMoveUp = { onReorderQueue(index, index - 1) },
-                                onMoveDown = { onReorderQueue(index, index + 1) },
-                                onRemove = { onRemoveQueueItem(index) },
-                                onOptionsClick = { selectedQueueSongForOptions = item }
-                            )
                         }
                     }
                 }
@@ -1113,17 +1329,25 @@ private fun DockNavItem(
 ) {
     val lift by animateDpAsState(
         targetValue = if (active) (-3).dp else 0.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
         label = "dockLift"
     )
 
     val inactiveColor = if (isDark) Color.White.copy(alpha = 0.55f) else Color(0xFF64748B)
+    val itemColor by animateColorAsState(
+        targetValue = if (active) Accent else inactiveColor,
+        animationSpec = tween(200),
+        label = "dockColor"
+    )
 
     Column(
         modifier = modifier
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
+            .pressable(
+                onClick = onClick,
+                pressedScale = 0.90f
             )
             .padding(vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1141,7 +1365,7 @@ private fun DockNavItem(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (active) Accent else inactiveColor,
+                tint = itemColor,
                 modifier = Modifier
                     .size(22.dp)
                     .offset(y = lift)
@@ -1149,7 +1373,7 @@ private fun DockNavItem(
         }
         Text(
             text = label,
-            color = if (active) Accent else inactiveColor,
+            color = itemColor,
             fontSize = 10.5.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
             letterSpacing = 0.5.sp
@@ -1274,7 +1498,7 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.PlayArrow,
             title = "Play Next",
-            subtitle = "Play immediately after current track",
+            subtitle = null,
             isDark = isDark,
             onClick = onPlayNext
         )
@@ -1282,15 +1506,15 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.List,
             title = "Add to Queue",
-            subtitle = "Append to the end of playback queue",
+            subtitle = null,
             isDark = isDark,
             onClick = onAddToQueue
         )
 
         OptionRowItem(
-            icon = Icons.Default.PlaylistAdd,
+            icon = Icons.Outlined.AddCircleOutline,
             title = "Add to Playlist",
-            subtitle = "Save track to your custom playlist",
+            subtitle = null,
             isDark = isDark,
             onClick = onAddToPlaylist
         )
@@ -1306,7 +1530,7 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.Groups,
             title = "Start Jam Session",
-            subtitle = "Listen together in real-time with friends",
+            subtitle = null,
             isDark = isDark,
             onClick = onStartJam
         )
@@ -1314,7 +1538,7 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.DarkMode,
             title = "Sleep Timer",
-            subtitle = "Automatically pause playback after timer",
+            subtitle = null,
             isDark = isDark,
             onClick = onOpenSleepTimer
         )
@@ -1322,7 +1546,7 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.Share,
             title = "Share Song",
-            subtitle = "Share via apps or copy link",
+            subtitle = null,
             isDark = isDark,
             onClick = {
                 val shareUrl = "https://21yash.online/track/${song.id}"
@@ -1339,7 +1563,7 @@ private fun PlayerMoreOptionsSheet(
         OptionRowItem(
             icon = Icons.Default.Info,
             title = "Song Details",
-            subtitle = "View credits, lyrics & audio format info",
+            subtitle = null,
             isDark = isDark,
             onClick = {
                 onDismiss()
@@ -1352,7 +1576,7 @@ private fun PlayerMoreOptionsSheet(
             OptionRowItem(
                 icon = Icons.Default.Album,
                 title = "Go to Album",
-                subtitle = if (song.album.title.isNotBlank()) "View album \"${song.album.title}\"" else "View full album",
+                subtitle = null,
                 isDark = isDark,
                 onClick = {
                     onDismiss()
@@ -1412,7 +1636,7 @@ private fun OptionRowItem(
             Text(
                 text = title,
                 fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Normal,
                 color = if (isDark) Color.White else Color(0xFF0F172A)
             )
             if (subtitle != null) {
@@ -1561,6 +1785,7 @@ private fun QueueItemRow(
     song: Song,
     active: Boolean,
     isDark: Boolean,
+    modifier: Modifier = Modifier,
     isPlaying: Boolean = true,
     canMoveUp: Boolean = false,
     canMoveDown: Boolean = false,
@@ -1577,13 +1802,32 @@ private fun QueueItemRow(
     val textSecondary = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF64748B)
     val shape = RoundedCornerShape(12.dp)
 
+    val rowBg by animateColorAsState(
+        targetValue = if (active) Accent.copy(alpha = 0.16f) else Color.Transparent,
+        animationSpec = tween(220),
+        label = "queueRowBg"
+    )
+    val rowBorder by animateColorAsState(
+        targetValue = if (active) Accent.copy(alpha = 0.38f) else Color.Transparent,
+        animationSpec = tween(220),
+        label = "queueRowBorder"
+    )
+    val titleColor by animateColorAsState(
+        targetValue = if (active) Accent else textPrimary,
+        animationSpec = tween(220),
+        label = "queueRowTitle"
+    )
+
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .pressable(
+                onClick = onClick,
+                pressedScale = 0.98f
+            )
             .clip(shape)
-            .background(if (active) Accent.copy(alpha = 0.16f) else Color.Transparent)
-            .border(1.dp, if (active) Accent.copy(alpha = 0.38f) else Color.Transparent, shape)
-            .clickable(onClick = onClick)
+            .background(rowBg)
+            .border(1.dp, rowBorder, shape)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1601,7 +1845,7 @@ private fun QueueItemRow(
                 text = song.title,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = if (active) Accent else textPrimary,
+                color = titleColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1625,7 +1869,12 @@ private fun QueueItemRow(
         } else if (isRecommended) {
             // Recommended song controls: Three dots menu + optional cross to remove (no reorder)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onOptionsClick?.invoke() }, modifier = Modifier.size(28.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .pressable(onClick = { onOptionsClick?.invoke() }, pressedScale = 0.80f),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = "More Options",
@@ -1634,7 +1883,12 @@ private fun QueueItemRow(
                     )
                 }
                 if (canRemove) {
-                    IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .pressable(onClick = onRemove, pressedScale = 0.80f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "Remove from Queue",
@@ -1647,16 +1901,31 @@ private fun QueueItemRow(
         } else if (showReorderControls) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (canMoveUp) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .pressable(onClick = onMoveUp, pressedScale = 0.78f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", tint = textSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
                 if (canMoveDown) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .pressable(onClick = onMoveDown, pressedScale = 0.78f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", tint = textSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
-                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .pressable(onClick = onRemove, pressedScale = 0.78f),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Default.Close, contentDescription = "Remove", tint = textSecondary.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
                 }
             }
@@ -1932,8 +2201,11 @@ private fun TopBarButton(
     Box(
         modifier = Modifier
             .size(40.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .pressable(
+                onClick = onClick,
+                pressedScale = 0.86f
+            )
+            .clip(CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -2162,8 +2434,13 @@ private fun BoxScope.BottomPanel(
                     }
                 )
             },
-        enter = slideInVertically(tween(350)) { it },
-        exit = slideOutVertically(tween(350)) { it }
+        enter = slideInVertically(
+            animationSpec = spring(
+                dampingRatio = 0.90f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ) { it },
+        exit = slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { it }
     ) {
         Column(
             modifier = Modifier
@@ -2202,9 +2479,12 @@ private fun BoxScope.BottomPanel(
                 Box(
                     modifier = Modifier
                         .size(32.dp)
+                        .pressable(
+                            onClick = onClose,
+                            pressedScale = 0.85f
+                        )
                         .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f))
-                        .clickable(onClick = onClose),
+                        .background(if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -2219,6 +2499,19 @@ private fun BoxScope.BottomPanel(
         }
     }
 }
+
+private fun LazyItemScope.queueItemAnimateModifier(): Modifier =
+    Modifier.animateItem(
+        fadeInSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        fadeOutSpec = tween(220, easing = FastOutSlowInEasing),
+        placementSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        )
+    )
 
 private fun formatDuration(seconds: Int): String {
     val m = seconds / 60
