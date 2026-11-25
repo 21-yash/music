@@ -188,19 +188,22 @@ fun HomeScreen(
     val matches = remember(sportsUiState.matches) { sportsUiState.matches.map { it.toMatchUi() }.distinctBy { it.id } }
     val dbRecentlyPlayed = remember(realRecentlyPlayed) {
         realRecentlyPlayed
-            .sortedByDescending { it.playedAt }
-            .distinctBy { it.songId }
-            .take(5)
+            ?.sortedByDescending { it.playedAt }
+            ?.distinctBy { it.songId }
+            ?.take(5)
     }
-    var displayedRecentlyPlayed by remember { mutableStateOf(dbRecentlyPlayed) }
+    var reorderedRecentlyPlayed by remember { mutableStateOf<List<RecentlyPlayedEntity>?>(null) }
 
     LaunchedEffect(dbRecentlyPlayed) {
-        val currentIds = displayedRecentlyPlayed.map { it.songId }
-        val newIds = dbRecentlyPlayed.map { it.songId }
-        if (currentIds != newIds) {
-            displayedRecentlyPlayed = dbRecentlyPlayed
+        val currentIds = reorderedRecentlyPlayed?.map { it.songId }
+        val newIds = dbRecentlyPlayed?.map { it.songId }
+        if (currentIds != null && newIds != null && currentIds != newIds) {
+            reorderedRecentlyPlayed = null
         }
     }
+
+    val isRecentlyPlayedLoading = dbRecentlyPlayed == null
+    val displayedRecentlyPlayed = reorderedRecentlyPlayed ?: dbRecentlyPlayed.orEmpty()
 
     val haptic = LocalHapticFeedback.current
     val recentlyPlayedListState = rememberLazyListState()
@@ -245,14 +248,14 @@ fun HomeScreen(
                         )
                     }
                     item {
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = Spacing.screenHorizontal)
-                                .width(264.dp)
-                                .height(148.dp)
-                                .clip(MaterialTheme.shapes.large)
-                                .shimmer(MaterialTheme.shapes.large)
-                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(2, key = { it }) {
+                                MatchCardSkeleton()
+                            }
+                        }
                     }
                 }
 
@@ -296,7 +299,7 @@ fun HomeScreen(
                         contentPadding = PaddingValues(
                             start = Spacing.screenHorizontal,
                             end = Spacing.screenHorizontal,
-                            top = if (matches.isNotEmpty()) Spacing.sectionGap else 8.dp,
+                            top = if (matches.isNotEmpty() || sportsUiState.isLoading) Spacing.sectionGap else 8.dp,
                             bottom = Spacing.headerToContent
                         )
                     )
@@ -339,7 +342,7 @@ fun HomeScreen(
                                                     reordered.add(displayedRecentlyPlayed[i])
                                                 }
                                             }
-                                            displayedRecentlyPlayed = reordered.take(5)
+                                            reorderedRecentlyPlayed = reordered.take(5)
                                             recentlyPlayedListState.requestScrollToItem(0)
                                         }
                                         homeViewModel.playSong(item)
@@ -363,6 +366,17 @@ fun HomeScreen(
                                             )
                                         )
                                 )
+                            }
+                        }
+                    }
+                } else if (isRecentlyPlayedLoading) {
+                    item {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = Spacing.screenHorizontal),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(3, key = { it }) {
+                                RecentSongTileSkeleton()
                             }
                         }
                     }
@@ -947,4 +961,92 @@ private fun com.synq.features.sports.domain.model.MatchSummary.toMatchUi(): Matc
         subtitle = matchDesc,
         summary = this.status
     )
+}
+
+@Composable
+private fun MatchCardSkeleton() {
+    val shape = MaterialTheme.shapes.large
+    Box(
+        modifier = Modifier
+            .width(264.dp)
+            .height(148.dp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 14.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(56.dp)
+                    .height(20.dp)
+                    .clip(CircleShape)
+                    .shimmer(CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.75f)
+                    .height(18.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .shimmer(MaterialTheme.shapes.small)
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(74.dp)
+                        .height(15.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .shimmer(MaterialTheme.shapes.small)
+                )
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(15.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .shimmer(MaterialTheme.shapes.small)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.58f)
+                    .height(12.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .shimmer(MaterialTheme.shapes.small)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentSongTileSkeleton() {
+    Column(modifier = Modifier.width(128.dp)) {
+        Box(
+            modifier = Modifier
+                .size(128.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .shimmer(MaterialTheme.shapes.medium)
+        )
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .height(14.dp)
+                .clip(MaterialTheme.shapes.small)
+                .shimmer(MaterialTheme.shapes.small)
+        )
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.55f)
+                .height(12.dp)
+                .clip(MaterialTheme.shapes.small)
+                .shimmer(MaterialTheme.shapes.small)
+        )
+    }
 }

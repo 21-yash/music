@@ -19,8 +19,8 @@ class HomeViewModel @Inject constructor(
     private val playerManager: MusicPlayerManager,
 ) : ViewModel() {
 
-    val recentlyPlayed: StateFlow<List<RecentlyPlayedEntity>> = recentlyPlayedRepository.recentlyPlayed
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentlyPlayed: StateFlow<List<RecentlyPlayedEntity>?> = recentlyPlayedRepository.recentlyPlayed
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun playSong(item: RecentlyPlayedEntity) {
         val song = Song(
