@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.CircleShape
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.synq.navigation.AppBottomNavBar
@@ -43,6 +44,7 @@ import com.synq.features.music.components.MiniPlayer
 import com.synq.features.music.jam.JamClientState
 import com.synq.features.music.jam.JamUiEvent
 import com.synq.features.music.jam.LocalCanAddSongsToJam
+import com.synq.ui.theme.PinkPrimary
 import com.synq.features.music.jam.LocalIsInJam
 
 /**
@@ -136,6 +138,8 @@ private fun MainAppContent(
                 rootViewModel.jamPreferences.clearLastJam()
                 rejoinCandidateCode = null
             },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = {
                 Text(
                     text = "Rejoin Jam $codeToRejoin?",
@@ -156,9 +160,14 @@ private fun MainAppContent(
                         rejoinCandidateCode = null
                         rootViewModel.joinJam(codeToRejoin, avatarUrl = rootViewModel.jamPreferences.getLastAvatarUrl())
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2D7A))
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = PinkPrimary)
                 ) {
-                    Text("Rejoin", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Rejoin",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
@@ -168,7 +177,11 @@ private fun MainAppContent(
                         rejoinCandidateCode = null
                     }
                 ) {
-                    Text("Dismiss")
+                    Text(
+                        text = "Dismiss",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         )
@@ -225,6 +238,8 @@ private fun MainAppContent(
     if (showSignOutConfirmation) {
         AlertDialog(
             onDismissRequest = { rootViewModel.dismissSignOut() },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = {
                 Text(
                     text = "Sign Out",
@@ -245,14 +260,23 @@ private fun MainAppContent(
                         rootViewModel.dismissSignOut()
                         rootViewModel.logout()
                     },
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Sign Out", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Sign Out",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { rootViewModel.dismissSignOut() }) {
-                    Text("Cancel")
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         )
@@ -262,23 +286,42 @@ private fun MainAppContent(
     if (showLeaveJamConfirm) {
         AlertDialog(
             onDismissRequest = { rootViewModel.dismissLeaveJamConfirmDialog() },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = {
-                Text("Leave Jam?", fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Leave Jam?",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
             },
             text = {
-                Text("Leave Jam and stop playback?")
+                Text(
+                    text = "Leave Jam and stop playback?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             },
             confirmButton = {
                 Button(
                     onClick = { rootViewModel.confirmLeaveJamAndStopPlayback() },
+                    shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Leave & Stop", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Leave & Stop",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { rootViewModel.dismissLeaveJamConfirmDialog() }) {
-                    Text("Cancel")
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         )

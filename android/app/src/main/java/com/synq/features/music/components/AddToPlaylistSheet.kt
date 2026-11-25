@@ -1,13 +1,26 @@
 package com.synq.features.music.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -23,15 +36,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.features.music.domain.model.Song
+import com.synq.ui.isAppDark
+import com.synq.ui.motion.MotionTokens
+import com.synq.ui.motion.performConfirm
+import com.synq.ui.motion.performToggle
+import com.synq.ui.motion.pressable
+import com.synq.ui.theme.PinkDeep
 import com.synq.ui.theme.PinkGradientHero
 import com.synq.ui.theme.PinkPrimary
 import com.synq.ui.theme.Spacing
@@ -46,7 +66,6 @@ private enum class PlaylistSortMode(val label: String) {
 
 /**
  * Add-to-Playlist bottom sheet (§3.2, §5: Reference visual north star).
- * Token swap only — appearance remains visually equivalent / pixel-similar to baseline.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +80,10 @@ fun AddToPlaylistSheet(
     onCreatePlaylist: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isDark = isAppDark()
+    val haptic = LocalHapticFeedback.current
+    val pinkAccent = if (isDark) PinkPrimary else PinkDeep
+
     var searchQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(PlaylistSortMode.DEFAULT) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -119,6 +142,7 @@ fun AddToPlaylistSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize()
                 .padding(horizontal = Spacing.screenHorizontal, vertical = Spacing.s)
         ) {
             // Header: Cancel (left), drag handle (center), Done (right)
@@ -127,9 +151,14 @@ fun AddToPlaylistSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TextButton(
-                    onClick = onDismiss,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                Box(
+                    modifier = Modifier
+                        .pressable(
+                            pressedScale = 0.90f,
+                            onClick = onDismiss
+                        )
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Cancel",
@@ -146,13 +175,21 @@ fun AddToPlaylistSheet(
                         .background(textSecondary.copy(alpha = 0.4f))
                 )
 
-                TextButton(
-                    onClick = onDismiss,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                Box(
+                    modifier = Modifier
+                        .pressable(
+                            pressedScale = 0.90f,
+                            onClick = {
+                                haptic.performConfirm()
+                                onDismiss()
+                            }
+                        )
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Done",
-                        color = PinkPrimary,
+                        color = pinkAccent,
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -172,13 +209,21 @@ fun AddToPlaylistSheet(
                     color = textPrimary
                 )
 
-                TextButton(
-                    onClick = { showCreateDialog = true },
-                    contentPadding = PaddingValues(0.dp)
+                Box(
+                    modifier = Modifier
+                        .pressable(
+                            pressedScale = 0.90f,
+                            onClick = {
+                                haptic.performConfirm()
+                                showCreateDialog = true
+                            }
+                        )
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "New playlist",
-                        color = PinkPrimary,
+                        color = pinkAccent,
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -195,33 +240,41 @@ fun AddToPlaylistSheet(
             ) {
                 // ─── 1. SAVED ITEMS (Shown ABOVE the search bar) ───
                 if (searchQuery.isBlank()) {
-                    // Liked Songs row if already liked
+                    // Liked Songs row if already liked (shared key slides smoothly across search bar)
                     if (isLiked) {
-                        item(key = "saved_liked_songs") {
+                        item(key = "liked_songs") {
                             LikedSongRow(
                                 isLiked = true,
-                                onToggle = onToggleLike,
+                                onToggle = {
+                                    haptic.performToggle(false)
+                                    onToggleLike()
+                                },
                                 textPrimary = textPrimary,
-                                textSecondary = textSecondary
+                                textSecondary = textSecondary,
+                                modifier = sheetItemAnimateModifier()
                             )
                         }
                     }
 
-                    // Playlists where the song is already saved
-                    items(savedPlaylists, key = { "saved_${it.serverId}" }) { playlist ->
+                    // Playlists where the song is already saved (shared key slides smoothly across search bar)
+                    items(savedPlaylists, key = { "playlist_${it.serverId}" }) { playlist ->
                         PlaylistRow(
                             playlist = playlist,
                             isSaved = true,
-                            onToggle = { onRemoveFromPlaylist(playlist) },
+                            onToggle = {
+                                haptic.performToggle(false)
+                                onRemoveFromPlaylist(playlist)
+                            },
                             textPrimary = textPrimary,
-                            textSecondary = textSecondary
+                            textSecondary = textSecondary,
+                            modifier = sheetItemAnimateModifier()
                         )
                     }
                 }
 
                 // ─── 2. SEARCH & SORT BAR ───
                 item(key = "search_and_sort_bar") {
-                    Column {
+                    Column(modifier = sheetItemAnimateModifier()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -265,10 +318,25 @@ fun AddToPlaylistSheet(
                                             innerTextField()
                                         }
                                     )
-                                    if (searchQuery.isNotEmpty()) {
-                                        IconButton(
-                                            onClick = { searchQuery = "" },
-                                            modifier = Modifier.size(24.dp)
+                                    AnimatedVisibility(
+                                        visible = searchQuery.isNotEmpty(),
+                                        enter = scaleIn(
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        ) + fadeIn(),
+                                        exit = scaleOut() + fadeOut()
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .pressable(
+                                                    pressedScale = MotionTokens.ChipPressScale,
+                                                    onClick = { searchQuery = "" }
+                                                ),
+                                            contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Close,
@@ -285,13 +353,18 @@ fun AddToPlaylistSheet(
 
                             // Sort button
                             Box {
-                                TextButton(
-                                    onClick = { showSortMenu = true },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .pressable(
+                                            pressedScale = 0.90f,
+                                            onClick = { showSortMenu = true }
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "Sort",
-                                        color = textSecondary,
+                                        text = if (sortMode == PlaylistSortMode.DEFAULT) "Sort" else sortMode.label.substringBefore(" "),
+                                        color = if (sortMode == PlaylistSortMode.DEFAULT) textSecondary else pinkAccent,
                                         style = MaterialTheme.typography.labelMedium
                                     )
                                 }
@@ -306,11 +379,22 @@ fun AddToPlaylistSheet(
                                             text = {
                                                 Text(
                                                     text = mode.label,
-                                                    color = if (sortMode == mode) PinkPrimary else textPrimary,
+                                                    color = if (sortMode == mode) pinkAccent else textPrimary,
                                                     style = MaterialTheme.typography.bodyMedium
                                                 )
                                             },
+                                            trailingIcon = if (sortMode == mode) {
+                                                {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = pinkAccent,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            } else null,
                                             onClick = {
+                                                haptic.performConfirm()
                                                 sortMode = mode
                                                 showSortMenu = false
                                             }
@@ -327,12 +411,16 @@ fun AddToPlaylistSheet(
                 if (searchQuery.isNotBlank()) {
                     // Search mode: show matching Liked Songs if applicable
                     if (matchesLikedSongs) {
-                        item(key = "search_liked_songs") {
+                        item(key = "liked_songs") {
                             LikedSongRow(
                                 isLiked = isLiked,
-                                onToggle = onToggleLike,
+                                onToggle = {
+                                    haptic.performToggle(!isLiked)
+                                    onToggleLike()
+                                },
                                 textPrimary = textPrimary,
-                                textSecondary = textSecondary
+                                textSecondary = textSecondary,
+                                modifier = sheetItemAnimateModifier()
                             )
                         }
                     }
@@ -342,6 +430,7 @@ fun AddToPlaylistSheet(
                         item(key = "no_search_results") {
                             Box(
                                 modifier = Modifier
+                                    .then(sheetItemAnimateModifier())
                                     .fillMaxWidth()
                                     .padding(vertical = 32.dp),
                                 contentAlignment = Alignment.Center
@@ -354,12 +443,13 @@ fun AddToPlaylistSheet(
                             }
                         }
                     } else {
-                        items(matchingSearchResults, key = { "search_${it.serverId}" }) { playlist ->
+                        items(matchingSearchResults, key = { "playlist_${it.serverId}" }) { playlist ->
                             val isSaved = savedPlaylistIds.contains(playlist.serverId)
                             PlaylistRow(
                                 playlist = playlist,
                                 isSaved = isSaved,
                                 onToggle = {
+                                    haptic.performToggle(!isSaved)
                                     if (isSaved) {
                                         onRemoveFromPlaylist(playlist)
                                     } else {
@@ -367,31 +457,40 @@ fun AddToPlaylistSheet(
                                     }
                                 },
                                 textPrimary = textPrimary,
-                                textSecondary = textSecondary
+                                textSecondary = textSecondary,
+                                modifier = sheetItemAnimateModifier()
                             )
                         }
                     }
                 } else {
                     // Default mode: Unsaved Liked Songs row (if not already liked)
                     if (!isLiked) {
-                        item(key = "unsaved_liked_songs") {
+                        item(key = "liked_songs") {
                             LikedSongRow(
                                 isLiked = false,
-                                onToggle = onToggleLike,
+                                onToggle = {
+                                    haptic.performToggle(true)
+                                    onToggleLike()
+                                },
                                 textPrimary = textPrimary,
-                                textSecondary = textSecondary
+                                textSecondary = textSecondary,
+                                modifier = sheetItemAnimateModifier()
                             )
                         }
                     }
 
                     // Default mode: Unsaved playlists
-                    items(unsavedPlaylists, key = { "unsaved_${it.serverId}" }) { playlist ->
+                    items(unsavedPlaylists, key = { "playlist_${it.serverId}" }) { playlist ->
                         PlaylistRow(
                             playlist = playlist,
                             isSaved = false,
-                            onToggle = { onSelectPlaylist(playlist) },
+                            onToggle = {
+                                haptic.performToggle(true)
+                                onSelectPlaylist(playlist)
+                            },
                             textPrimary = textPrimary,
-                            textSecondary = textSecondary
+                            textSecondary = textSecondary,
+                            modifier = sheetItemAnimateModifier()
                         )
                     }
 
@@ -399,6 +498,7 @@ fun AddToPlaylistSheet(
                         item(key = "empty_playlists") {
                             Box(
                                 modifier = Modifier
+                                    .then(sheetItemAnimateModifier())
                                     .fillMaxWidth()
                                     .padding(vertical = 32.dp),
                                 contentAlignment = Alignment.Center
@@ -428,17 +528,115 @@ fun AddToPlaylistSheet(
     }
 }
 
+private fun LazyItemScope.sheetItemAnimateModifier(): Modifier =
+    Modifier.animateItem(
+        fadeInSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        fadeOutSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        placementSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        )
+    )
+
+@Composable
+private fun SavedToggleBadge(
+    isSaved: Boolean,
+    savedContentDescription: String,
+    unsavedContentDescription: String,
+    textSecondary: Color
+) {
+    val popScale = remember { Animatable(1f) }
+    var hasRenderedInitial by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isSaved) {
+        if (!hasRenderedInitial) {
+            hasRenderedInitial = true
+            return@LaunchedEffect
+        }
+        popScale.snapTo(if (isSaved) 0.78f else 0.88f)
+        popScale.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = 0.45f,
+                stiffness = Spring.StiffnessMedium
+            )
+        )
+    }
+
+    val containerColor by animateColorAsState(
+        targetValue = if (isSaved) PinkPrimary else Color.Transparent,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "badgeBg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (isSaved) PinkPrimary else textSecondary.copy(alpha = 0.5f),
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "badgeBorder"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .graphicsLayer {
+                scaleX = popScale.value
+                scaleY = popScale.value
+            }
+            .clip(CircleShape)
+            .background(containerColor)
+            .border(1.5.dp, borderColor, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedContent(
+            targetState = isSaved,
+            transitionSpec = {
+                (scaleIn(
+                    initialScale = 0.6f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                ) + fadeIn(tween(150))) togetherWith (scaleOut(targetScale = 0.6f) + fadeOut(tween(120)))
+            },
+            label = "badgeIcon"
+        ) { saved ->
+            if (saved) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = savedContentDescription,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = unsavedContentDescription,
+                    tint = textSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun LikedSongRow(
     isLiked: Boolean,
     onToggle: () -> Unit,
     textPrimary: Color,
-    textSecondary: Color
+    textSecondary: Color,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .clip(MaterialTheme.shapes.medium)
+            .pressable(
+                pressedScale = MotionTokens.RowPressScale,
+                onClick = onToggle
+            )
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -474,37 +672,12 @@ private fun LikedSongRow(
             )
         }
 
-        if (isLiked) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(PinkPrimary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Saved in Liked Songs",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .border(1.5.dp, textSecondary.copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add to Liked Songs",
-                    tint = textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
+        SavedToggleBadge(
+            isSaved = isLiked,
+            savedContentDescription = "Saved in Liked Songs",
+            unsavedContentDescription = "Add to Liked Songs",
+            textSecondary = textSecondary
+        )
     }
 }
 
@@ -514,18 +687,28 @@ private fun PlaylistRow(
     isSaved: Boolean,
     onToggle: () -> Unit,
     textPrimary: Color,
-    textSecondary: Color
+    textSecondary: Color,
+    modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .clip(MaterialTheme.shapes.medium)
+            .pressable(
+                pressedScale = MotionTokens.RowPressScale,
+                onClick = onToggle
+            )
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (!playlist.imageUrl.isNullOrBlank()) {
             AsyncImage(
-                model = playlist.imageUrl,
+                model = ImageRequest.Builder(context)
+                    .data(playlist.imageUrl)
+                    .crossfade(true)
+                    .build(),
                 contentDescription = playlist.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -562,42 +745,17 @@ private fun PlaylistRow(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "${playlist.songCount} songs",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = textSecondary
             )
         }
 
-        if (isSaved) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(PinkPrimary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Saved in playlist",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .border(1.5.dp, textSecondary.copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add to playlist",
-                    tint = textSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
+        SavedToggleBadge(
+            isSaved = isSaved,
+            savedContentDescription = "Saved in playlist",
+            unsavedContentDescription = "Add to playlist",
+            textSecondary = textSecondary
+        )
     }
 }
 
