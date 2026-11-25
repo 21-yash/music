@@ -93,7 +93,6 @@ import com.synq.features.music.jam.JamParticipantUi
 import com.synq.features.music.jam.JamState
 import com.synq.features.music.playback.PlaybackState
 import android.content.Intent
-import android.widget.Toast
 import com.synq.features.music.components.AnimatedEqualizerBars
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.isAppDark
@@ -616,7 +615,7 @@ fun FullPlayerSheet(
                         progress = effectiveProgress,
                         onSeek = { ratio ->
                             if (!canControlPlayback) {
-                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                             } else {
                                 val targetMs = (ratio * totalDurationMs).toLong()
                                 seekHold = SeekHold(
@@ -630,7 +629,7 @@ fun FullPlayerSheet(
                         isDark = isDark,
                         enabled = canControlPlayback,
                         onDisabledClick = {
-                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                            com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                         },
                         onDragRatioChange = {
                             dragRatio = it
@@ -687,11 +686,11 @@ fun FullPlayerSheet(
                                 .pressable(
                                     onClick = {
                                         if (!canShuffle) {
-                                            Toast.makeText(context, "Shuffle is managed by the Jam session", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Shuffle is managed by the Jam session", com.synq.ui.toast.SynqToastType.WARNING)
                                         } else {
                                             val willBeShuffle = !isShuffle
                                             onToggleShuffle()
-                                            Toast.makeText(context, if (willBeShuffle) "Shuffle on" else "Shuffle off", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show(if (willBeShuffle) "Shuffle on" else "Shuffle off", com.synq.ui.toast.SynqToastType.INFO)
                                         }
                                     },
                                     pressedScale = 0.84f
@@ -712,7 +711,7 @@ fun FullPlayerSheet(
                                 .pressable(
                                     onClick = {
                                         if (!canControlPlayback) {
-                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                         } else {
                                             onPreviousClick()
                                         }
@@ -781,7 +780,7 @@ fun FullPlayerSheet(
                                 .pressable(
                                     onClick = {
                                         if (!canControlPlayback) {
-                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                         } else {
                                             onNextClick()
                                         }
@@ -805,11 +804,11 @@ fun FullPlayerSheet(
                                 .pressable(
                                     onClick = {
                                         if (!canRepeat) {
-                                            Toast.makeText(context, "Repeat is disabled during a Jam session", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Repeat is disabled during a Jam session", com.synq.ui.toast.SynqToastType.WARNING)
                                         } else {
                                             val willBeRepeat = !isRepeatOne
                                             onToggleRepeat()
-                                            Toast.makeText(context, if (willBeRepeat) "Repeat track on" else "Repeat off", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show(if (willBeRepeat) "Repeat track on" else "Repeat off", com.synq.ui.toast.SynqToastType.INFO)
                                         }
                                     },
                                     pressedScale = 0.84f
@@ -927,7 +926,7 @@ fun FullPlayerSheet(
                                         if (canControlPlayback) {
                                             onPlayItemByQid(item.qid)
                                         } else {
-                                            Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                         }
                                     },
                                     onMoveUp = { onMoveByQid(item.qid, index - 1) },
@@ -936,7 +935,10 @@ fun FullPlayerSheet(
                                         if (canRemove) {
                                             onRemoveByQid(item.qid)
                                         } else {
-                                            Toast.makeText(context, "Ask $hostName for queue manage permission", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show(
+                                                "Ask $hostName for queue manage permission",
+                                                com.synq.ui.toast.SynqToastType.WARNING
+                                            )
                                         }
                                     },
                                     onOptionsClick = { selectedQueueSongForOptions = item.song }
@@ -984,7 +986,7 @@ fun FullPlayerSheet(
                                             if (canControlPlayback) {
                                                 onPlayItemByQid(item.qid)
                                             } else {
-                                                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                                com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                             }
                                         },
                                         onMoveUp = {},
@@ -1178,12 +1180,12 @@ fun FullPlayerSheet(
                         isLiked = isLiked,
                         onPlayNext = {
                             onPlayNext(song)
-                            Toast.makeText(context, "Added to play next", Toast.LENGTH_SHORT).show()
+                            com.synq.ui.toast.SynqToastManager.show("Added to play next", com.synq.ui.toast.SynqToastType.SUCCESS)
                             showMoreOptions = false
                         },
                         onAddToQueue = {
                             onAddToQueue(song)
-                            Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                            com.synq.ui.toast.SynqToastManager.show("Added to queue", com.synq.ui.toast.SynqToastType.SUCCESS)
                             showMoreOptions = false
                         },
                         onLikeClick = {

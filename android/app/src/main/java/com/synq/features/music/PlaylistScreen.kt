@@ -1,7 +1,6 @@
 package com.synq.features.music
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import androidx.compose.animation.*
@@ -215,11 +214,10 @@ fun PlaylistScreen(
             onDismiss = { showEditDialog = false },
             onSave = { name, desc, imgUrl ->
                 viewModel.updatePlaylistDetails(name, desc, imgUrl) { success ->
-                    Toast.makeText(
-                        context,
+                    com.synq.ui.toast.SynqToastManager.show(
                         if (success) "Playlist updated" else "Failed to update playlist",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                        if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                    )
                 }
             }
         )
@@ -639,7 +637,10 @@ fun PlaylistScreen(
                                     if (originalPlaylist.songs.isNotEmpty()) {
                                         musicViewModel.setShuffle(true)
                                         musicViewModel.playQueue(originalPlaylist.songs.shuffled(), 0)
-                                        Toast.makeText(context, "Shuffle on", Toast.LENGTH_SHORT).show()
+                                        com.synq.ui.toast.SynqToastManager.show(
+                                            "Shuffle on",
+                                            com.synq.ui.toast.SynqToastType.INFO
+                                        )
                                     }
                                 }) {
                                     Icon(
@@ -965,9 +966,15 @@ fun PlaylistScreen(
                                 isSaving = false
                                 if (success) {
                                     isEditMode = false
-                                    Toast.makeText(context, "Playlist saved", Toast.LENGTH_SHORT).show()
+                                    com.synq.ui.toast.SynqToastManager.show(
+                                        "Playlist saved",
+                                        com.synq.ui.toast.SynqToastType.SUCCESS
+                                    )
                                 } else {
-                                    Toast.makeText(context, "Failed to save changes", Toast.LENGTH_SHORT).show()
+                                    com.synq.ui.toast.SynqToastManager.show(
+                                        "Failed to save changes",
+                                        com.synq.ui.toast.SynqToastType.ERROR
+                                    )
                                 }
                             }
                         }

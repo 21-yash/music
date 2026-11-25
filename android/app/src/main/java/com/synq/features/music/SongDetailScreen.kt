@@ -1,7 +1,6 @@
 package com.synq.features.music
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -386,7 +385,7 @@ fun SongDetailScreen(
                                     .pressable(
                                         onClick = {
                                             viewModel.addToQueue(song)
-                                            Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                                            com.synq.ui.toast.SynqToastManager.show("Added to queue", com.synq.ui.toast.SynqToastType.SUCCESS)
                                         },
                                         pressedScale = MotionTokens.ButtonPressScale
                                     )
@@ -685,7 +684,10 @@ fun SongDetailScreen(
                                                 .pressable(
                                                     onClick = {
                                                         clipboardManager.setText(AnnotatedString(song.id))
-                                                        Toast.makeText(context, "Copied ID: ${song.id}", Toast.LENGTH_SHORT).show()
+                                                        com.synq.ui.toast.SynqToastManager.show(
+                                                            "Copied ID: ${song.id}",
+                                                            com.synq.ui.toast.SynqToastType.SUCCESS
+                                                        )
                                                     },
                                                     pressedScale = MotionTokens.ButtonPressScale
                                                 )

@@ -3,7 +3,6 @@ package com.synq.features.music.jam
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
 import com.synq.core.network.NetworkMonitor
 import com.synq.data.remote.TokenRefreshResult
 import com.synq.data.repository.AuthRepository
@@ -53,9 +52,7 @@ class JamSessionManager(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val toastEmitter: (String) -> Unit = { msg ->
         try {
-            Handler(Looper.getMainLooper()).post {
-                context?.let { Toast.makeText(it, msg, Toast.LENGTH_SHORT).show() }
-            }
+            com.synq.ui.toast.SynqToastManager.show(msg)
         } catch (_: Throwable) {}
     }
 ) : JamPlaybackInterceptor {

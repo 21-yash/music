@@ -1,7 +1,6 @@
 package com.synq.features.music.components
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import com.synq.ui.motion.MotionTokens
@@ -267,7 +266,7 @@ fun SongOptionsSheet(
                     enabled = canAdd,
                     onClick = {
                         if (!canAdd) {
-                            Toast.makeText(context, "You don't have permission to add songs to Jam", Toast.LENGTH_SHORT).show()
+                            com.synq.ui.toast.SynqToastManager.show("You don't have permission to add songs to Jam", com.synq.ui.toast.SynqToastType.WARNING)
                         } else {
                             (onAddToQueue ?: onPlayNext)?.invoke()
                             onDismiss()
@@ -280,7 +279,7 @@ fun SongOptionsSheet(
                     text = "Play Next",
                     onClick = {
                         onPlayNext?.invoke()
-                        Toast.makeText(context, "Added to play next", Toast.LENGTH_SHORT).show()
+                        com.synq.ui.toast.SynqToastManager.show("Added to play next", com.synq.ui.toast.SynqToastType.SUCCESS)
                         onDismiss()
                     }
                 )
@@ -289,7 +288,7 @@ fun SongOptionsSheet(
                     text = "Add to Queue",
                     onClick = {
                         onAddToQueue?.invoke()
-                        Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                        com.synq.ui.toast.SynqToastManager.show("Added to queue", com.synq.ui.toast.SynqToastType.SUCCESS)
                         onDismiss()
                     }
                 )
@@ -372,6 +371,7 @@ fun SongOptionsSheet(
             }
             Spacer(modifier = Modifier.height(Spacing.xs))
         }
+        com.synq.ui.toast.SynqToastModalOverlay(bottomOffset = 20.dp)
     }
 }
 

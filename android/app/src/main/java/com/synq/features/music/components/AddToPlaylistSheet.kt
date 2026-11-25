@@ -514,6 +514,7 @@ fun AddToPlaylistSheet(
                 }
             }
         }
+        com.synq.ui.toast.SynqToastModalOverlay(bottomOffset = 20.dp)
     }
 
     if (showCreateDialog) {

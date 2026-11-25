@@ -1,6 +1,5 @@
 package com.synq.features.music.history
 
-import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -106,7 +105,10 @@ fun ListeningHistoryScreen(
                         showClearDialog = false
                         viewModel.clearHistory()
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        Toast.makeText(context, "History cleared", Toast.LENGTH_SHORT).show()
+                        com.synq.ui.toast.SynqToastManager.show(
+                            "History cleared",
+                            com.synq.ui.toast.SynqToastType.INFO
+                        )
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = CircleShape
@@ -334,18 +336,17 @@ fun ListeningHistoryScreen(
                                 onAddToQueue = { viewModel.addToQueue(songModel) },
                                 onToggleLike = {
                                     viewModel.toggleLike(songModel)
-                                    Toast.makeText(
-                                        context,
+                                    com.synq.ui.toast.SynqToastManager.show(
                                         if (isLiked) "Removed from Liked Songs" else "Added to Liked Songs",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                        if (isLiked) com.synq.ui.toast.SynqToastType.INFO else com.synq.ui.toast.SynqToastType.SUCCESS
+                                    )
                                 },
                                 onAddToPlaylist = {
                                     addToPlaylist(songModel)
                                 },
                                 onDelete = {
                                     viewModel.deleteEntry(item.id)
-                                    Toast.makeText(context, "Removed from history", Toast.LENGTH_SHORT).show()
+                                    com.synq.ui.toast.SynqToastManager.show("Removed from history", com.synq.ui.toast.SynqToastType.INFO)
                                 }
                             )
                         }

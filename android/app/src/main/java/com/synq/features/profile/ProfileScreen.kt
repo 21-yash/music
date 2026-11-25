@@ -1,7 +1,6 @@
 package com.synq.features.profile
 
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -352,11 +351,10 @@ fun ProfileScreen(
                     onClick = {
                         showClearCacheDialog = false
                         viewModel.clearCache { success ->
-                            Toast.makeText(
-                                context,
+                            com.synq.ui.toast.SynqToastManager.show(
                                 if (success) "Music cache cleared" else "Failed to clear cache",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                                if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                            )
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -748,7 +746,10 @@ fun ProfileScreen(
                 subtitle = "Score alerts & release updates",
                 icon = Icons.Filled.Notifications,
                 onClick = {
-                    Toast.makeText(context, "Notifications are active for match & music updates", Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        "Notifications are active for match & music updates",
+                        com.synq.ui.toast.SynqToastType.INFO
+                    )
                 }
             ),
             SettingsItem(
@@ -756,7 +757,10 @@ fun ProfileScreen(
                 subtitle = "Local storage & app permissions",
                 icon = Icons.Filled.Security,
                 onClick = {
-                    Toast.makeText(context, "All streaming data is stored securely on device", Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        "All streaming data is stored securely on device",
+                        com.synq.ui.toast.SynqToastType.INFO
+                    )
                 }
             ),
             SettingsItem(

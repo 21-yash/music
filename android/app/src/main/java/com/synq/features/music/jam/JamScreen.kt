@@ -1,7 +1,6 @@
 package com.synq.features.music.jam
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -366,7 +365,7 @@ fun JamScreen(
                                 onClick = {
                                     haptic.performConfirm()
                                     clipboardManager.setText(AnnotatedString(code))
-                                    Toast.makeText(context, "Code copied: $code", Toast.LENGTH_SHORT).show()
+                                    com.synq.ui.toast.SynqToastManager.show("Code copied: $code", com.synq.ui.toast.SynqToastType.SUCCESS)
                                 }
                             )
                     ) {
@@ -822,7 +821,7 @@ fun JamScreen(
                                                 pressedScale = MotionTokens.ButtonPressScale,
                                                 onClick = {
                                                     if (!uiState.canControlPlayback) {
-                                                        Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                                        com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                                     } else {
                                                         haptic.performConfirm()
                                                         rootViewModel.jamPreviousTrack()
@@ -882,7 +881,7 @@ fun JamScreen(
                                                 pressedScale = MotionTokens.ButtonPressScale,
                                                 onClick = {
                                                     if (!uiState.canControlPlayback) {
-                                                        Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                                                        com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                                     } else {
                                                         haptic.performConfirm()
                                                         rootViewModel.jamNextTrack()
@@ -1080,7 +1079,10 @@ fun JamScreen(
                                     if (uiState.canControlPlayback) {
                                         rootViewModel.playItemByQid(queueItem.qid)
                                     } else {
-                                        Toast.makeText(context, "Ask ${uiState.hostName.ifBlank { "Host" }} for playback control", Toast.LENGTH_SHORT).show()
+                                        com.synq.ui.toast.SynqToastManager.show(
+                                            "Ask ${uiState.hostName.ifBlank { "Host" }} for playback control",
+                                            com.synq.ui.toast.SynqToastType.WARNING
+                                        )
                                     }
                                 },
                                 onMoveUp = { rootViewModel.moveByQid(queueItem.qid, index - 1) },
@@ -1119,7 +1121,10 @@ fun JamScreen(
                                     if (uiState.canAddSongs) {
                                         rootViewModel.promoteRecommended(recItem.qid)
                                     } else {
-                                        Toast.makeText(context, "Ask ${uiState.hostName.ifBlank { "Host" }} to add songs", Toast.LENGTH_SHORT).show()
+                                        com.synq.ui.toast.SynqToastManager.show(
+                                            "Ask ${uiState.hostName.ifBlank { "Host" }} to add songs",
+                                            com.synq.ui.toast.SynqToastType.WARNING
+                                        )
                                     }
                                 },
                                 onDismiss = {
@@ -2223,6 +2228,7 @@ fun PeopleSheet(
 
             Spacer(modifier = Modifier.height(40.dp))
         }
+        com.synq.ui.toast.SynqToastModalOverlay(bottomOffset = 20.dp)
     }
 }
 
@@ -2306,7 +2312,7 @@ private fun JamTrackProgressBar(
             val target = dragProgressRatio
             dragProgressRatio = null
             if (!canControlPlayback) {
-                Toast.makeText(context, "Ask $hostName for playback control", Toast.LENGTH_SHORT).show()
+                com.synq.ui.toast.SynqToastManager.show("Ask $hostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
             } else if (jamProgress.canSeek && target != null) {
                 val targetMs = (target * durationMs).toLong()
                 seekHold = SeekHold(

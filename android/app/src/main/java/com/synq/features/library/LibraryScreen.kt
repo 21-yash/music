@@ -1,6 +1,5 @@
 package com.synq.features.library
 
-import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -140,11 +139,10 @@ fun LibraryScreen(
                 val song = songToAddToPlaylist!!
                 songToAddToPlaylist = null
                 viewModel.addSongToPlaylist(playlist.serverId, song) { success ->
-                    Toast.makeText(
-                        context,
+                    com.synq.ui.toast.SynqToastManager.show(
                         if (success) "Added to ${playlist.name}" else "Failed to add song",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                        if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                    )
                 }
             }
         )
@@ -465,11 +463,10 @@ fun LibraryScreen(
                             onPlay = { viewModel.playRecentlyPlayed(item) },
                             onToggleLike = {
                                 viewModel.toggleLike(songModel)
-                                Toast.makeText(
-                                    context,
+                                com.synq.ui.toast.SynqToastManager.show(
                                     if (isLiked) "Removed from Liked Songs" else "Added to Liked Songs",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                    if (isLiked) com.synq.ui.toast.SynqToastType.INFO else com.synq.ui.toast.SynqToastType.SUCCESS
+                                )
                             },
                             onAddToPlaylist = {
                                 rootViewModel.showAddToPlaylist(songModel)

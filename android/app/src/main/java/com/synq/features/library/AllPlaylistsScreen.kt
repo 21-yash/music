@@ -1,6 +1,5 @@
 package com.synq.features.library
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -101,7 +100,7 @@ fun AllPlaylistsScreen(
                     onClick = {
                         viewModel.deletePlaylist(playlist.serverId)
                         playlistToDelete = null
-                        Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
+                        com.synq.ui.toast.SynqToastManager.show("Playlist deleted", com.synq.ui.toast.SynqToastType.SUCCESS)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
@@ -123,7 +122,7 @@ fun AllPlaylistsScreen(
             onCreate = { name, desc ->
                 viewModel.createPlaylist(name, desc)
                 showCreateDialog = false
-                Toast.makeText(context, "Playlist created", Toast.LENGTH_SHORT).show()
+                com.synq.ui.toast.SynqToastManager.show("Playlist created", com.synq.ui.toast.SynqToastType.SUCCESS)
             }
         )
     }

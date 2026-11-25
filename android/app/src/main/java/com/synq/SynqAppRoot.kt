@@ -192,19 +192,19 @@ private fun MainAppContent(
         rootViewModel.jamUiEvents.collect { event ->
             when (event) {
                 is JamUiEvent.MemberJoined -> {
-                    android.widget.Toast.makeText(context, "${event.username} joined the Jam", android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show("${event.username} joined the Jam", com.synq.ui.toast.SynqToastType.SUCCESS)
                 }
                 is JamUiEvent.MemberLeft -> {
-                    android.widget.Toast.makeText(context, "${event.username} left the Jam", android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show("${event.username} left the Jam", com.synq.ui.toast.SynqToastType.INFO)
                 }
                 is JamUiEvent.HostChanged -> {
-                    android.widget.Toast.makeText(context, "${event.newHostUsername} is now the host", android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show("${event.newHostUsername} is now the host", com.synq.ui.toast.SynqToastType.INFO)
                 }
                 is JamUiEvent.Kicked -> {
-                    android.widget.Toast.makeText(context, event.reason, android.widget.Toast.LENGTH_LONG).show()
+                    com.synq.ui.toast.SynqToastManager.show(event.reason, com.synq.ui.toast.SynqToastType.ERROR, longDuration = true)
                 }
                 is JamUiEvent.Toast -> {
-                    android.widget.Toast.makeText(context, event.message, android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(event.message)
                 }
                 is JamUiEvent.PermChanged -> {
                     // Handled via JamUiEvent.Toast derived in JamStateStore
@@ -216,14 +216,14 @@ private fun MainAppContent(
 
     LaunchedEffect(jamState.error) {
         jamState.error?.let { err ->
-            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_LONG).show()
+            com.synq.ui.toast.SynqToastManager.show(err, com.synq.ui.toast.SynqToastType.ERROR, longDuration = true)
             rootViewModel.clearJamError()
         }
     }
 
     LaunchedEffect(playbackState.error) {
         playbackState.error?.let { err ->
-            android.widget.Toast.makeText(context, err, android.widget.Toast.LENGTH_SHORT).show()
+            com.synq.ui.toast.SynqToastManager.show(err, com.synq.ui.toast.SynqToastType.ERROR)
         }
     }
 
@@ -340,17 +340,26 @@ private fun MainAppContent(
             },
             onSelectPlaylist = { playlist ->
                 rootViewModel.addSongToExistingPlaylist(playlist.serverId, song) { success, msg ->
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        msg,
+                        if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                    )
                 }
             },
             onRemoveFromPlaylist = { playlist ->
                 rootViewModel.removeSongFromPlaylist(playlist.serverId, song.id) { success, msg ->
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        msg,
+                        if (success) com.synq.ui.toast.SynqToastType.INFO else com.synq.ui.toast.SynqToastType.ERROR
+                    )
                 }
             },
             onCreatePlaylist = { name ->
                 rootViewModel.createPlaylistAndAddSong(name, song) { success, msg ->
-                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    com.synq.ui.toast.SynqToastManager.show(
+                        msg,
+                        if (success) com.synq.ui.toast.SynqToastType.SUCCESS else com.synq.ui.toast.SynqToastType.ERROR
+                    )
                 }
             },
             onDismiss = { rootViewModel.dismissAddToPlaylist() }
@@ -375,11 +384,10 @@ private fun MainAppContent(
         com.synq.features.music.components.LocalToggleLike provides { song ->
             val wasLiked = likedSongIds.contains(song.id)
             rootViewModel.toggleLike(song)
-            android.widget.Toast.makeText(
-                context,
+            com.synq.ui.toast.SynqToastManager.show(
                 if (wasLiked) "Removed from Liked Songs" else "Added to Liked Songs",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
+                if (wasLiked) com.synq.ui.toast.SynqToastType.INFO else com.synq.ui.toast.SynqToastType.SUCCESS
+            )
         }
     ) {
         Scaffold(
@@ -422,7 +430,7 @@ private fun MainAppContent(
                                     if (jamUiState.canControlPlayback) {
                                         rootViewModel.jamPreviousTrack()
                                     } else {
-                                        android.widget.Toast.makeText(context, "Ask $jamHostName for playback control", android.widget.Toast.LENGTH_SHORT).show()
+                                        com.synq.ui.toast.SynqToastManager.show("Ask $jamHostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                     }
                                 } else {
                                     rootViewModel.skipToPrevious()
@@ -433,7 +441,7 @@ private fun MainAppContent(
                                     if (jamUiState.canControlPlayback) {
                                         rootViewModel.jamNextTrack()
                                     } else {
-                                        android.widget.Toast.makeText(context, "Ask $jamHostName for playback control", android.widget.Toast.LENGTH_SHORT).show()
+                                        com.synq.ui.toast.SynqToastManager.show("Ask $jamHostName for playback control", com.synq.ui.toast.SynqToastType.WARNING)
                                     }
                                 } else {
                                     rootViewModel.skipToNext()
@@ -540,6 +548,15 @@ private fun MainAppContent(
                     onDismiss = { showFullPlayer = false }
                 )
             }
+
+            val toastBottomOffset = when {
+                showFullPlayer && playbackState.currentSong != null -> 80.dp
+                showMiniPlayer && playbackState.currentSong != null && showBottomBar -> 164.dp
+                showMiniPlayer && playbackState.currentSong != null -> 92.dp
+                showBottomBar -> 86.dp
+                else -> 24.dp
+            }
+            com.synq.ui.toast.SynqToastHost(bottomOffset = toastBottomOffset)
         }
         }
     }
