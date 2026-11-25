@@ -209,11 +209,15 @@ fun HomeScreen(
     val recentlyPlayedListState = rememberLazyListState()
 
     val firstSongId = displayedRecentlyPlayed.firstOrNull()?.songId
-    var previousFirstSongId by remember { mutableStateOf(firstSongId) }
+    var previousFirstSongId by remember { mutableStateOf<String?>(null) }
 
-    if (firstSongId != null && previousFirstSongId != null && firstSongId != previousFirstSongId) {
-        recentlyPlayedListState.requestScrollToItem(0)
-        previousFirstSongId = firstSongId
+    LaunchedEffect(firstSongId) {
+        if (firstSongId != null) {
+            if (previousFirstSongId != null && firstSongId != previousFirstSongId) {
+                recentlyPlayedListState.scrollToItem(0)
+            }
+            previousFirstSongId = firstSongId
+        }
     }
 
     Box(

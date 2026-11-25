@@ -146,7 +146,7 @@ fun AlbumScreen(
     // titleTopY is the absolute Y position of the title text on screen, updated via onGloballyPositioned
     val isHeaderVisible by remember {
         derivedStateOf {
-            titleTopY <= headerTriggerZonePx
+            listState.firstVisibleItemIndex > 1 || titleTopY <= headerTriggerZonePx
         }
     }
 
@@ -712,7 +712,7 @@ fun AlbumScreen(
                             }
                         }
 
-                        items(album.songs.size, key = { album.songs[it].id }) { index ->
+                        items(album.songs.size, key = { index -> "${album.songs[index].id}_$index" }) { index ->
                             val song = album.songs[index]
                             SongItem(
                                 song = song,

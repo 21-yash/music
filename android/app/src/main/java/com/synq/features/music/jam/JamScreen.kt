@@ -123,6 +123,20 @@ fun JamScreen(
     var showConfirmEndDialog by remember { mutableStateOf(false) }
     var showPeopleSheet by remember { mutableStateOf(false) }
     var isHistoryExpanded by remember { mutableStateOf(false) }
+    var showReconnectingChip by remember { mutableStateOf(false) }
+
+    LaunchedEffect(clientState, hasPendingCommand) {
+        if (clientState is JamClientState.Reconnecting) {
+            if (hasPendingCommand) {
+                showReconnectingChip = true
+            } else if (!showReconnectingChip) {
+                kotlinx.coroutines.delay(2000L)
+                showReconnectingChip = true
+            }
+        } else {
+            showReconnectingChip = false
+        }
+    }
 
     val hasSeenBatteryTip by rootViewModel.jamPreferences.hasSeenBatteryTip.collectAsState()
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
@@ -485,20 +499,6 @@ fun JamScreen(
                     item(key = "jam_top_section") {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Status Pill
-                    var showReconnectingChip by remember { mutableStateOf(false) }
-                    LaunchedEffect(clientState, hasPendingCommand) {
-                        if (clientState is JamClientState.Reconnecting) {
-                            if (hasPendingCommand) {
-                                showReconnectingChip = true
-                            } else if (!showReconnectingChip) {
-                                kotlinx.coroutines.delay(2000L)
-                                showReconnectingChip = true
-                            }
-                        } else {
-                            showReconnectingChip = false
-                        }
-                    }
-
                     val isStepOut = localPlaybackState is LocalPlaybackState.LocalStepOut
                     val isCatchingUp = localPlaybackState is LocalPlaybackState.CatchingUp
                     val isReconnecting = showReconnectingChip && (clientState is JamClientState.Reconnecting)
@@ -1875,7 +1875,9 @@ fun PeopleSheet(
                         Spacer(modifier = Modifier.height(Spacing.xs))
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)
                         ) {
                             FilterChip(
@@ -2096,7 +2098,9 @@ fun PeopleSheet(
                     if (!isMemberHost) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(Spacing.xxs)
                         ) {
                             if (isHost) {

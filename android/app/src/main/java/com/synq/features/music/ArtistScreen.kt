@@ -153,14 +153,14 @@ fun ArtistScreen(
     // Sticky header appears when the on-screen artist name reaches the status bar zone
     val isHeaderVisible by remember {
         derivedStateOf {
-            titleTopY <= headerTriggerZonePx
+            listState.firstVisibleItemIndex > 0 || titleTopY <= headerTriggerZonePx
         }
     }
 
     // Play button in sticky header appears when on-screen play button goes past status bar
     val isHeaderPlayButtonVisible by remember {
         derivedStateOf {
-            playButtonTopY <= headerTriggerZonePx
+            listState.firstVisibleItemIndex > 0 || playButtonTopY <= headerTriggerZonePx
         }
     }
 
@@ -654,7 +654,7 @@ fun ArtistScreen(
                                 contentPadding = PaddingValues(horizontal = 24.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                items(artist.albums.size, key = { artist.albums[it].id }) { index ->
+                                items(artist.albums.size, key = { index -> "${artist.albums[index].id}_$index" }) { index ->
                                     val album = artist.albums[index]
                                     Card(
                                         modifier = Modifier

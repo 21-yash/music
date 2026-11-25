@@ -422,6 +422,11 @@ fun FullPlayerSheet(
                     val likeBurstProgress = remember { Animatable(0f) }
                     var previousLikedState by remember(song.id) { mutableStateOf(isLiked) }
 
+                    LaunchedEffect(song.id) {
+                        likeScale.snapTo(1f)
+                        likeBurstProgress.snapTo(0f)
+                    }
+
                     LaunchedEffect(isLiked, song.id) {
                         if (isLiked != previousLikedState) {
                             previousLikedState = isLiked

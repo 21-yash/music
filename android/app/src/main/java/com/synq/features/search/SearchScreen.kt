@@ -101,13 +101,18 @@ fun SearchScreen(
         }
     }
 
+    var hasAutoFocused by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(initialQuery) {
         if (!initialQuery.isNullOrBlank()) {
             viewModel.updateQuery(initialQuery)
-        } else {
-            kotlinx.coroutines.delay(200)
-            focusRequester.requestFocus()
-            keyboardController?.show()
+            hasAutoFocused = true
+        } else if (!hasAutoFocused) {
+            hasAutoFocused = true
+            if (uiState.query.isEmpty()) {
+                kotlinx.coroutines.delay(200)
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            }
         }
     }
 
@@ -734,7 +739,7 @@ fun SearchResultsContent(
         }
     }
     var selectedFilter by rememberSaveable { mutableStateOf("All") }
-    if (selectedFilter !in availableFilters && availableFilters.isNotEmpty()) {
+    if (selectedFilter != "All" && selectedFilter !in availableFilters) {
         selectedFilter = "All"
     }
 
@@ -828,7 +833,7 @@ fun SearchResultsContent(
                         }) { _, artist ->
                             SearchArtistCircleItem(
                                 artist = artist,
-                                onClick = { onArtistClick(artist.id) },
+                                onClick = { if (artist.id.isNotBlank()) onArtistClick(artist.id) },
                                 modifier = Modifier.animateItem()
                             )
                         }
@@ -860,7 +865,7 @@ fun SearchResultsContent(
                         }) { _, album ->
                             SearchAlbumTileItem(
                                 album = album,
-                                onClick = { onAlbumClick(album.id) },
+                                onClick = { if (album.id.isNotBlank()) onAlbumClick(album.id) },
                                 modifier = Modifier.animateItem()
                             )
                         }

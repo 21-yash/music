@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -423,7 +424,10 @@ fun SongDetailScreen(
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    items(song.artists, key = { it.id.ifBlank { it.name } }) { artist ->
+                                    itemsIndexed(
+                                        song.artists,
+                                        key = { index, artist -> "${artist.id.ifBlank { artist.name }}_$index" }
+                                    ) { _, artist ->
                                         ArtistChip(
                                             name = artist.name,
                                             imageUrl = artist.imageUrl,

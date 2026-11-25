@@ -55,11 +55,12 @@ fun Modifier.pressable(
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     pressedScale: Float = MotionTokens.DefaultPressScale,
-    targetScale: Float = pressedScale
+    targetScale: Float = pressedScale,
+    externalInteractionSource: MutableInteractionSource? = null
 ): Modifier = composed {
     val effectiveScale = if (pressedScale != MotionTokens.DefaultPressScale) pressedScale else targetScale
     val scale = remember { Animatable(1f) }
-    val interactionSource = remember { MutableInteractionSource() }
+    val interactionSource = externalInteractionSource ?: remember { MutableInteractionSource() }
 
     LaunchedEffect(interactionSource, effectiveScale) {
         var pressStartTime = 0L
@@ -127,7 +128,7 @@ fun Modifier.pressable(
 fun Modifier.pressScale(
     targetScale: Float = MotionTokens.DefaultPressScale,
     interactionSource: MutableInteractionSource? = null
-): Modifier = pressable(pressedScale = targetScale)
+): Modifier = pressable(pressedScale = targetScale, externalInteractionSource = interactionSource)
 
 /**
  * Helper extensions for standard app haptics (§4.7).

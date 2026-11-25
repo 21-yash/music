@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.outlined.CalendarToday
@@ -506,7 +507,7 @@ fun SportsScreen(
             }
 
             // ─── 3. Content States (Skeletons / Error / Empty / Match Cards) ───
-            if (uiState.isLoading && displayedMatches.isEmpty()) {
+            if (uiState.isLoading && uiState.matches.isEmpty()) {
                 items(3, key = { "sports_skel_$it" }) {
                     MatchCardSkeleton(
                         modifier = Modifier
@@ -514,7 +515,7 @@ fun SportsScreen(
                             .padding(horizontal = 20.dp)
                     )
                 }
-            } else if (uiState.error != null && displayedMatches.isEmpty()) {
+            } else if (uiState.error != null && uiState.matches.isEmpty()) {
                 item(key = "sports_error") {
                     Column(
                         modifier = Modifier
@@ -682,6 +683,7 @@ private fun SportsFilterBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp)
         ) {

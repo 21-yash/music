@@ -143,26 +143,10 @@ fun ListeningHistoryScreen(
                 Box(
                     modifier = Modifier
                         .size(48.dp)
-                        .graphicsLayer {
-                            scaleX = backScale.value
-                            scaleY = backScale.value
-                        }
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            coroutineScope.launch {
-                                backScale.animateTo(0.72f, tween(60))
-                                backScale.animateTo(
-                                    targetValue = 1f,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.45f,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
-                                )
-                                onBackClick()
-                            }
-                        },
+                        .pressable(
+                            pressedScale = 0.80f,
+                            onClick = onBackClick
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -194,27 +178,13 @@ fun ListeningHistoryScreen(
                     Box(
                         modifier = Modifier
                             .size(48.dp)
-                            .graphicsLayer {
-                                scaleX = dustbinScale.value
-                                scaleY = dustbinScale.value
-                            }
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                coroutineScope.launch {
-                                    dustbinScale.animateTo(0.72f, tween(60))
-                                    dustbinScale.animateTo(
-                                        targetValue = 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = 0.45f,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
+                            .pressable(
+                                pressedScale = 0.80f,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     showClearDialog = true
                                 }
-                            },
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -484,27 +454,13 @@ private fun HistorySongItem(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .graphicsLayer {
-                        scaleX = crossScale.value
-                        scaleY = crossScale.value
-                    }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        coroutineScope.launch {
-                            crossScale.animateTo(0.72f, tween(60))
-                            crossScale.animateTo(
-                                targetValue = 1f,
-                                animationSpec = spring(
-                                    dampingRatio = 0.45f,
-                                    stiffness = Spring.StiffnessMedium
-                                )
-                            )
+                    .pressable(
+                        pressedScale = 0.80f,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onDelete()
                         }
-                    },
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -517,27 +473,13 @@ private fun HistorySongItem(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .graphicsLayer {
-                        scaleX = dotsScale.value
-                        scaleY = dotsScale.value
-                    }
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        coroutineScope.launch {
-                            dotsScale.animateTo(0.72f, tween(60))
-                            dotsScale.animateTo(
-                                targetValue = 1f,
-                                animationSpec = spring(
-                                    dampingRatio = 0.45f,
-                                    stiffness = Spring.StiffnessMedium
-                                )
-                            )
+                    .pressable(
+                        pressedScale = 0.80f,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showOptions = true
                         }
-                    },
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

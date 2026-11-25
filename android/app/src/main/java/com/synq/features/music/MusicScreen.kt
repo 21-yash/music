@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -330,7 +331,9 @@ fun MusicScreen(
                     )
                 }
                 val basePairs = topPlaylistPairs.take(5)
-                items(basePairs, key = { pair -> pair.map { it.id }.joinToString("_") }) { pair ->
+                itemsIndexed(basePairs, key = { index, pair ->
+                    "pair_${pair.joinToString("_") { it.id }}_$index"
+                }) { _, pair ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -529,7 +532,7 @@ fun MusicScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         val initialArtists = popularArtists.take(10)
-                        items(initialArtists, key = { it.id }) { artist ->
+                        itemsIndexed(initialArtists, key = { index, it -> "${it.id}_$index" }) { _, artist ->
                             ArtistAvatarItem(
                                 name = artist.name,
                                 imageUrl = artist.imageUrl,
@@ -583,7 +586,7 @@ fun MusicScreen(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        items(bestOfList, key = { it.id }) { playlist ->
+                        itemsIndexed(bestOfList, key = { index, it -> "${it.id}_$index" }) { _, playlist ->
                             SquareCard(
                                 title = playlist.title,
                                 imageUrl = playlist.imageUrl ?: "",
@@ -644,7 +647,7 @@ private fun FeaturedHeroCarousel(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(albums.size, key = { index -> albums[index].id }) { index ->
+        items(albums.size, key = { index -> "${albums[index].id}_$index" }) { index ->
             val album = albums[index]
             HeroAlbumCard(
                 album = album,

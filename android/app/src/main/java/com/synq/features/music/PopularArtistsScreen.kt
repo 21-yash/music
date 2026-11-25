@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -78,27 +79,14 @@ fun PopularArtistsScreen(
                         onClick = onBackClick,
                         modifier = Modifier.size(48.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Text(
                         text = "Popular Artists",
@@ -278,7 +266,7 @@ fun PopularArtistsScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(filteredArtists, key = { it.id }) { artist ->
+                itemsIndexed(filteredArtists, key = { index, it -> "${it.id}_$index" }) { _, artist ->
                     ArtistGridItem(
                         artist = artist,
                         onClick = { onNavigateToArtist(artist.id) },

@@ -269,7 +269,7 @@ fun LibraryScreen(
                             )
                         }
                     } else {
-                        items(likedSongs, key = { "liked_${it.songId}" }) { song ->
+                        items(likedSongs, key = { "liked_${it.id}" }) { song ->
                             val songModel = remember(song) {
                                 Song(
                                     id = song.songId,
