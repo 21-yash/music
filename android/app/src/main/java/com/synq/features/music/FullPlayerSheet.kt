@@ -388,16 +388,17 @@ fun FullPlayerSheet(
                     ) {
                         val artShape = RoundedCornerShape(24.dp)
                         AnimatedContent(
-                            targetState = song.id,
+                            targetState = song,
+                            contentKey = { it.id },
                             transitionSpec = {
                                 (fadeIn(tween(260)) + scaleIn(initialScale = 0.96f))
                                     .togetherWith(fadeOut(tween(180)))
                             },
                             label = "albumArtCrossfade"
-                        ) { _ ->
+                        ) { targetSong ->
                             AsyncImage(
-                                model = song.imageUrl,
-                                contentDescription = "Album art for ${song.title}",
+                                model = targetSong.imageUrl,
+                                contentDescription = "Album art for ${targetSong.title}",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .fillMaxHeight(1f)
