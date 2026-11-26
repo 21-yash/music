@@ -88,6 +88,7 @@ fun ProfileScreen(
     val user by viewModel.user.collectAsState()
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val isSportsEnabled by viewModel.isSportsEnabled.collectAsState()
     val context = LocalContext.current
 
     val profilePrefs = remember(context) {
@@ -107,6 +108,7 @@ fun ProfileScreen(
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showAppearanceDialog by remember { mutableStateOf(false) }
+    var showSportsDialog by remember { mutableStateOf(false) }
     var showCacheDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showAvatarCustomizer by remember { mutableStateOf(false) }
@@ -365,6 +367,71 @@ fun ProfileScreen(
             dismissButton = {
                 TextButton(onClick = { showClearCacheDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Sports Selection Dialog (same layout as Appearance)
+    if (showSportsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSportsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (isSportsEnabled) Icons.Filled.SportsCricket else Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = PinkPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Sports",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Select whether sports appears in Synq",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+
+                    // Enable Sports Option
+                    SettingsRadioOptionCard(
+                        title = "Enable Sports",
+                        subtitle = "Cricket tab & Live Action on Home",
+                        icon = Icons.Filled.SportsCricket,
+                        selected = isSportsEnabled,
+                        onClick = {
+                            viewModel.setSportsEnabled(true)
+                            showSportsDialog = false
+                        }
+                    )
+
+                    // Turn Off Sports Option
+                    SettingsRadioOptionCard(
+                        title = "Turn Off Sports",
+                        subtitle = "Hide Live Action & put Search in bottom bar",
+                        icon = Icons.Filled.Search,
+                        selected = !isSportsEnabled,
+                        onClick = {
+                            viewModel.setSportsEnabled(false)
+                            showSportsDialog = false
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSportsDialog = false }) {
+                    Text("Done", color = PinkPrimary)
                 }
             }
         )
@@ -721,13 +788,19 @@ fun ProfileScreen(
         )
     }
 
-    val settingsItems = remember(isDarkTheme, cacheSizeBytes, selectedPaletteIndex, selectedIconTypeIndex) {
+    val settingsItems = remember(isDarkTheme, isSportsEnabled, cacheSizeBytes, selectedPaletteIndex, selectedIconTypeIndex) {
         listOf(
             SettingsItem(
                 title = "Appearance",
                 subtitle = if (isDarkTheme) "Dark Theme" else "Light Theme",
                 icon = if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode,
                 onClick = { showAppearanceDialog = true }
+            ),
+            SettingsItem(
+                title = "Sports",
+                subtitle = if (isSportsEnabled) "Cricket Enabled" else "Cricket Disabled",
+                icon = Icons.Filled.SportsCricket,
+                onClick = { showSportsDialog = true }
             ),
             SettingsItem(
                 title = "Customize Avatar",
@@ -1056,6 +1129,65 @@ private fun SettingsRow(item: SettingsItem) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+@Composable
+private fun SettingsRadioOptionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressable(
+                onClick = onClick,
+                pressedScale = MotionTokens.RowPressScale
+            )
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                if (selected) MaterialTheme.colorScheme.surfaceContainerHigh
+                else MaterialTheme.colorScheme.surfaceContainerLow
+            )
+            .border(
+                1.dp,
+                if (selected) PinkPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                MaterialTheme.shapes.medium
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) PinkPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            RadioButton(
+                selected = selected,
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors(selectedColor = PinkPrimary)
+            )
+        }
     }
 }
 

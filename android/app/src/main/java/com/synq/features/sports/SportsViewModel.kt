@@ -2,6 +2,7 @@ package com.synq.features.sports
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.synq.data.local.SportsPreferences
 import com.synq.features.sports.domain.model.MatchSummary
 import com.synq.features.sports.domain.repository.SportsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,7 +23,8 @@ data class SportsUiState(
 
 @HiltViewModel
 class SportsViewModel @Inject constructor(
-    private val repository: SportsRepository
+    private val repository: SportsRepository,
+    private val sportsPreferences: SportsPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SportsUiState())
@@ -30,7 +32,18 @@ class SportsViewModel @Inject constructor(
     private var fetchJob: Job? = null
 
     init {
-        fetchMatches("live")
+        viewModelScope.launch {
+            sportsPreferences.isSportsEnabled.collect { enabled ->
+                if (enabled) {
+                    if (_uiState.value.matches.isEmpty()) {
+                        fetchMatches(_uiState.value.selectedFilter)
+                    }
+                } else {
+                    fetchJob?.cancel()
+                    _uiState.update { it.copy(isLoading = false, error = null, matches = emptyList()) }
+                }
+            }
+        }
     }
 
     fun onFilterSelected(filter: String) {
@@ -45,6 +58,11 @@ class SportsViewModel @Inject constructor(
     }
 
     private fun fetchMatches(filter: String) {
+        if (!sportsPreferences.isSportsEnabled.value) {
+            fetchJob?.cancel()
+            _uiState.update { it.copy(isLoading = false, error = null, matches = emptyList()) }
+            return
+        }
         fetchJob?.cancel()
         _uiState.update { it.copy(isLoading = true, error = null) }
         fetchJob = viewModelScope.launch {

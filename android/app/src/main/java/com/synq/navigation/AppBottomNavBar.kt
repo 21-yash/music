@@ -38,11 +38,13 @@ import com.synq.ui.glassSurface
 fun AppBottomNavBar(
     navController: NavController,
     modifier: Modifier = Modifier,
+    isSportsEnabled: Boolean = true,
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
     var lastMusicClickTime by remember { mutableLongStateOf(0L) }
+    val navItems = remember(isSportsEnabled) { Screen.bottomNavItems(isSportsEnabled) }
 
     Row(
         modifier = modifier
@@ -53,7 +55,7 @@ fun AppBottomNavBar(
         horizontalArrangement = Arrangement.SpaceAround,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Screen.bottomNavItems.forEach { screen ->
+        navItems.forEach { screen ->
             val isSelected = currentRoute == screen.route
 
             NavBarItem(
@@ -71,6 +73,15 @@ fun AppBottomNavBar(
                             return@NavBarItem
                         }
                         lastMusicClickTime = now
+                    }
+
+                    if (screen == Screen.Search) {
+                        if (currentRoute != Screen.Search.route) {
+                            navController.navigate(Screen.Search.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                        return@NavBarItem
                     }
 
                     if (currentRoute != screen.route) {

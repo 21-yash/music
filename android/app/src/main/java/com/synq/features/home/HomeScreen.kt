@@ -181,6 +181,7 @@ fun HomeScreen(
 ) {
     val uiState by musicViewModel.uiState.collectAsState()
     val sportsUiState by sportsViewModel.uiState.collectAsState()
+    val isSportsEnabled by rootViewModel.isSportsEnabled.collectAsState()
     val realRecentlyPlayed by homeViewModel.recentlyPlayed.collectAsState()
     val jamState by rootViewModel.jamState.collectAsState()
     var showJamIntro by remember { mutableStateOf(false) }
@@ -228,7 +229,7 @@ fun HomeScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             AppHeader(
                 title = greetingForNow(),
-                subtitle = "Welcome to Synq • Music & Sports",
+                subtitle = if (isSportsEnabled) "Welcome to Synq • Music & Sports" else "Welcome to Synq • Music",
                 rootViewModel = rootViewModel,
                 navController = navController,
                 showBrandLogo = true
@@ -239,7 +240,7 @@ fun HomeScreen(
                 contentPadding = contentPadding
             ) {
                 // Skeletons for matches when loading
-                if (sportsUiState.isLoading && matches.isEmpty()) {
+                if (isSportsEnabled && sportsUiState.isLoading && matches.isEmpty()) {
                     item {
                         SectionHeader(
                             title = "Live Action",
@@ -263,8 +264,8 @@ fun HomeScreen(
                     }
                 }
 
-                // Live Action — only shown when there are active/scheduled matches
-                if (matches.isNotEmpty()) {
+                // Live Action — only shown when sports is enabled and there are active/scheduled matches
+                if (isSportsEnabled && matches.isNotEmpty()) {
                     item {
                         SectionHeader(
                             title = "Live Action",
@@ -303,7 +304,7 @@ fun HomeScreen(
                         contentPadding = PaddingValues(
                             start = Spacing.screenHorizontal,
                             end = Spacing.screenHorizontal,
-                            top = if (matches.isNotEmpty() || sportsUiState.isLoading) Spacing.sectionGap else 8.dp,
+                            top = if (isSportsEnabled && (matches.isNotEmpty() || sportsUiState.isLoading)) Spacing.sectionGap else 8.dp,
                             bottom = Spacing.headerToContent
                         )
                     )

@@ -173,6 +173,9 @@ sealed class Screen(
     companion object {
         /** Ordered list of bottom navigation tabs. */
         val bottomNavItems = listOf(Home, Music, Sports, Library, Profile)
+
+        fun bottomNavItems(isSportsEnabled: Boolean): List<Screen> =
+            listOf(Home, Music, if (isSportsEnabled) Sports else Search, Library, Profile)
     }
 }
 

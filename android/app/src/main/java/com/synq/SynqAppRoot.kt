@@ -227,8 +227,17 @@ private fun MainAppContent(
         }
     }
 
-    // Bottom bar is visible on all bottom-nav tabs, hidden on sub-pages
+    val isSportsEnabled by rootViewModel.isSportsEnabled.collectAsState()
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
+
+    LaunchedEffect(isSportsEnabled, currentRoute) {
+        if (!isSportsEnabled && (currentRoute == Screen.Sports.route || currentRoute?.startsWith("sports/") == true)) {
+            navController.navigate(Screen.Home.route) {
+                popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
     val isPlaylistEditing by rootViewModel.isPlaylistEditing.collectAsState()
     val showMiniPlayer = currentRoute != Screen.MatchDetails().route &&
         currentRoute != Screen.HighlightPlayer().route &&
@@ -458,7 +467,10 @@ private fun MainAppContent(
                         enter = slideInVertically(initialOffsetY = { it }) + expandVertically(),
                         exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(),
                     ) {
-                        AppBottomNavBar(navController = navController)
+                        AppBottomNavBar(
+                            navController = navController,
+                            isSportsEnabled = isSportsEnabled
+                        )
                     }
                 }
             }

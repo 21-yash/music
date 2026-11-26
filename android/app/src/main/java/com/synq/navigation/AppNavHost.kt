@@ -242,7 +242,17 @@ fun AppNavHost(
         composable(Screen.Search.route) {
             SearchScreen(
                 rootViewModel = rootViewModel,
-                onBackClick = { navController.popBackStack() },
+                onBackClick = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
                 onArtistClick = { artistId -> navController.navigate(Screen.Artist().createRoute(artistId)) },
                 onAlbumClick = { albumId -> navController.navigate(Screen.Album().createRoute(albumId)) }
             )

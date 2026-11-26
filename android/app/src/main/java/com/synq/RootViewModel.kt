@@ -34,6 +34,7 @@ class RootViewModel @Inject constructor(
     val sleepTimerManager: SleepTimerManager,
     val jamSessionManager: JamSessionManager,
     private val themePreferences: com.synq.data.local.ThemePreferences,
+    private val sportsPreferences: com.synq.data.local.SportsPreferences,
     val jamPreferences: com.synq.features.music.jam.JamPreferences
 ) : ViewModel() {
     val playbackState = playerManager.playbackState
@@ -133,6 +134,7 @@ class RootViewModel @Inject constructor(
     }
 
     val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme
+    val isSportsEnabled: StateFlow<Boolean> = sportsPreferences.isSportsEnabled
 
     fun toggleTheme() {
         themePreferences.toggleTheme()

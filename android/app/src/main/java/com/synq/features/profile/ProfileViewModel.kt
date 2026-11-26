@@ -3,6 +3,7 @@ package com.synq.features.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.synq.core.domain.AppResult
+import com.synq.data.local.SportsPreferences
 import com.synq.data.local.ThemePreferences
 import com.synq.data.remote.dto.UserDto
 import com.synq.data.repository.AuthRepository
@@ -21,9 +22,11 @@ class ProfileViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val audioCacheProvider: AudioCacheProvider,
     private val themePreferences: ThemePreferences,
+    private val sportsPreferences: SportsPreferences,
 ) : ViewModel() {
 
     val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme
+    val isSportsEnabled: StateFlow<Boolean> = sportsPreferences.isSportsEnabled
 
     fun setDarkTheme(isDark: Boolean) {
         themePreferences.setDarkTheme(isDark)
@@ -31,6 +34,14 @@ class ProfileViewModel @Inject constructor(
 
     fun toggleTheme() {
         themePreferences.toggleTheme()
+    }
+
+    fun setSportsEnabled(enabled: Boolean) {
+        sportsPreferences.setSportsEnabled(enabled)
+    }
+
+    fun toggleSports() {
+        sportsPreferences.toggleSports()
     }
 
     private val _user = MutableStateFlow<UserDto?>(null)

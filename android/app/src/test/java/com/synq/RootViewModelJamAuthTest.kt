@@ -32,6 +32,7 @@ class RootViewModelJamAuthTest {
     private val sleepTimerManager: SleepTimerManager = mockk(relaxed = true)
     private val jamSessionManager: JamSessionManager = mockk(relaxed = true)
     private val themePreferences: com.synq.data.local.ThemePreferences = mockk(relaxed = true)
+    private val sportsPreferences: com.synq.data.local.SportsPreferences = mockk(relaxed = true)
     private val jamPreferences: JamPreferences = mockk(relaxed = true)
 
     private val cachedUserFlow = MutableStateFlow<UserDto?>(null)
@@ -58,6 +59,7 @@ class RootViewModelJamAuthTest {
             sleepTimerManager = sleepTimerManager,
             jamSessionManager = jamSessionManager,
             themePreferences = themePreferences,
+            sportsPreferences = sportsPreferences,
             jamPreferences = jamPreferences
         )
     }
