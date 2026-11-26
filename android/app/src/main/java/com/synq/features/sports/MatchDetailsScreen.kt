@@ -1,9 +1,16 @@
 package com.synq.features.sports
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -14,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -39,6 +48,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.features.sports.domain.model.*
 import com.synq.features.sports.highlights.highlightsTabItems
+import com.synq.features.sports.live.*
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.motion.MotionTokens
 import com.synq.ui.motion.pressable
@@ -87,7 +97,9 @@ fun MatchDetailsScreen(
     var selectedInning by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(selectedTabIndex) {
-        if (selectedTabIndex == 4) {
+        if (selectedTabIndex == 2) {
+            viewModel.refreshScorecard(force = true)
+        } else if (selectedTabIndex == 4) {
             viewModel.loadHighlights()
         }
     }
@@ -150,6 +162,7 @@ fun MatchDetailsScreen(
                         item(key = "match_card") {
                             MatchDetailsSummaryCard(
                                 summary = details.summary,
+                                activeLiveEvent = uiState.activeLiveEvent,
                                 modifier = Modifier
                                     .padding(horizontal = 20.dp)
                                     .padding(top = 4.dp, bottom = 8.dp)
@@ -215,7 +228,12 @@ fun MatchDetailsScreen(
                         // TAB CONTENT ITEMS
                         when (selectedTabIndex) {
                             0 -> infoTabItems(details = details)
-                            1 -> liveTabItems(details = details)
+                            1 -> liveTabItems(
+                                details = details,
+                                activeLiveEvent = uiState.activeLiveEvent,
+                                recentBallItems = uiState.recentBallItems,
+                                lastWicketPulseId = uiState.lastWicketPulseId
+                            )
                             2 -> scorecardTabItems(
                                 scorecard = uiState.scorecard,
                                 state = details.summary.state,
@@ -414,87 +432,342 @@ private fun CustomHeader(title: String, subtitle: String, onBackClick: () -> Uni
 @Composable
 internal fun MatchDetailsSummaryCard(
     summary: MatchSummary,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    activeLiveEvent: LiveMatchEvent? = null
 ) {
+    val summaryType = activeLiveEvent?.matchCardType
+    val summaryId = if (summaryType != null) activeLiveEvent.id else null
+    val hasMultiInnings = LiveMatchEventDetector.hasMultipleInnings(summary)
+    var showInningsPopup by remember(summary.id) { mutableStateOf(false) }
     val shape = MaterialTheme.shapes.large
-    Column(
+    val animatedBorderColor = rememberAnimatedEventBorderColor(
+        eventId = summaryId,
+        eventType = summaryType,
+        baseColor = BorderLight
+    )
+    val team1First = LiveMatchEventDetector.isTeam1BattingFirst(summary)
+    val topTeam = if (team1First) summary.team1 else summary.team2
+    val topScore = if (team1First) (summary.team1Score ?: "") else (summary.team2Score ?: "")
+    val bottomTeam = if (team1First) summary.team2 else summary.team1
+    val bottomScore = if (team1First) (summary.team2Score ?: "") else (summary.team1Score ?: "")
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (hasMultiInnings) {
+                    Modifier.pressable(
+                        onClick = { showInningsPopup = true },
+                        pressedScale = MotionTokens.CardPressScale
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .clip(shape)
             .background(CardBlue)
-            .border(1.dp, BorderLight, shape)
-            .padding(14.dp)
+            .border(1.dp, animatedBorderColor, shape)
     ) {
-        // Header: Series name & Badge
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = summary.seriesName,
-                fontSize = 13.sp,
-                color = TextSecondary,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
+        if (summaryType == LiveEventType.NO_BALL) {
+            NoBallSirenOverlay(
+                triggerId = summaryId,
+                modifier = Modifier.matchParentSize()
             )
+        }
 
-            Box(
-                modifier = Modifier
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            // Header: Series name & Badge
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = summary.format.name,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SportsAccent
+                    text = summary.seriesName,
+                    fontSize = 13.sp,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = summary.format.name,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SportsAccent
+                    )
+                }
+            }
+
+            val topActive = summaryType != null && (
+                activeLiveEvent.battingTeamShort == topTeam.shortName ||
+                    (activeLiveEvent.battingTeamShort == null && topScore.isNotBlank() && bottomScore.isBlank())
+                )
+            TeamCardRow(
+                name = topTeam.shortName,
+                score = topScore,
+                logoUrl = topTeam.logoUrl,
+                floatingPillType = if (topActive) summaryType else null,
+                floatingPillId = if (topActive) summaryId else null,
+                shakeTriggerId = if (topActive && summaryType == LiveEventType.WICKET) summaryId else null
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            val bottomActive = summaryType != null && (
+                activeLiveEvent.battingTeamShort == bottomTeam.shortName ||
+                    (!topActive && activeLiveEvent.battingTeamShort == null && bottomScore.isNotBlank())
+                )
+            TeamCardRow(
+                name = bottomTeam.shortName,
+                score = bottomScore,
+                logoUrl = bottomTeam.logoUrl,
+                floatingPillType = if (bottomActive) summaryType else null,
+                floatingPillId = if (bottomActive) summaryId else null,
+                shakeTriggerId = if (bottomActive && summaryType == LiveEventType.WICKET) summaryId else null
+            )
+
+            // Status + Bottom-right Innings chip
+            if (summary.status.isNotBlank() || hasMultiInnings) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (summary.status.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (summary.isLive) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .background(AccentRed, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = summary.status,
+                                fontSize = 12.sp,
+                                fontWeight = if (summary.isLive) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (summary.isLive) AccentRed else TextSecondary,
+                                maxLines = 1,
+                                modifier = Modifier.basicMarquee()
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+
+                    if (hasMultiInnings) {
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                .padding(start = 8.dp, end = 5.dp, top = 3.dp, bottom = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Innings",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = "View all innings",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showInningsPopup && hasMultiInnings) {
+        MultiInningsScoreDialog(
+            seriesName = summary.seriesName,
+            topTeam = topTeam,
+            topScore = topScore,
+            bottomTeam = bottomTeam,
+            bottomScore = bottomScore,
+            onDismiss = { showInningsPopup = false }
+        )
+    }
+}
+
+@Composable
+private fun MultiInningsScoreDialog(
+    seriesName: String,
+    topTeam: Team,
+    topScore: String,
+    bottomTeam: Team,
+    bottomScore: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        title = {
+            Column {
+                Text(
+                    text = "All Innings",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextMain
+                )
+                if (seriesName.isNotBlank()) {
+                    Text(
+                        text = seriesName,
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                InningsBreakdownSection(team = topTeam, rawScore = topScore)
+                HorizontalDivider(color = BorderLight)
+                InningsBreakdownSection(team = bottomTeam, rawScore = bottomScore)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = SportsAccent, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    )
+}
+
+@Composable
+private fun InningsBreakdownSection(
+    team: Team,
+    rawScore: String
+) {
+    val innings = LiveMatchEventDetector.splitInnings(rawScore)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (team.logoUrl != null) {
+                    AsyncImage(
+                        model = team.logoUrl,
+                        contentDescription = team.shortName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = team.shortName,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextMain
+            )
+            if (team.name.isNotBlank() && !team.name.equals(team.shortName, ignoreCase = true)) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = team.name,
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        // Team 1
-        TeamCardRow(name = summary.team1.shortName, score = summary.team1Score ?: "", logoUrl = summary.team1.logoUrl)
-        Spacer(modifier = Modifier.height(8.dp))
-        // Team 2
-        TeamCardRow(name = summary.team2.shortName, score = summary.team2Score ?: "", logoUrl = summary.team2.logoUrl)
-
-        // Status
-        if (summary.status.isNotBlank()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (summary.isLive) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(AccentRed, CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
+        if (innings.isEmpty()) {
+            Text(
+                text = "Yet to bat",
+                fontSize = 13.sp,
+                color = TextSecondary,
+                modifier = Modifier.padding(start = 30.dp)
+            )
+        } else {
+            innings.forEachIndexed { idx, part ->
+                val label = when (idx) {
+                    0 -> "1st Innings"
+                    1 -> "2nd Innings"
+                    else -> "${idx + 1}th Innings"
                 }
-                Text(
-                    text = summary.status,
-                    fontSize = 12.sp,
-                    fontWeight = if (summary.isLive) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (summary.isLive) AccentRed else TextSecondary
-                )
+                val isLatest = idx == innings.lastIndex
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 30.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = part.currentScore,
+                            fontSize = 15.sp,
+                            fontWeight = if (isLatest) FontWeight.Bold else FontWeight.SemiBold,
+                            color = TextMain,
+                            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                        )
+                        if (part.oversSuffix.isNotEmpty()) {
+                            Text(
+                                text = part.oversSuffix,
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TeamCardRow(name: String, score: String, logoUrl: String?) {
+private fun TeamCardRow(
+    name: String,
+    score: String,
+    logoUrl: String?,
+    floatingPillType: LiveEventType? = null,
+    floatingPillId: Long? = null,
+    shakeTriggerId: Long? = null
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .wicketShake(shakeTriggerId),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).padding(end = 12.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -523,8 +796,8 @@ private fun TeamCardRow(name: String, score: String, logoUrl: String?) {
             )
         }
 
-        val isYetToBat = score.isBlank() || score.equals("Yet to bat", ignoreCase = true)
-        if (isYetToBat) {
+        val parsed = LiveMatchEventDetector.parseTeamScore(score)
+        if (parsed.isYetToBat) {
             Text(
                 text = "Yet to bat",
                 fontSize = 13.sp,
@@ -532,31 +805,51 @@ private fun TeamCardRow(name: String, score: String, logoUrl: String?) {
                 color = TextSecondary
             )
         } else {
-            val parts = score.split("(")
-            val runsText = parts[0].trim()
-            val oversText = if (parts.size > 1) "(${parts[1]}" else ""
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(contentAlignment = Alignment.Center) {
+                    RollingValueTransition(targetValue = parsed.currentScore) { currentPart ->
+                        Text(
+                            text = currentPart,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMain,
+                            maxLines = 1,
+                            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                        )
+                    }
 
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum", color = TextMain)) {
-                        append(runsText)
-                    }
-                    if (oversText.isNotEmpty()) {
-                        append(" ")
-                        withStyle(SpanStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium, fontFeatureSettings = "tnum", color = TextSecondary)) {
-                            append(oversText)
-                        }
-                    }
-                },
-                textAlign = TextAlign.End
-            )
+                    FloatingScoreEventPill(
+                        eventType = floatingPillType,
+                        triggerId = floatingPillId,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .offset(y = (-21).dp)
+                    )
+                }
+
+                if (parsed.oversSuffix.isNotEmpty()) {
+                    Text(
+                        text = parsed.oversSuffix,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                    )
+                }
+            }
         }
     }
 }
 
 // ─── LIVE TAB ITEMS ───────────────────────────────────────────────────
 
-private fun LazyListScope.liveTabItems(details: MatchDetails) {
+private fun LazyListScope.liveTabItems(
+    details: MatchDetails,
+    activeLiveEvent: LiveMatchEvent? = null,
+    recentBallItems: List<RecentBallItem> = emptyList(),
+    lastWicketPulseId: Long? = null
+) {
     val crr = details.summary.liveScore?.runRate ?: ""
     val rrr = details.summary.liveScore?.requiredRunRate ?: ""
     val hasLiveData = details.currentBatsmen.isNotEmpty() ||
@@ -608,7 +901,18 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
     }
 
     // Batting Card
-    if (details.currentBatsmen.isNotEmpty()) {
+    val wicketBatterKeys = activeLiveEvent?.batterEvents
+        ?.filterValues { it == LiveEventType.WICKET }
+        ?.keys
+        .orEmpty()
+    val dismissedTransient = if (wicketBatterKeys.isNotEmpty()) {
+        activeLiveEvent?.transientDismissedBatter?.takeIf { outBat ->
+            val outNorm = LiveMatchEventDetector.normalizeName(outBat.name)
+            details.currentBatsmen.none { LiveMatchEventDetector.normalizeName(it.name) == outNorm }
+        }
+    } else null
+
+    if (details.currentBatsmen.isNotEmpty() || dismissedTransient != null) {
         item {
             SectionCard(
                 modifier = Modifier
@@ -624,11 +928,47 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
                 )
                 HorizontalDivider(color = BorderLight)
 
-                details.currentBatsmen.forEachIndexed { index, bat ->
-                    LiveBatterRow(
-                        bat = bat,
-                        isLast = index == details.currentBatsmen.lastIndex
-                    )
+                val batterRows = buildList {
+                    val replaceIdx = if (dismissedTransient != null) {
+                        val incomingName = activeLiveEvent?.replacedBatterName
+                        val matchedIncoming = if (incomingName != null) {
+                            details.currentBatsmen.indexOfFirst {
+                                LiveMatchEventDetector.normalizeName(it.name) == incomingName
+                            }
+                        } else -1
+
+                        when {
+                            matchedIncoming >= 0 -> matchedIncoming
+                            else -> details.currentBatsmen.indexOfFirst { it.runs == 0 && it.balls == 0 }
+                                .takeIf { it >= 0 }
+                                ?: if (details.currentBatsmen.size >= 2) details.currentBatsmen.lastIndex else -1
+                        }
+                    } else -1
+
+                    details.currentBatsmen.forEachIndexed { index, bat ->
+                        if (index == replaceIdx && dismissedTransient != null) {
+                            add(dismissedTransient.copy(onStrike = false) to LiveEventType.WICKET)
+                        } else {
+                            val normalizedName = LiveMatchEventDetector.normalizeName(bat.name)
+                            val eventType = activeLiveEvent?.batterEvents?.get(normalizedName)
+                            add(bat to eventType)
+                        }
+                    }
+
+                    if (dismissedTransient != null && replaceIdx < 0) {
+                        add(dismissedTransient.copy(onStrike = false) to LiveEventType.WICKET)
+                    }
+                }
+
+                batterRows.forEachIndexed { index, (bat, batterEventType) ->
+                    key(LiveMatchEventDetector.normalizeName(bat.name)) {
+                        LiveBatterRow(
+                            bat = bat,
+                            isLast = index == batterRows.lastIndex,
+                            eventType = batterEventType,
+                            eventId = if (batterEventType != null) activeLiveEvent?.id else null
+                        )
+                    }
                 }
             }
         }
@@ -652,10 +992,16 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
                 HorizontalDivider(color = BorderLight)
 
                 details.currentBowlers.forEachIndexed { index, bowl ->
-                    LiveBowlerRow(
-                        bowl = bowl,
-                        isLast = index == details.currentBowlers.lastIndex
-                    )
+                    key(LiveMatchEventDetector.normalizeName(bowl.name)) {
+                        val normalizedName = LiveMatchEventDetector.normalizeName(bowl.name)
+                        val bowlerEventType = activeLiveEvent?.bowlerEvents?.get(normalizedName)
+                        LiveBowlerRow(
+                            bowl = bowl,
+                            isLast = index == details.currentBowlers.lastIndex,
+                            eventType = bowlerEventType,
+                            eventId = if (bowlerEventType != null) activeLiveEvent?.id else null
+                        )
+                    }
                 }
             }
         }
@@ -714,16 +1060,16 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
         }
     }
 
-    // Recent Balls: Latest on left side (.reversed()), 4 in blue, 6 in purple, W in red
-    val recentBallsStr = details.recentBalls
-    val recentBalls = if (recentBallsStr.isNotBlank()) {
-        recentBallsStr.split(" ", "|")
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .reversed() // Reversing order so latest is on the left
+    // Recent Balls: Latest on left side with unique item keys so new balls pop in & older balls slide right
+    val displayBalls = if (recentBallItems.isNotEmpty()) {
+        recentBallItems
+    } else if (details.recentBalls.isNotBlank()) {
+        LiveMatchEventDetector.parseBalls(details.recentBalls)
+            .reversed()
+            .mapIndexed { idx, token -> RecentBallItem(id = -(idx + 1L), label = token, isNew = false) }
     } else emptyList()
 
-    if (recentBalls.isNotEmpty()) {
+    if (displayBalls.isNotEmpty()) {
         item {
             SectionCard(
                 modifier = Modifier
@@ -737,7 +1083,7 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Recent (Last ${recentBalls.size} balls)",
+                            "Recent (Last ${displayBalls.size} balls)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = TextMain
@@ -749,11 +1095,23 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(recentBalls) { ball ->
-                            val isW = ball.equals("W", ignoreCase = true) || ball.equals("Wicket", ignoreCase = true)
-                            val isFour = ball == "4" || ball.equals("Four", ignoreCase = true)
-                            val isSix = ball == "6" || ball.equals("Six", ignoreCase = true)
+                    val recentRowState = rememberLazyListState()
+                    val newestBall = displayBalls.firstOrNull()
+                    LaunchedEffect(newestBall?.id) {
+                        if (newestBall?.isNew == true) {
+                            recentRowState.animateScrollToItem(0)
+                        }
+                    }
+                    LazyRow(
+                        state = recentRowState,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(displayBalls, key = { it.id }) { item ->
+                            val ball = item.label
+                            val isW = LiveMatchEventDetector.isWicketToken(ball)
+                            val isFour = LiveMatchEventDetector.isFourToken(ball)
+                            val isSix = LiveMatchEventDetector.isSixToken(ball)
+                            val isNb = LiveMatchEventDetector.isNoBallToken(ball)
 
                             val bgColor = when {
                                 isW -> BallWicket
@@ -764,22 +1122,36 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
                             val colored = isW || isFour || isSix
                             val textColor = if (colored) Color.White else TextMain
                             val borderColor = if (colored) bgColor else BorderLight
+                            val pulseColor = when {
+                                isW -> BallWicket
+                                isFour -> BallFour
+                                isSix -> BallSix
+                                isNb -> Color(0xFFF59E0B)
+                                else -> null
+                            }
 
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(bgColor)
-                                    .border(1.dp, borderColor, CircleShape),
-                                contentAlignment = Alignment.Center
+                            PopInBallWrapper(
+                                isNew = item.isNew,
+                                ballKey = item.id,
+                                pulseColor = pulseColor,
+                                modifier = Modifier.animateItem()
                             ) {
-                                Text(
-                                    text = ball,
-                                    color = textColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(bgColor)
+                                        .border(1.dp, borderColor, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = ball,
+                                        color = textColor,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                                    )
+                                }
                             }
                         }
                     }
@@ -793,6 +1165,7 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
         item {
             LastWicketCard(
                 lastWicketText = details.lastWicket,
+                pulseId = lastWicketPulseId,
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 12.dp)
@@ -895,56 +1268,84 @@ private fun LazyListScope.liveTabItems(details: MatchDetails) {
 // ─── REDESIGNED LAST WICKET CARD ──────────────────────────────────────
 
 @Composable
-private fun LastWicketCard(lastWicketText: String, modifier: Modifier = Modifier) {
+private fun LastWicketCard(
+    lastWicketText: String,
+    pulseId: Long? = null,
+    modifier: Modifier = Modifier
+) {
     val shape = MaterialTheme.shapes.large
-    Row(
+    val animatedBorder = rememberLastWicketBorderColor(
+        triggerId = pulseId,
+        baseColor = BorderLight
+    )
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(CardBlue)
-            .border(1.dp, BorderLight, shape)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .border(1.dp, animatedBorder, shape)
     ) {
-        // Red wicket badge
-        Box(
+        LastWicketFlashOverlay(
+            triggerId = pulseId,
+            modifier = Modifier.matchParentSize()
+        )
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(AccentRed.copy(alpha = 0.15f))
-                .border(1.dp, AccentRed.copy(alpha = 0.35f), CircleShape),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "W",
-                color = AccentRed,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            )
-        }
+            // Red wicket badge with spring pop & ripple ring
+            LastWicketBadgeWrapper(triggerId = pulseId) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(AccentRed.copy(alpha = 0.15f))
+                        .border(1.dp, AccentRed.copy(alpha = 0.35f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "W",
+                        color = AccentRed,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+            }
 
-        Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "LAST WICKET",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
-                ),
-                color = AccentRed
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = lastWicketText,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    lineHeight = 18.sp
-                ),
-                color = TextMain
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "LAST WICKET",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    ),
+                    color = AccentRed
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                AnimatedContent(
+                    targetState = lastWicketText,
+                    transitionSpec = {
+                        (slideInVertically(animationSpec = tween(460)) { it / 2 } + fadeIn(tween(380)))
+                            .togetherWith(slideOutVertically(animationSpec = tween(260)) { -it / 2 } + fadeOut(tween(220)))
+                    },
+                    label = "lastWicketText"
+                ) { wicketText ->
+                    Text(
+                        text = wicketText,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 18.sp
+                        ),
+                        color = TextMain
+                    )
+                }
+            }
         }
     }
 }
@@ -962,87 +1363,191 @@ private fun SummaryStat(label: String, value: String) {
 }
 
 @Composable
-private fun LiveBatterRow(bat: BatsmanLive, isLast: Boolean) {
-    Column(
+private fun LiveBatterRow(
+    bat: BatsmanLive,
+    isLast: Boolean,
+    eventType: LiveEventType? = null,
+    eventId: Long? = null
+) {
+    val shakeId = if (eventType == LiveEventType.WICKET) eventId else null
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .clipToBounds()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Neutral text for non-active batsman, green for active on-strike batsman
-            val nameColor = if (bat.onStrike) ActiveBatterGreen else TextMain
-            Text(
-                text = bat.name + if (bat.onStrike) " *" else "",
-                color = nameColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Normal,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
+        when (eventType) {
+            LiveEventType.FOUR -> KineticGlyphSweepOverlay(
+                glyph = "4",
+                accentColor = BallFour,
+                triggerId = eventId,
+                modifier = Modifier.matchParentSize()
             )
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, fontFeatureSettings = "tnum", color = TextMain)) {
-                        append(bat.runs.toString())
-                    }
-                    withStyle(SpanStyle(color = TextSecondary, fontSize = 13.sp, fontFeatureSettings = "tnum")) {
-                        append(" (${bat.balls})")
-                    }
-                }
+            LiveEventType.SIX -> KineticGlyphSweepOverlay(
+                glyph = "6",
+                accentColor = BallSix,
+                triggerId = eventId,
+                modifier = Modifier.matchParentSize()
             )
+            LiveEventType.WICKET -> IconScoutWicketOverlay(
+                triggerId = eventId,
+                modifier = Modifier.matchParentSize()
+            )
+            LiveEventType.FIFTY, LiveEventType.CENTURY -> MilestoneRaisedBatOverlay(
+                eventType = eventType,
+                triggerId = eventId,
+                modifier = Modifier.matchParentSize()
+            )
+            LiveEventType.NO_BALL, null -> Unit
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .wicketShake(shakeId)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            Text("4s: ${bat.fours}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
-            Text("6s: ${bat.sixes}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
-            Text("SR: ${bat.strikeRate}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Neutral text for non-active batsman, green for active, red if just out
+                val nameColor = when {
+                    bat.onStrike -> ActiveBatterGreen
+                    eventType == LiveEventType.WICKET -> AccentRed
+                    else -> TextMain
+                }
+                Text(
+                    text = bat.name + if (bat.onStrike) " *" else "",
+                    color = nameColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RollingValueTransition(targetValue = bat.runs.toString()) { runsText ->
+                        Text(
+                            text = runsText,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextMain,
+                            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                        )
+                    }
+                    Text(
+                        text = " (${bat.balls})",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                RollingValueTransition(
+                    targetValue = bat.fours.toString(),
+                    modifier = Modifier.weight(1f)
+                ) { foursText ->
+                    Text("4s: $foursText", fontSize = 13.sp, color = TextSecondary, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+                RollingValueTransition(
+                    targetValue = bat.sixes.toString(),
+                    modifier = Modifier.weight(1f)
+                ) { sixesText ->
+                    Text("6s: $sixesText", fontSize = 13.sp, color = TextSecondary, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+                RollingValueTransition(
+                    targetValue = bat.strikeRate.toString(),
+                    modifier = Modifier.weight(1f)
+                ) { srText ->
+                    Text("SR: $srText", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+            }
         }
     }
     if (!isLast) HorizontalDivider(color = BorderLight, modifier = Modifier.padding(horizontal = 16.dp))
 }
 
 @Composable
-private fun LiveBowlerRow(bowl: BowlerLive, isLast: Boolean) {
-    Column(
+private fun LiveBowlerRow(
+    bowl: BowlerLive,
+    isLast: Boolean,
+    eventType: LiveEventType? = null,
+    eventId: Long? = null
+) {
+    val isWicket = eventType == LiveEventType.WICKET
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .clipToBounds()
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Bowler name in neutral TextMain
-            Text(
-                text = bowl.name,
-                color = TextMain,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Normal,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
-            )
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, fontFeatureSettings = "tnum", color = TextMain)) {
-                        append(bowl.wickets.toString())
-                    }
-                    withStyle(SpanStyle(color = TextSecondary, fontSize = 13.sp, fontFeatureSettings = "tnum")) {
-                        append("-${bowl.runs}")
-                    }
-                }
+        if (isWicket) {
+            KineticGlyphSweepOverlay(
+                glyph = "W",
+                accentColor = AccentRed,
+                triggerId = eventId,
+                modifier = Modifier.matchParentSize()
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            Text("O: ${bowl.overs}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
-            Text("M: ${bowl.maidens}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
-            Text("ECO: ${bowl.economy}", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.weight(1f), textAlign = TextAlign.End, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Bowler name in neutral TextMain
+                Text(
+                    text = bowl.name,
+                    color = TextMain,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                RollingValueTransition(targetValue = "${bowl.wickets}|${bowl.runs}") { value ->
+                    val wicketsPart = value.substringBefore("|")
+                    val runsPart = value.substringAfter("|")
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, fontFeatureSettings = "tnum", color = TextMain)) {
+                                append(wicketsPart)
+                            }
+                            withStyle(SpanStyle(color = TextSecondary, fontSize = 13.sp, fontFeatureSettings = "tnum")) {
+                                append("-$runsPart")
+                            }
+                        }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                RollingValueTransition(
+                    targetValue = bowl.overs,
+                    modifier = Modifier.weight(1f)
+                ) { oversText ->
+                    Text("O: $oversText", fontSize = 13.sp, color = TextSecondary, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+                RollingValueTransition(
+                    targetValue = bowl.maidens.toString(),
+                    modifier = Modifier.weight(1f)
+                ) { maidensText ->
+                    Text("M: $maidensText", fontSize = 13.sp, color = TextSecondary, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+                RollingValueTransition(
+                    targetValue = bowl.economy.toString(),
+                    modifier = Modifier.weight(1f)
+                ) { ecoText ->
+                    Text("ECO: $ecoText", fontSize = 13.sp, color = TextSecondary, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                }
+            }
         }
     }
     if (!isLast) HorizontalDivider(color = BorderLight, modifier = Modifier.padding(horizontal = 16.dp))

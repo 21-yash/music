@@ -25,7 +25,7 @@ class SportsSocketService @Inject constructor(
     private var consecutiveAuthRebuilds = 0
     private var reconnectJob: kotlinx.coroutines.Job? = null
 
-    private val _matchUpdates = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _matchUpdates = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val matchUpdates: SharedFlow<String> = _matchUpdates
 
     fun connect() {
