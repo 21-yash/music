@@ -22,12 +22,13 @@ export const OFFICIAL_CRICKET_CHANNELS: ReadonlyMap<string, string> = new Map([
   ['UCr9aK3E9n7jW1q9F_6k_t8Q', 'Sri Lanka Cricket'],
   ['UC2t5bjwFrE2h_Q-2l9R6E2w', 'Windies Cricket'],
   ['UC0y6P-6W_R7m5J6z5c-q7Cg', 'BLACKCAPS'],
+  ['UCuKowzPg2-A0FcmyPa3yWug', 'New Zealand Cricket'],
   ['UC8p4g7V_0y_sK2qG5S2tJ2Q', 'Cricket South Africa'],
   ['UCa-0l9X-V5T6n1Q8K-4qG3A', 'Bangladesh Cricket'],
   ['UCF7a7e0-i0u-Q4e4o5f8h1Q', 'Zimbabwe Cricket'],
   ['UCW5C8xS5V5Q4m4y8n7o-4XQ', 'Cricket Ireland'],
   ['UCd1M7xG7tH5uR6S6c3i8w2w', 'Prime Video Sport'],
-  ['UCx2Z-1V6nQ5k8M7l0N7c8bA', 'SonyLIV'],
+  ['UCOQNJjhXwvAScuELTT_i7cQ', 'Sony LIV'],
   ['UCu2X7-3Q1v0m7l8p9q3r6sQ', 'FanCode'],
   ['UCk4f1W6N2J7q4m3x8l9v5Zw', 'The Hundred'],
   ['UCh6g9C3S8V5Q0w3b2q9m1aA', 'Big Bash League'],
@@ -44,6 +45,7 @@ const OFFICIAL_CHANNEL_NAMES = new Set([
   'sri lanka cricket',
   'windies cricket',
   'blackcaps',
+  'new zealand cricket',
   'nz cricket',
   'cricket south africa',
   'bangladesh cricket : the tigers',
@@ -98,10 +100,10 @@ export class YouTubeHighlightsProvider {
         continue;
       }
 
-      // YouTube search returns relative publish strings ("1d ago"), so skip ISO date filtering
       const score = scoreHighlightMatch(match, {
         title: candidate.title,
         publishedAt: null,
+        publishedText: candidate.publishedText,
         durationSeconds: candidate.durationSeconds,
       });
 
@@ -130,7 +132,7 @@ export class YouTubeHighlightsProvider {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 6).map((entry) => entry.highlight);
+    return scored.slice(0, 10).map((entry) => entry.highlight);
   }
 
   private buildSearchQuery(match: MatchCandidateContext): string {
@@ -149,29 +151,115 @@ export class YouTubeHighlightsProvider {
   }
 
   private async searchYouTube(query: string): Promise<ParsedYouTubeVideo[]> {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    // Primary: YouTube Innertube JSON search with gl=IN & hl=en.
+    // Cloud servers (e.g., Render US/EU) bypass EU GDPR consent walls and still receive
+    // India-licensed cricket highlights (e.g., Sony LIV, ACC, NZC).
+    const innertubeResults = await this.searchViaInnertube(query);
+    if (innertubeResults.length > 0) {
+      return innertubeResults;
+    }
+
+    // Fallback: HTML search with SOCS consent cookie + gl=IN
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&gl=IN&hl=en`;
     try {
       const response = await fetch(url, {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
           'Accept-Language': 'en-US,en;q=0.9',
+          Cookie: 'SOCS=CAI',
         },
         signal: AbortSignal.timeout(YOUTUBE_SEARCH_TIMEOUT_MS),
       });
 
       if (!response.ok) {
-        logger.warn({ status: response.status, query }, 'YouTube highlights search failed');
+        logger.warn({ status: response.status, query }, 'YouTube HTML highlights search failed');
         return [];
       }
 
       const html = await response.text();
       return parseYouTubeInitialData(html);
     } catch (error) {
-      logger.warn({ error: (error as Error).message, query }, 'YouTube highlights search error');
+      logger.warn({ error: (error as Error).message, query }, 'YouTube HTML highlights search error');
       return [];
     }
   }
+
+  private async searchViaInnertube(query: string): Promise<ParsedYouTubeVideo[]> {
+    try {
+      const response = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: 'WEB',
+              clientVersion: '2.20260101.00.00',
+              hl: 'en',
+              gl: 'IN',
+            },
+          },
+          query,
+        }),
+        signal: AbortSignal.timeout(YOUTUBE_SEARCH_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        logger.warn({ status: response.status, query }, 'YouTube Innertube search failed');
+        return [];
+      }
+
+      const data = (await response.json()) as Record<string, any>;
+      return extractVideosFromSearchPayload(data);
+    } catch (error) {
+      logger.warn({ error: (error as Error).message, query }, 'YouTube Innertube search error');
+      return [];
+    }
+  }
+}
+
+function extractVideosFromSearchPayload(data: Record<string, any>): ParsedYouTubeVideo[] {
+  const sectionContents =
+    data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
+      ?.contents ?? [];
+
+  const results: ParsedYouTubeVideo[] = [];
+
+  for (const section of sectionContents) {
+    const items = section?.itemSectionRenderer?.contents ?? [];
+    for (const item of items) {
+      const renderer = item?.videoRenderer;
+      if (!renderer?.videoId) continue;
+
+      const title = renderer.title?.runs?.[0]?.text ?? '';
+      const channelName = renderer.ownerText?.runs?.[0]?.text ?? '';
+      const channelId =
+        renderer.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId ?? '';
+      const duration = renderer.lengthText?.simpleText ?? '';
+      const durationSeconds = parseDurationToSeconds(duration);
+      const publishedText = renderer.publishedTimeText?.simpleText ?? null;
+      const thumbnails = renderer.thumbnail?.thumbnails as Array<{ url?: string }> | undefined;
+      const thumbnailUrl = thumbnails?.[thumbnails.length - 1]?.url ?? null;
+
+      results.push({
+        videoId: String(renderer.videoId),
+        title: String(title),
+        channelName: String(channelName),
+        channelId: String(channelId),
+        duration: String(duration),
+        durationSeconds,
+        publishedText: publishedText ? String(publishedText) : null,
+        thumbnailUrl,
+      });
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -184,42 +272,7 @@ export function parseYouTubeInitialData(html: string): ParsedYouTubeVideo[] {
 
   try {
     const data = JSON.parse(match[1]) as Record<string, any>;
-    const sectionContents =
-      data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer
-        ?.contents ?? [];
-
-    const results: ParsedYouTubeVideo[] = [];
-
-    for (const section of sectionContents) {
-      const items = section?.itemSectionRenderer?.contents ?? [];
-      for (const item of items) {
-        const renderer = item?.videoRenderer;
-        if (!renderer?.videoId) continue;
-
-        const title = renderer.title?.runs?.[0]?.text ?? '';
-        const channelName = renderer.ownerText?.runs?.[0]?.text ?? '';
-        const channelId =
-          renderer.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId ?? '';
-        const duration = renderer.lengthText?.simpleText ?? '';
-        const durationSeconds = parseDurationToSeconds(duration);
-        const publishedText = renderer.publishedTimeText?.simpleText ?? null;
-        const thumbnails = renderer.thumbnail?.thumbnails as Array<{ url?: string }> | undefined;
-        const thumbnailUrl = thumbnails?.[thumbnails.length - 1]?.url ?? null;
-
-        results.push({
-          videoId: String(renderer.videoId),
-          title: String(title),
-          channelName: String(channelName),
-          channelId: String(channelId),
-          duration: String(duration),
-          durationSeconds,
-          publishedText: publishedText ? String(publishedText) : null,
-          thumbnailUrl,
-        });
-      }
-    }
-
-    return results;
+    return extractVideosFromSearchPayload(data);
   } catch {
     return [];
   }

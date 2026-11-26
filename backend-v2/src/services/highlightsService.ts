@@ -15,7 +15,7 @@ import { youtubeHighlightsProvider } from '../providers/sports/highlights/YouTub
 
 const CACHE_PREFIX = 'sports:highlights:match:';
 const CACHE_TTL_FOUND_SECONDS = 600; // 10 minutes — safely below Mux JWT expiry
-const CACHE_TTL_EMPTY_SECONDS = 300; // 5 minutes — re-check soon after match ends
+const CACHE_TTL_EMPTY_SECONDS = 60;  // 1 minute — re-check quickly if clips aren't live yet or upstream hiccupped
 
 export interface HighlightsProviderSet {
   bcci: { findHighlights(match: MatchCandidateContext): Promise<MatchHighlight[]> };

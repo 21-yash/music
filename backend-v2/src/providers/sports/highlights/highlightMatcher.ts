@@ -22,6 +22,7 @@ export interface MatchCandidateContext {
 export interface VideoCandidateInput {
   title: string;
   publishedAt: string | null;
+  publishedText?: string | null;
   durationSeconds: number;
 }
 
@@ -48,10 +49,15 @@ const TEAM_ALIASES: Record<string, string[]> = {
   bangladesh: ['ban', 'bangladesh'],
   'bangladesh women': ['ban w', 'banw', 'bangladesh women', 'bangladesh w'],
   afghanistan: ['afg', 'afghanistan'],
+  'afghanistan a': ['afg a', 'afga', 'afghanistan a'],
+  'pakistan a': ['pak a', 'paka', 'pakistan a'],
+  'sri lanka a': ['sl a', 'sla', 'sri lanka a'],
+  'bangladesh a': ['ban a', 'bana', 'bangladesh a'],
   zimbabwe: ['zim', 'zimbabwe'],
   'zimbabwe women': ['zim w', 'zimw', 'zimbabwe women', 'zimbabwe w'],
   ireland: ['ire', 'ireland'],
   'ireland women': ['ire w', 'irew', 'ireland women', 'ireland w'],
+  'hong kong': ['hk', 'hkc', 'hong kong', 'hong kong china', 'hk china'],
   scotland: ['sco', 'scotland'],
   netherlands: ['ned', 'netherlands'],
   nepal: ['nep', 'nepal'],
@@ -202,6 +208,45 @@ function extractHighlightSignalScore(normTitle: string): number {
 }
 
 /**
+ * Parse a relative YouTube publish string (e.g., "2 days ago", "1 year ago",
+ * "Streamed 3 months ago", "1d ago") into an approximate [minDaysAgo, maxDaysAgo] range.
+ */
+export function parseRelativeAgeRangeDays(
+  publishedText: string | null | undefined,
+): [number, number] | null {
+  if (!publishedText) return null;
+  const text = publishedText.toLowerCase().trim();
+  const match = text.match(
+    /(\d+)\s*(second|sec|s|minute|min|m|hour|hr|h|day|d|week|wk|w|month|mo|year|yr|y)s?\s*ago/,
+  );
+  if (!match) return null;
+
+  const value = Number.parseInt(match[1], 10);
+  if (Number.isNaN(value) || value < 0) return null;
+
+  const unit = match[2];
+  if (unit === 'second' || unit === 'sec' || unit === 's' || unit === 'minute' || unit === 'min' || unit === 'm') {
+    return [0, 1];
+  }
+  if (unit === 'hour' || unit === 'hr' || unit === 'h') {
+    return [0, Math.max(1, value / 24 + 0.5)];
+  }
+  if (unit === 'day' || unit === 'd') {
+    return [Math.max(0, value - 0.5), value + 1.5];
+  }
+  if (unit === 'week' || unit === 'wk' || unit === 'w') {
+    return [Math.max(0, value * 7 - 2), value * 7 + 6];
+  }
+  if (unit === 'month' || unit === 'mo') {
+    return [Math.max(0, value * 28 - 5), value * 32 + 10];
+  }
+  if (unit === 'year' || unit === 'yr' || unit === 'y') {
+    return [Math.max(0, value * 365 - 30), value * 366 + 60];
+  }
+  return null;
+}
+
+/**
  * Score a video candidate against a cricket match.
  * Returns null if the candidate is clearly not for this match.
  */
@@ -236,13 +281,43 @@ export function scoreHighlightMatch(
     return null;
   }
 
-  // Date window check when timestamps exist
+  // Explicit year guard: if the video title names tournament year(s) like "2025",
+  // reject if none match the match's year (allowing YYYY-YY season overlap in Jan-Apr).
+  if (match.startTimestamp) {
+    const startDate = new Date(match.startTimestamp);
+    const matchYear = startDate.getUTCFullYear();
+    const matchMonth = startDate.getUTCMonth(); // 0-indexed
+    const titleYears = Array.from(normTitle.matchAll(/\b(20[1-3]\d)\b/g)).map((m) =>
+      Number.parseInt(m[1], 10),
+    );
+    if (titleYears.length > 0) {
+      const seasonAllowed = matchMonth <= 3 ? [matchYear, matchYear - 1] : [matchYear];
+      if (!titleYears.some((y) => seasonAllowed.includes(y))) {
+        return null;
+      }
+    }
+  }
+
+  // Date window check when ISO timestamp exists (BCCI / IPL)
   if (match.startTimestamp && video.publishedAt) {
     const pubMs = Date.parse(video.publishedAt);
     if (!Number.isNaN(pubMs)) {
       const diffDays = (pubMs - match.startTimestamp) / (1000 * 60 * 60 * 24);
       const maxAfterDays = match.format === 'Test' ? 8 : 4;
       if (diffDays < -1 || diffDays > maxAfterDays) {
+        return null;
+      }
+    }
+  }
+
+  // Relative publish-age check (YouTube search returns e.g. "2 days ago", "1 year ago")
+  if (match.startTimestamp && video.publishedText) {
+    const ageRange = parseRelativeAgeRangeDays(video.publishedText);
+    if (ageRange) {
+      const [minAgeDays, maxAgeDays] = ageRange;
+      const matchAgeDays = Math.max(0, (Date.now() - match.startTimestamp) / (1000 * 60 * 60 * 24));
+      const maxAfterGrace = match.format === 'Test' ? 10 : 6;
+      if (minAgeDays > matchAgeDays + 5 || maxAgeDays < matchAgeDays - maxAfterGrace) {
         return null;
       }
     }

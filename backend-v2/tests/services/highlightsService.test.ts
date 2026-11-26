@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   scoreHighlightMatch,
   parseDurationToSeconds,
+  parseRelativeAgeRangeDays,
   isIplMatch,
   isBcciCandidateMatch,
   type MatchCandidateContext,
@@ -102,13 +103,53 @@ describe('Highlight Matcher', () => {
     ).not.toBeNull();
   });
 
-  it('rejects highlights outside valid date window', () => {
+  it('rejects highlights outside valid date window or from prior years', () => {
     const staleVideo = scoreHighlightMatch(indVsZimWomen, {
       title: 'IND-W vs ZIM-W 2024, 3rd ODI: Match Highlights',
       publishedAt: '2024-10-28T11:35:00.000Z',
       durationSeconds: 600,
     });
     expect(staleVideo).toBeNull();
+
+    // Recent AFG A vs HK match must reject 2025/2-years-ago YouTube videos
+    const recentAfgHk: MatchCandidateContext = {
+      team1Name: 'Hong Kong, China',
+      team1Short: 'HKC',
+      team2Name: 'Afghanistan A',
+      team2Short: 'AFGA',
+      series: "ACC Men's Asia Cup Rising Stars 2026",
+      matchDesc: '9th Match, Group A',
+      format: 'ODI',
+      startTimestamp: Date.now() - 3 * 24 * 60 * 60 * 1000,
+    };
+    expect(
+      scoreHighlightMatch(recentAfgHk, {
+        title: "Highlights | Match 9| Afghanistan 'A' v Hong Kong, China | DP World Men's Asia Cup Rising Stars 2026",
+        publishedAt: null,
+        publishedText: '2 days ago',
+        durationSeconds: 1480,
+      }),
+    ).not.toBeNull();
+
+    expect(
+      scoreHighlightMatch(recentAfgHk, {
+        title: 'Afghanistan A vs Hong Kong | Group Stage | Highlights | DP World Asia Cup Rising Stars 2025',
+        publishedAt: null,
+        publishedText: '1 year ago',
+        durationSeconds: 1097,
+      }),
+    ).toBeNull();
+
+    expect(
+      scoreHighlightMatch(recentAfgHk, {
+        title: 'Afghanistan A vs Hong Kong | Highlights',
+        publishedAt: null,
+        publishedText: '2 years ago',
+        durationSeconds: 900,
+      }),
+    ).toBeNull();
+
+    expect(parseRelativeAgeRangeDays('2 days ago')).toEqual([1.5, 3.5]);
   });
 
   it('parses duration strings accurately', () => {
