@@ -3,13 +3,21 @@ package com.synq.features.sports
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.synq.features.music.playback.MusicPlayerManager
 import com.synq.features.sports.data.remote.SportsSocketService
 import com.synq.features.sports.data.dto.MatchDetailsResponseDto
+import com.synq.features.sports.domain.model.HighlightSource
 import com.synq.features.sports.domain.model.MatchDetails
+import com.synq.features.sports.domain.model.MatchHighlight
+import com.synq.features.sports.domain.model.MatchState
 import com.synq.features.sports.domain.model.Scorecard
 import com.synq.features.sports.domain.model.Squad
 import com.synq.features.sports.domain.repository.SportsRepository
+import com.synq.features.sports.highlights.HighlightStreamResolver
+import com.synq.features.sports.highlights.ResolvedHighlightPlayback
+import com.synq.features.sports.highlights.YouTubeDeviceHighlightSearcher
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,18 +31,31 @@ data class MatchDetailsUiState(
     val error: String? = null,
     val details: MatchDetails? = null,
     val scorecard: Scorecard? = null,
-    val squads: Squad? = null
+    val squads: Squad? = null,
+    val highlights: List<MatchHighlight> = emptyList(),
+    val isHighlightsLoading: Boolean = false,
+    val hasLoadedHighlights: Boolean = false,
+    val highlightsError: String? = null,
+    val selectedHighlight: MatchHighlight? = null,
+    val resolvedPlayback: ResolvedHighlightPlayback? = null,
+    val isResolvingStream: Boolean = false,
+    val streamError: String? = null
 )
 
 @HiltViewModel
 class MatchDetailsViewModel @Inject constructor(
     private val repository: SportsRepository,
     private val socketService: SportsSocketService,
+    private val highlightStreamResolver: HighlightStreamResolver,
+    private val youTubeDeviceHighlightSearcher: YouTubeDeviceHighlightSearcher,
+    private val musicPlayerManager: MusicPlayerManager,
     private val json: Json,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val matchId: String = checkNotNull(savedStateHandle["matchId"])
+    private var highlightsJob: Job? = null
+    private var streamResolutionJob: Job? = null
 
     private val _uiState = MutableStateFlow(MatchDetailsUiState())
     val uiState: StateFlow<MatchDetailsUiState> = _uiState.asStateFlow()
@@ -90,6 +111,134 @@ class MatchDetailsViewModel @Inject constructor(
                     _uiState.update { it.copy(squads = squads) }
                 }
             }
+        }
+    }
+
+    fun loadHighlights(forceRefresh: Boolean = false) {
+        val current = _uiState.value
+        if (!forceRefresh && (current.hasLoadedHighlights || current.isHighlightsLoading)) {
+            return
+        }
+
+        highlightsJob?.cancel()
+        _uiState.update { it.copy(isHighlightsLoading = true, highlightsError = null) }
+
+        highlightsJob = viewModelScope.launch {
+            repository.getHighlights(matchId).collect { result ->
+                result.fold(
+                    onSuccess = { backendList ->
+                        val hasOfficialBcciOrIpl = backendList.any {
+                            it.source == HighlightSource.BCCI || it.source == HighlightSource.IPLT20
+                        }
+                        val summary = _uiState.value.details?.summary
+
+                        // If backend returned no BCCI/IPL highlights, also search YouTube from the user's
+                        // own IP so India-geo-restricted channels (Sony LIV, FanCode) appear even when
+                        // the backend runs in another region (e.g. Singapore).
+                        val merged = if (!hasOfficialBcciOrIpl && summary != null && summary.state != MatchState.UPCOMING) {
+                            val deviceList = youTubeDeviceHighlightSearcher.search(summary)
+                            (backendList + deviceList).distinctBy { it.streamTarget }
+                        } else {
+                            backendList
+                        }
+
+                        _uiState.update {
+                            it.copy(
+                                isHighlightsLoading = false,
+                                hasLoadedHighlights = true,
+                                highlights = merged,
+                                highlightsError = null
+                            )
+                        }
+                    },
+                    onFailure = { error ->
+                        val summary = _uiState.value.details?.summary
+                        val deviceList = if (summary != null && summary.state != MatchState.UPCOMING) {
+                            youTubeDeviceHighlightSearcher.search(summary)
+                        } else {
+                            emptyList()
+                        }
+                        if (deviceList.isNotEmpty()) {
+                            _uiState.update {
+                                it.copy(
+                                    isHighlightsLoading = false,
+                                    hasLoadedHighlights = true,
+                                    highlights = deviceList,
+                                    highlightsError = null
+                                )
+                            }
+                        } else {
+                            _uiState.update {
+                                it.copy(
+                                    isHighlightsLoading = false,
+                                    highlightsError = error.message ?: "Failed to load highlights"
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    fun pauseMusicForHighlight() {
+        musicPlayerManager.pause()
+    }
+
+    fun selectHighlight(highlight: MatchHighlight) {
+        // Pause active music playback before starting match highlight video
+        musicPlayerManager.pause()
+
+        streamResolutionJob?.cancel()
+        _uiState.update {
+            it.copy(
+                selectedHighlight = highlight,
+                resolvedPlayback = null,
+                isResolvingStream = true,
+                streamError = null
+            )
+        }
+
+        streamResolutionJob = viewModelScope.launch {
+            val result = highlightStreamResolver.resolve(highlight)
+            result.fold(
+                onSuccess = { resolved ->
+                    _uiState.update {
+                        it.copy(
+                            resolvedPlayback = resolved,
+                            isResolvingStream = false,
+                            streamError = null
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isResolvingStream = false,
+                            streamError = error.message ?: "Unable to play this highlight stream"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun selectQuality(option: com.synq.features.sports.highlights.VideoQualityOption) {
+        _uiState.update { state ->
+            val current = state.resolvedPlayback ?: return@update state
+            state.copy(resolvedPlayback = current.copy(activeQuality = option))
+        }
+    }
+
+    fun clearSelectedHighlight() {
+        streamResolutionJob?.cancel()
+        _uiState.update {
+            it.copy(
+                selectedHighlight = null,
+                resolvedPlayback = null,
+                isResolvingStream = false,
+                streamError = null
+            )
         }
     }
 

@@ -172,3 +172,28 @@ data class PlayerRef(
     val isCaptain: Boolean = false,
     val isKeeper: Boolean = false
 )
+
+// ─── Highlights ──────────────────────────────────────────────────────
+
+enum class HighlightSource {
+    BCCI, IPLT20, YOUTUBE
+}
+
+enum class HighlightPlaybackType {
+    HLS, YOUTUBE
+}
+
+data class MatchHighlight(
+    val id: String,
+    val title: String,
+    val thumbnailUrl: String? = null,
+    val duration: String = "0:00",
+    val durationSeconds: Int = 0,
+    val publishedAt: String? = null,
+    val source: HighlightSource = HighlightSource.YOUTUBE,
+    val playbackType: HighlightPlaybackType = HighlightPlaybackType.YOUTUBE,
+    val streamTarget: String,
+    val externalUrl: String,
+    val publisher: String = "",
+    val playbackHeaders: Map<String, String> = emptyMap()
+)

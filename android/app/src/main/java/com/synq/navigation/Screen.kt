@@ -86,6 +86,19 @@ sealed class Screen(
         fun createRoute(id: String) = "sports/match/$id"
     }
 
+    data class HighlightPlayer(
+        val matchId: String = "{matchId}",
+        val highlightId: String = "{highlightId}"
+    ) : Screen(
+        route = "sports/match/{matchId}/highlights/{highlightId}",
+        label = "Highlight Player",
+        selectedIcon = Icons.Filled.SportsCricket,
+        unselectedIcon = Icons.Outlined.SportsCricket,
+    ) {
+        fun createRoute(matchId: String, highlightId: String) =
+            "sports/match/${android.net.Uri.encode(matchId)}/highlights/${android.net.Uri.encode(highlightId)}"
+    }
+
     data class Artist(val artistId: String = "{artistId}") : Screen(
         route = "music/artist/$artistId",
         label = "Artist",

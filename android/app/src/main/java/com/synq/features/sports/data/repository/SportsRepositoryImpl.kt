@@ -51,4 +51,12 @@ class SportsRepositoryImpl @Inject constructor(
             is AppResult.Error -> emit(Result.failure(Exception(result.error.message)))
         }
     }
+
+    override fun getHighlights(matchId: String): Flow<Result<List<com.synq.features.sports.domain.model.MatchHighlight>>> = flow {
+        val result = safeApiCall { api.getHighlights(matchId) }
+        when (result) {
+            is AppResult.Success -> emit(Result.success(result.data.highlights.map { it.toDomain() }))
+            is AppResult.Error -> emit(Result.failure(Exception(result.error.message)))
+        }
+    }
 }

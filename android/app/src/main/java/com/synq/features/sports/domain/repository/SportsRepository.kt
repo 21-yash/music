@@ -13,4 +13,5 @@ interface SportsRepository {
     fun getMatchDetails(matchId: String): Flow<Result<com.synq.features.sports.domain.model.MatchDetails>>
     fun getScorecard(matchId: String): Flow<Result<com.synq.features.sports.domain.model.Scorecard>>
     fun getSquads(matchId: String): Flow<Result<com.synq.features.sports.domain.model.Squad>>
+    fun getHighlights(matchId: String): Flow<Result<List<com.synq.features.sports.domain.model.MatchHighlight>>>
 }

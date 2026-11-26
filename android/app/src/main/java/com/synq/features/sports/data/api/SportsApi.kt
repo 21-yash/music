@@ -28,4 +28,9 @@ interface SportsApi {
     suspend fun getSquads(
         @Path("matchId") matchId: String
     ): ApiResponse<SquadResponseDto>
+
+    @GET("sports/cricket/matches/{matchId}/highlights")
+    suspend fun getHighlights(
+        @Path("matchId") matchId: String
+    ): ApiResponse<HighlightsResponseDto>
 }

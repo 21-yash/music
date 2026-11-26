@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.synq.features.sports.domain.model.*
+import com.synq.features.sports.highlights.highlightsTabItems
 import com.synq.ui.SynqLoadingIndicator
 import com.synq.ui.motion.MotionTokens
 import com.synq.ui.motion.pressable
@@ -74,14 +76,21 @@ private val ColEco = 44.dp
 @Composable
 fun MatchDetailsScreen(
     onBackClick: () -> Unit,
+    onHighlightClick: (matchId: String, highlightId: String) -> Unit = { _, _ -> },
     viewModel: MatchDetailsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Tab State
-    val tabs = listOf("Info", "Live", "Scorecard", "Squads")
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
-    var selectedInning by remember { mutableIntStateOf(0) }
+    // Tab State (rememberSaveable preserves tab across forward navigation to HighlightPlayerScreen)
+    val tabs = listOf("Info", "Live", "Scorecard", "Squads", "Highlights")
+    var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var selectedInning by rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(selectedTabIndex) {
+        if (selectedTabIndex == 4) {
+            viewModel.loadHighlights()
+        }
+    }
 
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -139,7 +148,7 @@ fun MatchDetailsScreen(
                     ) {
                         // Match Card (scrolls)
                         item(key = "match_card") {
-                            MatchCard(
+                            MatchDetailsSummaryCard(
                                 summary = details.summary,
                                 modifier = Modifier
                                     .padding(horizontal = 20.dp)
@@ -214,6 +223,16 @@ fun MatchDetailsScreen(
                                 onInningSelected = { selectedInning = it }
                             )
                             3 -> squadsTabItems(squads = uiState.squads, state = details.summary.state)
+                            4 -> highlightsTabItems(
+                                highlights = uiState.highlights,
+                                isLoading = uiState.isHighlightsLoading,
+                                error = uiState.highlightsError,
+                                matchState = details.summary.state,
+                                onSelectHighlight = { highlight ->
+                                    onHighlightClick(details.summary.id, highlight.id)
+                                },
+                                onRetryLoad = { viewModel.loadHighlights(forceRefresh = true) }
+                            )
                         }
                     }
                 }
@@ -393,7 +412,7 @@ private fun CustomHeader(title: String, subtitle: String, onBackClick: () -> Uni
 // ─── MATCH CARD ───────────────────────────────────────────────────────
 
 @Composable
-private fun MatchCard(
+internal fun MatchDetailsSummaryCard(
     summary: MatchSummary,
     modifier: Modifier = Modifier
 ) {

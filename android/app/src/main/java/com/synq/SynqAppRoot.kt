@@ -230,7 +230,9 @@ private fun MainAppContent(
     // Bottom bar is visible on all bottom-nav tabs, hidden on sub-pages
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
     val isPlaylistEditing by rootViewModel.isPlaylistEditing.collectAsState()
-    val showMiniPlayer = currentRoute != Screen.MatchDetails().route && !isPlaylistEditing
+    val showMiniPlayer = currentRoute != Screen.MatchDetails().route &&
+        currentRoute != Screen.HighlightPlayer().route &&
+        !isPlaylistEditing
 
     val user by rootViewModel.user.collectAsState()
     val showSignOutConfirmation by rootViewModel.showSignOutDialog.collectAsState()

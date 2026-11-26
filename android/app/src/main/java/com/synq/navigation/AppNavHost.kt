@@ -32,7 +32,7 @@ import com.synq.features.sports.SportsScreen
  * slide animations between bottom-nav destinations.
  */
 
-private val detailRoutes = listOf("match_details", "artist", "playlist", "album", "search", "auth", "music/jam", "music/popular_artists", "music/playlists")
+private val detailRoutes = listOf("match_details", "sports/match", "artist", "playlist", "album", "search", "auth", "music/jam", "music/popular_artists", "music/playlists")
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -212,6 +212,29 @@ fun AppNavHost(
             route = Screen.MatchDetails().route,
         ) {
             com.synq.features.sports.MatchDetailsScreen(
+                onBackClick = { navController.popBackStack() },
+                onHighlightClick = { matchId, highlightId ->
+                    navController.navigate(Screen.HighlightPlayer().createRoute(matchId, highlightId))
+                }
+            )
+        }
+
+        composable(
+            route = Screen.HighlightPlayer().route,
+        ) { backStackEntry ->
+            val encodedHighlightId = backStackEntry.arguments?.getString("highlightId") ?: ""
+            val highlightId = android.net.Uri.decode(encodedHighlightId)
+            val parentEntry = androidx.compose.runtime.remember(backStackEntry) {
+                runCatching { navController.getBackStackEntry(Screen.MatchDetails().route) }.getOrNull()
+            }
+            val matchDetailsViewModel: com.synq.features.sports.MatchDetailsViewModel = if (parentEntry != null) {
+                androidx.hilt.navigation.compose.hiltViewModel(parentEntry)
+            } else {
+                androidx.hilt.navigation.compose.hiltViewModel()
+            }
+            com.synq.features.sports.highlights.HighlightPlayerScreen(
+                highlightId = highlightId,
+                viewModel = matchDetailsViewModel,
                 onBackClick = { navController.popBackStack() }
             )
         }

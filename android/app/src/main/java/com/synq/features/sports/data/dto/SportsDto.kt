@@ -343,3 +343,54 @@ data class PlayerRefDto(
         id, name, role, imageUrl, isCaptain, isKeeper
     )
 }
+
+// ─── Highlights ──────────────────────────────────────────────────────
+
+@Serializable
+data class MatchHighlightDto(
+    val id: String,
+    val title: String,
+    val thumbnailUrl: String? = null,
+    val duration: String = "0:00",
+    val durationSeconds: Int = 0,
+    val publishedAt: String? = null,
+    val source: String = "youtube",
+    val playbackType: String = "youtube",
+    val streamTarget: String,
+    val externalUrl: String,
+    val publisher: String = "",
+    val playbackHeaders: Map<String, String> = emptyMap()
+) {
+    fun toDomain(): com.synq.features.sports.domain.model.MatchHighlight {
+        val mappedSource = when (source.lowercase()) {
+            "bcci" -> com.synq.features.sports.domain.model.HighlightSource.BCCI
+            "iplt20" -> com.synq.features.sports.domain.model.HighlightSource.IPLT20
+            else -> com.synq.features.sports.domain.model.HighlightSource.YOUTUBE
+        }
+        val mappedPlayback = when (playbackType.lowercase()) {
+            "hls" -> com.synq.features.sports.domain.model.HighlightPlaybackType.HLS
+            else -> com.synq.features.sports.domain.model.HighlightPlaybackType.YOUTUBE
+        }
+        return com.synq.features.sports.domain.model.MatchHighlight(
+            id = id,
+            title = title,
+            thumbnailUrl = thumbnailUrl,
+            duration = duration,
+            durationSeconds = durationSeconds,
+            publishedAt = publishedAt,
+            source = mappedSource,
+            playbackType = mappedPlayback,
+            streamTarget = streamTarget,
+            externalUrl = externalUrl,
+            publisher = publisher,
+            playbackHeaders = playbackHeaders
+        )
+    }
+}
+
+@Serializable
+data class HighlightsResponseDto(
+    val matchId: String,
+    val highlights: List<MatchHighlightDto> = emptyList(),
+    val fetchedAt: String
+)
