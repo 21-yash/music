@@ -16,6 +16,7 @@ export class SportsWorker {
   private intervalMs: number;
   private timer: NodeJS.Timeout | null = null;
   private matchHashes: Map<string, string> = new Map();
+  private lastProgress: Map<string, { balls: number; runs: number; wkts: number; inningsCount: number }> = new Map();
 
   constructor(io: Server, intervalMs: number = 15_000) {
     this.io = io;
@@ -52,14 +53,21 @@ export class SportsWorker {
         const result = await getMatchDetails(matchId, true); // forceRefresh = true
         if (!result) continue;
 
-        // 3. Compare with previous state to avoid spamming identical updates
+        // 3. Reject stale CDN rollback for the same active innings before broadcasting
+        if (result.match.isLive && this.isStaleRollback(matchId, result.match)) {
+          logger.warn({ matchId }, 'Skipped stale Cricbuzz CDN rollback snapshot');
+          continue;
+        }
+
+        // 4. Compare with previous state to avoid spamming identical updates
         const currentHash = this.hashPayload(result.match);
         const previousHash = this.matchHashes.get(matchId);
 
         if (currentHash !== previousHash) {
           this.matchHashes.set(matchId, currentHash);
+          this.recordProgress(matchId, result.match);
           
-          // 4. Broadcast to everyone in the room
+          // 5. Broadcast to everyone in the room
           this.io.to(`match:${matchId}`).emit('match_update', result);
           logger.info({ matchId }, 'Broadcasted match update');
         }
@@ -85,5 +93,56 @@ export class SportsWorker {
 
   private hashPayload(payload: unknown): string {
     return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  private extractProgress(match: {
+    team1Score?: string | null;
+    team2Score?: string | null;
+    liveScore?: { score?: string } | null;
+  }): { balls: number; runs: number; wkts: number; inningsCount: number } | null {
+    const s1 = (match.team1Score || '').trim();
+    const s2 = (match.team2Score || '').trim();
+    const countInn = (s: string) =>
+      !s || /^yet to bat$/i.test(s) ? 0 : s.split(' & ').filter(Boolean).length;
+    const inningsCount = countInn(s1) + countInn(s2);
+    const active = match.liveScore?.score?.trim() || (countInn(s2) > 0 ? s2 : s1);
+    const m = active.match(/(\d+)(?:[/-](\d+))?\s*\((\d+)(?:\.(\d+))?/);
+    if (!m) return null;
+    const runs = Number(m[1] || 0);
+    const wkts = Number(m[2] || 0);
+    const balls = Number(m[3] || 0) * 6 + Number(m[4] || 0);
+    return { balls, runs, wkts, inningsCount };
+  }
+
+  private isStaleRollback(
+    matchId: string,
+    match: {
+      team1Score?: string | null;
+      team2Score?: string | null;
+      liveScore?: { score?: string } | null;
+    },
+  ): boolean {
+    const prev = this.lastProgress.get(matchId);
+    const next = this.extractProgress(match);
+    if (!prev || !next) return false;
+    if (next.inningsCount !== prev.inningsCount) return false;
+    if (next.balls < prev.balls) return true;
+    if (next.wkts < prev.wkts) return true;
+    if (next.balls <= prev.balls && next.runs < prev.runs) return true;
+    return false;
+  }
+
+  private recordProgress(
+    matchId: string,
+    match: {
+      team1Score?: string | null;
+      team2Score?: string | null;
+      liveScore?: { score?: string } | null;
+    },
+  ): void {
+    const prog = this.extractProgress(match);
+    if (prog) {
+      this.lastProgress.set(matchId, prog);
+    }
   }
 }

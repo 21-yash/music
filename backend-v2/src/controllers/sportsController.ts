@@ -68,8 +68,9 @@ export async function getMatchDetails(req: Request, res: Response, next: NextFun
 export async function getScorecard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const matchId = req.params.matchId as string;
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
-    const result = await sportsService.getScorecard(matchId);
+    const result = await sportsService.getScorecard(matchId, forceRefresh);
     if (!result) {
       throw new NotFoundError('Scorecard');
     }

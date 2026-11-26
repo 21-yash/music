@@ -33,7 +33,7 @@ const CACHE_TTL = {
   matchesUpcoming: 300,  // 5 minutes — schedule rarely changes
   matchesRecent: 300,    // 5 minutes — results are final
   matchDetails: 15,      // 15 seconds — live commentary
-  scorecard: 30,         // 30 seconds — per-over updates
+  scorecard: 15,         // 15 seconds — stay in sync with live details
   squads: 300,           // 5 minutes — static once announced
   slugMap: 86400,        // 24 hours — slugs don't change for a match
 } as const;
@@ -137,11 +137,14 @@ export async function getMatchDetails(
  */
 export async function getScorecard(
   matchId: string,
+  forceRefresh: boolean = false,
 ): Promise<{ scorecard: Scorecard; fetchedAt: string } | null> {
   const cacheKey = `${CACHE_PREFIX.scorecard}${matchId}`;
 
-  const cached = await getFromCache<{ scorecard: Scorecard; fetchedAt: string }>(cacheKey);
-  if (cached) return cached;
+  if (!forceRefresh) {
+    const cached = await getFromCache<{ scorecard: Scorecard; fetchedAt: string }>(cacheKey);
+    if (cached) return cached;
+  }
 
   const slug = await getSlug(matchId);
   if (!slug) {

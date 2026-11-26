@@ -24,6 +24,8 @@ const CRICBUZZ_HEADERS: Record<string, string> = {
     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5',
   Referer: 'https://m.cricbuzz.com/',
+  'Cache-Control': 'no-cache, no-store, max-age=0',
+  Pragma: 'no-cache',
 };
 
 /**
@@ -41,6 +43,7 @@ export async function fetchCricbuzzPage(
     try {
       const response = await fetch(url, {
         headers: CRICBUZZ_HEADERS,
+        cache: 'no-store',
         signal: AbortSignal.timeout(timeoutMs),
       });
 

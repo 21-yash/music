@@ -386,8 +386,11 @@ export function mapMatchDetails(
       if (commentary.length >= 6) break;
     }
   }
-    const venueInfo: any = header.venueInfo || {};
-    const venue = [venueInfo.ground, venueInfo.city].filter(Boolean).join(', ');
+    const venueObj: any =
+      (header.venue && typeof header.venue === 'object' ? header.venue : null) ||
+      (header.venueInfo && typeof header.venueInfo === 'object' ? header.venueInfo : null) ||
+      {};
+    const venue = [venueObj.ground || venueObj.name, venueObj.city].filter(Boolean).join(', ');
 
   const rawOversRem = String(miniscore.oversRem || '');
   const oversLeft = (rawOversRem && rawOversRem !== "undefined" && rawOversRem !== "$undefined") ? rawOversRem : '';
