@@ -18,4 +18,17 @@ export type {
   Powerplay,
   Squad,
   PlayerRef,
+  HighlightSource,
+  HighlightPlaybackType,
+  MatchHighlight,
+  MatchHighlightsResult,
 } from './types';
+export {
+  bcciHighlightsProvider,
+  iplHighlightsProvider,
+  MuxBffHighlightsProvider,
+} from './highlights/MuxBffHighlightsProvider';
+export {
+  youtubeHighlightsProvider,
+  YouTubeHighlightsProvider,
+} from './highlights/YouTubeHighlightsProvider';

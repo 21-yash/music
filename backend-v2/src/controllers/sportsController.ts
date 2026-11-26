@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as sportsService from '../services/sportsService';
+import * as highlightsService from '../services/highlightsService';
 import { sendSuccess } from '../utils/response';
 import { NotFoundError } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -97,6 +98,26 @@ export async function getSquads(req: Request, res: Response, next: NextFunction)
     sendSuccess(res, result);
   } catch (error) {
     logger.error({ error, matchId: req.params.matchId }, 'Failed to get squads');
+    next(error);
+  }
+}
+
+/**
+ * Get highlight videos for a match (BCCI.tv, IPLT20.com, or official YouTube channels).
+ */
+export async function getHighlights(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const matchId = req.params.matchId as string;
+
+    const result = await highlightsService.getMatchHighlights(matchId);
+    if (!result) {
+      throw new NotFoundError('Match');
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=180');
+    sendSuccess(res, result);
+  } catch (error) {
+    logger.error({ error, matchId: req.params.matchId }, 'Failed to get match highlights');
     next(error);
   }
 }

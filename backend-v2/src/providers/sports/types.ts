@@ -164,3 +164,30 @@ export interface PlayerRef {
   isCaptain: boolean;
   isKeeper: boolean;
 }
+
+// ─── Highlights ──────────────────────────────────────────────────────
+
+export type HighlightSource = 'bcci' | 'iplt20' | 'youtube';
+
+export type HighlightPlaybackType = 'hls' | 'youtube';
+
+export interface MatchHighlight {
+  id: string;
+  title: string;
+  thumbnailUrl: string | null;
+  duration: string;
+  durationSeconds: number;
+  publishedAt: string | null;
+  source: HighlightSource;
+  playbackType: HighlightPlaybackType;
+  streamTarget: string;
+  externalUrl: string;
+  publisher: string;
+  playbackHeaders?: Record<string, string>;
+}
+
+export interface MatchHighlightsResult {
+  matchId: string;
+  highlights: MatchHighlight[];
+  fetchedAt: string;
+}

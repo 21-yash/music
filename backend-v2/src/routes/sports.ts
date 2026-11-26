@@ -16,6 +16,7 @@ import { matchesSchema, matchIdSchema } from './schemas/sportsSchemas';
  *   GET /matches/:matchId                     — Full match details
  *   GET /matches/:matchId/scorecard           — Full scorecard
  *   GET /matches/:matchId/squads              — Playing XI & bench
+ *   GET /matches/:matchId/highlights          — Match highlight videos
  */
 const router = Router();
 
@@ -46,6 +47,12 @@ router.get(
   '/matches/:matchId/squads',
   validate(matchIdSchema),
   sportsController.getSquads,
+);
+
+router.get(
+  '/matches/:matchId/highlights',
+  validate(matchIdSchema),
+  sportsController.getHighlights,
 );
 
 export default router;
