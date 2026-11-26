@@ -29,7 +29,9 @@ export const OFFICIAL_CRICKET_CHANNELS: ReadonlyMap<string, string> = new Map([
   ['UCW5C8xS5V5Q4m4y8n7o-4XQ', 'Cricket Ireland'],
   ['UCd1M7xG7tH5uR6S6c3i8w2w', 'Prime Video Sport'],
   ['UCOQNJjhXwvAScuELTT_i7cQ', 'Sony LIV'],
-  ['UCu2X7-3Q1v0m7l8p9q3r6sQ', 'FanCode'],
+  ['UC_WKb6N9iTGc77hxwXLDrbA', 'Sony Sports Network'],
+  ['UCF10AG_t1AYW3mlmX7g1VJA', 'FanCode'],
+  ['UCNU0Vv6U1xZS82cIQrgDeqw', 'Rabbitholebd Sports'],
   ['UCk4f1W6N2J7q4m3x8l9v5Zw', 'The Hundred'],
   ['UCh6g9C3S8V5Q0w3b2q9m1aA', 'Big Bash League'],
   ['UCJ0m4W8w5N0p6v2f4q7e3rA', 'SA20'],
@@ -60,7 +62,9 @@ const OFFICIAL_CHANNEL_NAMES = new Set([
   'pakistan super league',
   'sony liv',
   'sonyliv',
+  'sony sports network',
   'fancode',
+  'rabbitholebd sports',
   'prime video sport',
 ]);
 
