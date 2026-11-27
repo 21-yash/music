@@ -35,6 +35,11 @@ const envSchema = z.object({
 
   // App internal API key (min 32 characters)
   APP_API_KEY: z.string().min(32, 'APP_API_KEY is required and must be at least 32 characters'),
+
+  // Firebase Admin SDK (optional at startup so dev/tests run cleanly before FCM credentials are configured)
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

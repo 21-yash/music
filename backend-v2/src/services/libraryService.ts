@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { LikedSong, Playlist, FollowedTeam } from '../models';
 import { NotFoundError, BadRequestError } from '../utils/errors';
 import { upgradeImageUrl } from '../providers/music/jiosaavn/jiosaavnMapper';
+import { sportsNotifier } from '../jobs/sportsNotifier';
 
 // ─── Liked Songs ─────────────────────────────────────────────────────────────
 
@@ -520,6 +521,8 @@ export async function followTeam(userId: string, data: FollowTeamInput) {
       setDefaultsOnInsert: true,
     },
   );
+
+  void sportsNotifier.requestDiscoverySweep();
 
   return {
     teamId: team.teamId,

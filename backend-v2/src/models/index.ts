@@ -13,3 +13,10 @@ export type { IFollowedTeam } from './FollowedTeam';
 export { Invite } from './Invite';
 export type { IInvite } from './Invite';
 
+export { NotificationSettings } from './NotificationSettings';
+export type {
+  INotificationSettings,
+  IFcmDeviceToken,
+  ISportsNotificationPrefs,
+} from './NotificationSettings';
+

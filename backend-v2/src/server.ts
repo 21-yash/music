@@ -12,6 +12,7 @@ import { initSportsService } from './services/sportsService';
 import { CricbuzzProvider } from './providers/sports/cricket/cricbuzzProvider';
 import { jam2Store } from './jam2/store';
 import { jam2Manager } from './jam2/manager';
+import { sportsNotifier } from './jobs/sportsNotifier';
 
 /**
  * Application entry point.
@@ -51,6 +52,7 @@ async function start(): Promise<void> {
 
     // ─── Initialize Socket.IO ──────────────────────────────────
     initializeSocketIO(server);
+    sportsNotifier.start();
 
     // ─── Start listening ───────────────────────────────────────
     server.listen(env.PORT, () => {
@@ -79,6 +81,7 @@ async function start(): Promise<void> {
 
       jam2Manager.notifyServerRestart();
       jam2Manager.stop();
+      sportsNotifier.stop();
       await jam2Store.flushAllDirty();
 
       // Stop accepting new connections

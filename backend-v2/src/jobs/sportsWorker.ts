@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
 import { getMatchDetails } from '../services/sportsService';
+import { sportsNotifier } from './sportsNotifier';
 import crypto from 'crypto';
 
 /**
@@ -66,7 +67,8 @@ export class SportsWorker {
         if (currentHash !== previousHash) {
           this.matchHashes.set(matchId, currentHash);
           this.recordProgress(matchId, result.match);
-          
+          void sportsNotifier.onLiveDetailsObserved(result.match);
+
           // 5. Broadcast to everyone in the room
           this.io.to(`match:${matchId}`).emit('match_update', result);
           logger.info({ matchId }, 'Broadcasted match update');
