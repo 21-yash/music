@@ -42,6 +42,25 @@ object PlaybackCommandRouter {
         }
     }
 
+    fun isSkipCommand(playerCommand: Int): Boolean {
+        return playerCommand == Player.COMMAND_SEEK_TO_NEXT ||
+            playerCommand == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+            playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS ||
+            playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+    }
+
+    /** Ensures notification bar and lock-screen controls keep skip buttons active even with a single ExoPlayer item. */
+    fun withSkipCommands(commands: Player.Commands): Player.Commands {
+        return commands.buildUpon()
+            .addAll(
+                Player.COMMAND_SEEK_TO_NEXT,
+                Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_PREVIOUS,
+                Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM
+            )
+            .build()
+    }
+
     fun mapJamCommand(playerCommand: Int, canPlayback: Boolean = true): Action? {
         return when (playerCommand) {
             Player.COMMAND_PLAY_PAUSE -> Action.TOGGLE

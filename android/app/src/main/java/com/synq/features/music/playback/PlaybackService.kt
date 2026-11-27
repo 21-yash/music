@@ -27,17 +27,198 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var jamSessionManagerProvider: javax.inject.Provider<com.synq.features.music.jam.JamSessionManager>
 
+    @Inject
+    lateinit var musicPlayerManagerProvider: javax.inject.Provider<MusicPlayerManager>
+
     private var mediaSession: MediaSession? = null
     private var player: ExoPlayer? = null
     private var jamAwarePlayer: JamAwarePlayer? = null
 
     class JamAwarePlayer(
         player: Player,
-        private val jamSessionManagerProvider: javax.inject.Provider<com.synq.features.music.jam.JamSessionManager>
+        private val jamSessionManagerProvider: javax.inject.Provider<com.synq.features.music.jam.JamSessionManager>,
+        private val musicPlayerManagerProvider: javax.inject.Provider<MusicPlayerManager>
     ) : ForwardingPlayer(player) {
 
         @Volatile
         var isCurrentSeekExternal: Boolean = false
+
+        private val listenerWrappers = java.util.IdentityHashMap<Player.Listener, Player.Listener>()
+
+        override fun getAvailableCommands(): Player.Commands {
+            return PlaybackCommandRouter.withSkipCommands(super.getAvailableCommands())
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            return if (PlaybackCommandRouter.isSkipCommand(command)) {
+                true
+            } else {
+                super.isCommandAvailable(command)
+            }
+        }
+
+        override fun addListener(listener: Player.Listener) {
+            // Forward all Player.Listener callbacks explicitly because Kotlin `by` delegation does not forward Java default methods.
+            val wrapper = synchronized(listenerWrappers) {
+                listenerWrappers.getOrPut(listener) {
+                    ForwardingSkipListener(listener)
+                }
+            }
+            super.addListener(wrapper)
+        }
+
+        private class ForwardingSkipListener(
+            private val delegate: Player.Listener
+        ) : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) =
+                delegate.onEvents(player, events)
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) =
+                delegate.onTimelineChanged(timeline, reason)
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) =
+                delegate.onMediaItemTransition(mediaItem, reason)
+
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) =
+                delegate.onTracksChanged(tracks)
+
+            override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) =
+                delegate.onMediaMetadataChanged(mediaMetadata)
+
+            override fun onPlaylistMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) =
+                delegate.onPlaylistMetadataChanged(mediaMetadata)
+
+            override fun onIsLoadingChanged(isLoading: Boolean) =
+                delegate.onIsLoadingChanged(isLoading)
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onLoadingChanged(isLoading: Boolean) =
+                delegate.onLoadingChanged(isLoading)
+
+            override fun onAvailableCommandsChanged(availableCommands: Player.Commands) =
+                delegate.onAvailableCommandsChanged(
+                    PlaybackCommandRouter.withSkipCommands(availableCommands)
+                )
+
+            override fun onTrackSelectionParametersChanged(
+                parameters: androidx.media3.common.TrackSelectionParameters
+            ) = delegate.onTrackSelectionParametersChanged(parameters)
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) =
+                delegate.onPlayerStateChanged(playWhenReady, playbackState)
+
+            override fun onPlaybackStateChanged(playbackState: Int) =
+                delegate.onPlaybackStateChanged(playbackState)
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) =
+                delegate.onPlayWhenReadyChanged(playWhenReady, reason)
+
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) =
+                delegate.onPlaybackSuppressionReasonChanged(playbackSuppressionReason)
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) =
+                delegate.onIsPlayingChanged(isPlaying)
+
+            override fun onRepeatModeChanged(repeatMode: Int) =
+                delegate.onRepeatModeChanged(repeatMode)
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) =
+                delegate.onShuffleModeEnabledChanged(shuffleModeEnabled)
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) =
+                delegate.onPlayerError(error)
+
+            override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) =
+                delegate.onPlayerErrorChanged(error)
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onPositionDiscontinuity(reason: Int) =
+                delegate.onPositionDiscontinuity(reason)
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) = delegate.onPositionDiscontinuity(oldPosition, newPosition, reason)
+
+            override fun onPlaybackParametersChanged(
+                playbackParameters: androidx.media3.common.PlaybackParameters
+            ) = delegate.onPlaybackParametersChanged(playbackParameters)
+
+            override fun onSeekBackIncrementChanged(seekBackIncrementMs: Long) =
+                delegate.onSeekBackIncrementChanged(seekBackIncrementMs)
+
+            override fun onSeekForwardIncrementChanged(seekForwardIncrementMs: Long) =
+                delegate.onSeekForwardIncrementChanged(seekForwardIncrementMs)
+
+            override fun onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs: Long) =
+                delegate.onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs)
+
+            override fun onAudioSessionIdChanged(audioSessionId: Int) =
+                delegate.onAudioSessionIdChanged(audioSessionId)
+
+            override fun onAudioAttributesChanged(audioAttributes: AudioAttributes) =
+                delegate.onAudioAttributesChanged(audioAttributes)
+
+            override fun onVolumeChanged(volume: Float) =
+                delegate.onVolumeChanged(volume)
+
+            override fun onSkipSilenceEnabledChanged(skipSilenceEnabled: Boolean) =
+                delegate.onSkipSilenceEnabledChanged(skipSilenceEnabled)
+
+            override fun onDeviceInfoChanged(deviceInfo: androidx.media3.common.DeviceInfo) =
+                delegate.onDeviceInfoChanged(deviceInfo)
+
+            override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) =
+                delegate.onDeviceVolumeChanged(volume, muted)
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) =
+                delegate.onVideoSizeChanged(videoSize)
+
+            override fun onSurfaceSizeChanged(width: Int, height: Int) =
+                delegate.onSurfaceSizeChanged(width, height)
+
+            override fun onRenderedFirstFrame() =
+                delegate.onRenderedFirstFrame()
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onCues(cues: List<androidx.media3.common.text.Cue>) =
+                delegate.onCues(cues)
+
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) =
+                delegate.onCues(cueGroup)
+
+            override fun onMetadata(metadata: androidx.media3.common.Metadata) =
+                delegate.onMetadata(metadata)
+        }
+
+        override fun removeListener(listener: Player.Listener) {
+            val wrapper = synchronized(listenerWrappers) {
+                listenerWrappers.remove(listener)
+            }
+            super.removeListener(wrapper ?: listener)
+        }
+
+        override fun seekToNext() {
+            musicPlayerManagerProvider.get().skipToNext()
+        }
+
+        override fun seekToNextMediaItem() {
+            musicPlayerManagerProvider.get().skipToNext()
+        }
+
+        override fun seekToPrevious() {
+            musicPlayerManagerProvider.get().skipToPrevious()
+        }
+
+        override fun seekToPreviousMediaItem() {
+            musicPlayerManagerProvider.get().skipToPrevious()
+        }
 
         override fun seekTo(positionMs: Long) {
             seekTo(currentMediaItemIndex, positionMs)
@@ -186,7 +367,11 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        val wrappedPlayer = JamAwarePlayer(player!!, jamSessionManagerProvider)
+        val wrappedPlayer = JamAwarePlayer(
+            player = player!!,
+            jamSessionManagerProvider = jamSessionManagerProvider,
+            musicPlayerManagerProvider = musicPlayerManagerProvider
+        )
         jamAwarePlayer = wrappedPlayer
 
         mediaSession = MediaSession.Builder(this, wrappedPlayer)
@@ -196,7 +381,7 @@ class PlaybackService : MediaSessionService() {
         val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
             .build()
             .apply {
-                setSmallIcon(R.drawable.ic_stat_synq)
+                setSmallIcon(R.drawable.ic_notification)
             }
         setMediaNotificationProvider(notificationProvider)
     }
