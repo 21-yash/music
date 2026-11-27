@@ -60,6 +60,7 @@ fun LibraryScreen(
     val likedCount by viewModel.likedCount.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val followedTeams by viewModel.followedTeams.collectAsState()
+    val isSportsEnabled by viewModel.isSportsEnabled.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
     val showCreateDialog by viewModel.showCreatePlaylistDialog.collectAsState()
     var songToAddToPlaylist by remember { mutableStateOf<Song?>(null) }
@@ -68,6 +69,16 @@ fun LibraryScreen(
     val likedSongIds = remember(likedSongs) { likedSongs.map { it.songId }.toSet() }
 
     val lazyListState = rememberLazyListState()
+    val chipsListState = rememberLazyListState()
+    val visibleTabs = remember(isSportsEnabled) {
+        if (isSportsEnabled) LibraryTab.entries else LibraryTab.entries.filter { it != LibraryTab.TEAMS }
+    }
+    LaunchedEffect(selectedTab, visibleTabs) {
+        val idx = visibleTabs.indexOf(selectedTab)
+        if (idx >= 0) {
+            chipsListState.animateScrollToItem(idx)
+        }
+    }
     val isScrolled by remember {
         derivedStateOf {
             lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 24
@@ -164,7 +175,7 @@ fun LibraryScreen(
             item(key = "library_app_header") {
                 AppHeader(
                     title = "Your Library",
-                    subtitle = "Playlists, liked songs & teams",
+                    subtitle = if (isSportsEnabled) "Playlists, liked songs & teams" else "Playlists & liked songs",
                     rootViewModel = rootViewModel,
                     navController = navController
                 )
@@ -189,10 +200,11 @@ fun LibraryScreen(
                         .padding(vertical = 8.dp)
                 ) {
                     LazyRow(
+                        state = chipsListState,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp)
                     ) {
-                        items(LibraryTab.entries, key = { it.name }) { tab ->
+                        items(visibleTabs, key = { it.name }) { tab ->
                             val isSelected = selectedTab == tab
                             val countText = when (tab) {
                                 LibraryTab.ALL -> "All"
@@ -374,12 +386,14 @@ fun LibraryScreen(
                 }
             }
 
-            // ─── 5. Followed Teams (if All or Teams) ───
-            if (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS) {
+            // ─── 5. Followed Teams (if Sports enabled and All or Teams) ───
+            if (isSportsEnabled && (selectedTab == LibraryTab.ALL || selectedTab == LibraryTab.TEAMS)) {
                 item(key = "teams_header") {
                     SectionHeader(
                         title = "Followed Teams",
                         subtitle = "Cricket notifications and updates",
+                        actionText = if (selectedTab == LibraryTab.ALL && followedTeams.size > 5) "See more" else null,
+                        onActionClick = { viewModel.setTab(LibraryTab.TEAMS) },
                         contentPadding = PaddingValues(
                             start = 20.dp,
                             end = 20.dp,
@@ -399,7 +413,8 @@ fun LibraryScreen(
                         )
                     }
                 } else {
-                    items(followedTeams, key = { "team_${it.teamId}" }) { team ->
+                    val displayTeams = if (selectedTab == LibraryTab.ALL) followedTeams.take(5) else followedTeams
+                    items(displayTeams, key = { "team_${it.teamId}" }) { team ->
                         FollowedTeamItem(
                             team = team,
                             onUnfollow = { viewModel.unfollowTeam(team.teamId) },

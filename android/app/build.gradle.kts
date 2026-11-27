@@ -153,6 +153,10 @@ dependencies {
     // Coil for Compose (Image Loading)
     implementation(libs.coil.compose)
 
+    // Firebase Cloud Messaging
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
@@ -163,4 +167,8 @@ dependencies {
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
     debugImplementation(libs.compose.ui.test.manifest)
+}
+
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }

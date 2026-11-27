@@ -21,8 +21,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.synq.data.local.db.entity.FollowedTeamEntity
 import com.synq.features.sports.domain.model.*
 import com.synq.features.sports.highlights.highlightsTabItems
 import com.synq.features.sports.live.*
@@ -90,6 +94,7 @@ fun MatchDetailsScreen(
     viewModel: MatchDetailsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val followedTeams by viewModel.followedTeams.collectAsState()
 
     // Tab State (rememberSaveable preserves tab across forward navigation to HighlightPlayerScreen)
     val tabs = listOf("Info", "Live", "Scorecard", "Squads", "Highlights")
@@ -227,7 +232,11 @@ fun MatchDetailsScreen(
 
                         // TAB CONTENT ITEMS
                         when (selectedTabIndex) {
-                            0 -> infoTabItems(details = details)
+                            0 -> infoTabItems(
+                                details = details,
+                                followedTeams = followedTeams,
+                                onToggleFollowTeam = { team -> viewModel.toggleFollowTeam(team) }
+                            )
                             1 -> liveTabItems(
                                 details = details,
                                 activeLiveEvent = uiState.activeLiveEvent,
@@ -294,8 +303,20 @@ private fun CardHeader(content: @Composable RowScope.() -> Unit) {
 }
 
 @Composable
-private fun CardHeaderTitle(text: String) {
-    Text(text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = TextMain)
+private fun CardHeaderTitle(
+    text: String,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        color = TextMain,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis
+    )
 }
 
 @Composable
@@ -323,12 +344,41 @@ private fun PlayerAvatar(iconTint: Color = TextSecondary) {
 
 // ─── INFO TAB ITEMS ───────────────────────────────────────────────────
 
-private fun LazyListScope.infoTabItems(details: MatchDetails) {
+private fun LazyListScope.infoTabItems(
+    details: MatchDetails,
+    followedTeams: List<FollowedTeamEntity>,
+    onToggleFollowTeam: (Team) -> Unit
+) {
     item {
         SectionCard(
             modifier = Modifier
                 .padding(horizontal = 20.dp)
-                .padding(top = 8.dp, bottom = 24.dp)
+                .padding(top = 8.dp, bottom = 12.dp)
+        ) {
+            CardHeader { CardHeaderTitle("Follow Teams for Alerts") }
+
+            val teams = listOf(details.summary.team1, details.summary.team2)
+            teams.forEachIndexed { index, team ->
+                val isFollowed = followedTeams.any { entity ->
+                    (team.id.isNotBlank() && entity.teamId == team.id) ||
+                        (team.shortName.isNotBlank() && entity.shortName.equals(team.shortName, ignoreCase = true)) ||
+                        (team.name.isNotBlank() && entity.teamName.equals(team.name, ignoreCase = true))
+                }
+                TeamFollowRow(
+                    team = team,
+                    isFollowed = isFollowed,
+                    isLast = index == teams.lastIndex,
+                    onClick = { onToggleFollowTeam(team) }
+                )
+            }
+        }
+    }
+
+    item {
+        SectionCard(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .padding(top = 4.dp, bottom = 24.dp)
         ) {
             CardHeader { CardHeaderTitle("Match Details") }
 
@@ -356,6 +406,93 @@ private fun LazyListScope.infoTabItems(details: MatchDetails) {
             InfoRow("Toss", if (details.toss.isNotBlank()) details.toss else "-", isLast = true)
         }
     }
+}
+
+@Composable
+private fun TeamFollowRow(
+    team: Team,
+    isFollowed: Boolean,
+    isLast: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(AvatarBg),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!team.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = team.logoUrl,
+                        contentDescription = team.shortName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                } else {
+                    Text(
+                        text = team.shortName.ifBlank { team.name }.take(3).uppercase(),
+                        color = TextMain,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = team.name.ifBlank { team.shortName },
+                    color = TextMain,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (team.shortName.isNotBlank() && !team.shortName.equals(team.name, ignoreCase = true)) {
+                    Text(
+                        text = team.shortName,
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(if (isFollowed) SportsAccent else MaterialTheme.colorScheme.surfaceContainerHighest)
+                .pressable(onClick = onClick, pressedScale = MotionTokens.ChipPressScale)
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (isFollowed) Icons.Filled.NotificationsActive else Icons.Outlined.Notifications,
+                contentDescription = null,
+                tint = if (isFollowed) OnSportsAccent else TextSecondary,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (isFollowed) "Following" else "Follow",
+                color = if (isFollowed) OnSportsAccent else TextMain,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+    if (!isLast) HorizontalDivider(color = BorderLight)
 }
 
 @Composable
@@ -1668,7 +1805,11 @@ private fun LazyListScope.scorecardTabItems(
                     .padding(bottom = 12.dp)
             ) {
                 CardHeader {
-                    CardHeaderTitle(inning.battingTeam)
+                    CardHeaderTitle(
+                        text = inning.battingTeam,
+                        modifier = Modifier.weight(1f).padding(end = 12.dp),
+                        maxLines = 2
+                    )
                     Text(
                         text = buildAnnotatedString {
                             withStyle(SpanStyle(fontFeatureSettings = "tnum")) {
@@ -1688,7 +1829,9 @@ private fun LazyListScope.scorecardTabItems(
                         },
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp,
-                        color = TextMain
+                        color = TextMain,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
 
@@ -1728,9 +1871,17 @@ private fun LazyListScope.scorecardTabItems(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Extras", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextMain)
+                    Text(
+                        "Extras",
+                        modifier = Modifier.padding(end = 12.dp),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = TextMain
+                    )
                     Text(
                         inning.extras,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp,
                         color = TextMain,
@@ -1785,11 +1936,13 @@ private fun LazyListScope.scorecardTabItems(
                                     }
                                 },
                                 fontSize = 13.sp,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
                             )
                             Text(
                                 "${fow.over} ov",
                                 fontSize = 13.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = TextSecondary,
                                 style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                             )

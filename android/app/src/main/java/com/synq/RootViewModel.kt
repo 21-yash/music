@@ -7,6 +7,7 @@ import com.synq.data.local.db.entity.PlaylistEntity
 import com.synq.data.remote.dto.UserDto
 import com.synq.data.repository.AuthRepository
 import com.synq.data.repository.LikedSongsRepository
+import com.synq.data.repository.NotificationRepository
 import com.synq.data.repository.PlaylistRepository
 import com.synq.features.music.domain.model.Artist
 import com.synq.features.music.domain.model.Song
@@ -35,6 +36,7 @@ class RootViewModel @Inject constructor(
     val jamSessionManager: JamSessionManager,
     private val themePreferences: com.synq.data.local.ThemePreferences,
     private val sportsPreferences: com.synq.data.local.SportsPreferences,
+    private val notificationRepository: NotificationRepository,
     val jamPreferences: com.synq.features.music.jam.JamPreferences
 ) : ViewModel() {
     val playbackState = playerManager.playbackState
@@ -95,11 +97,26 @@ class RootViewModel @Inject constructor(
             authRepository.isLoggedIn.collect { loggedIn ->
                 if (loggedIn) {
                     loadUserProfile()
+                    notificationRepository.syncPreferences()
+                    notificationRepository.syncFcmTokenIfAvailable()
                 } else {
                     _user.value = null
                 }
             }
         }
+    }
+
+    private val _pendingMatchNavigationId = MutableStateFlow<String?>(null)
+    val pendingMatchNavigationId: StateFlow<String?> = _pendingMatchNavigationId.asStateFlow()
+
+    fun onNotificationMatchId(matchId: String?) {
+        if (!matchId.isNullOrBlank()) {
+            _pendingMatchNavigationId.value = matchId
+        }
+    }
+
+    fun consumePendingMatchNavigation() {
+        _pendingMatchNavigationId.value = null
     }
 
     fun loadUserProfile() {
@@ -115,6 +132,7 @@ class RootViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            notificationRepository.unregisterCurrentToken()
             jamSessionManager.leaveJam()
             playerManager.stop()
             authRepository.logout()

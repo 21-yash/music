@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.synq.core.network.NetworkMonitor
 import com.synq.data.remote.api.NewPipeDownloader
+import com.synq.features.sports.notifications.NotificationChannels
 import com.synq.workers.SyncManager
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
@@ -43,6 +44,9 @@ class SynqApp : Application(), Configuration.Provider {
             .build()
             
         NewPipe.init(NewPipeDownloader(cleanClient))
+
+        // Create notification channels early so OS Settings lists them immediately
+        NotificationChannels.ensureCreated(this)
 
         // Start network monitoring & schedule periodic background library sync
         networkMonitor.startMonitoring()

@@ -5,8 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.synq.core.domain.AppResult
 import com.synq.data.local.SportsPreferences
 import com.synq.data.local.ThemePreferences
+import com.synq.data.remote.dto.SportsNotificationPrefsDto
+import com.synq.data.remote.dto.UpdateNotificationPreferencesRequest
 import com.synq.data.remote.dto.UserDto
 import com.synq.data.repository.AuthRepository
+import com.synq.data.repository.NotificationRepository
 import com.synq.features.music.playback.AudioCacheProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +26,12 @@ class ProfileViewModel @Inject constructor(
     private val audioCacheProvider: AudioCacheProvider,
     private val themePreferences: ThemePreferences,
     private val sportsPreferences: SportsPreferences,
+    private val notificationRepository: NotificationRepository,
 ) : ViewModel() {
 
     val isDarkTheme: StateFlow<Boolean> = themePreferences.isDarkTheme
     val isSportsEnabled: StateFlow<Boolean> = sportsPreferences.isSportsEnabled
+    val notificationPrefs: StateFlow<SportsNotificationPrefsDto> = notificationRepository.preferences
 
     fun setDarkTheme(isDark: Boolean) {
         themePreferences.setDarkTheme(isDark)
@@ -38,10 +43,19 @@ class ProfileViewModel @Inject constructor(
 
     fun setSportsEnabled(enabled: Boolean) {
         sportsPreferences.setSportsEnabled(enabled)
+        viewModelScope.launch {
+            notificationRepository.onSportsToggled(enabled)
+        }
     }
 
     fun toggleSports() {
-        sportsPreferences.toggleSports()
+        setSportsEnabled(!sportsPreferences.isSportsEnabled.value)
+    }
+
+    fun updateNotificationPrefs(request: UpdateNotificationPreferencesRequest) {
+        viewModelScope.launch {
+            notificationRepository.updatePreferences(request)
+        }
     }
 
     private val _user = MutableStateFlow<UserDto?>(null)
@@ -60,6 +74,9 @@ class ProfileViewModel @Inject constructor(
         }
         loadUserProfile()
         loadCacheSize()
+        viewModelScope.launch {
+            notificationRepository.syncPreferences()
+        }
     }
 
     fun loadCacheSize() {
@@ -94,6 +111,7 @@ class ProfileViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            notificationRepository.unregisterCurrentToken()
             authRepository.logout()
             _user.value = null
         }

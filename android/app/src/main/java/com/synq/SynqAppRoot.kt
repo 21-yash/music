@@ -101,9 +101,24 @@ private fun MainAppContent(
     val playlists by rootViewModel.playlists.collectAsState()
     val songForPlaylistAdd by rootViewModel.songForPlaylistAdd.collectAsState()
     val likedSongIds by rootViewModel.likedSongIds.collectAsState()
+    val pendingMatchId by rootViewModel.pendingMatchNavigationId.collectAsState()
+    val isSportsEnabled by rootViewModel.isSportsEnabled.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     
     var showFullPlayer by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingMatchId, isSportsEnabled) {
+        val targetId = pendingMatchId
+        if (!targetId.isNullOrBlank()) {
+            if (isSportsEnabled) {
+                showFullPlayer = false
+                navController.navigate(com.synq.navigation.Screen.MatchDetails().createRoute(targetId)) {
+                    launchSingleTop = true
+                }
+            }
+            rootViewModel.consumePendingMatchNavigation()
+        }
+    }
 
     LaunchedEffect(playbackState.currentSong) {
         if (playbackState.currentSong == null) {
@@ -227,7 +242,6 @@ private fun MainAppContent(
         }
     }
 
-    val isSportsEnabled by rootViewModel.isSportsEnabled.collectAsState()
     val showBottomBar = currentRoute in Screen.bottomNavItems.map { it.route }
 
     LaunchedEffect(isSportsEnabled, currentRoute) {

@@ -2,6 +2,7 @@ package com.synq.features.library
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.synq.data.local.SportsPreferences
 import com.synq.data.local.db.entity.FollowedTeamEntity
 import com.synq.data.local.db.entity.LikedSongEntity
 import com.synq.data.local.db.entity.PlaylistEntity
@@ -38,8 +39,11 @@ class LibraryViewModel @Inject constructor(
     private val likedSongsRepository: LikedSongsRepository,
     private val playlistRepository: PlaylistRepository,
     private val followedTeamRepository: FollowedTeamRepository,
+    private val sportsPreferences: SportsPreferences,
     private val playerManager: MusicPlayerManager,
 ) : ViewModel() {
+
+    val isSportsEnabled: StateFlow<Boolean> = sportsPreferences.isSportsEnabled
 
     val recentlyPlayed: StateFlow<List<RecentlyPlayedEntity>> = recentlyPlayedRepository.recentlyPlayed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -67,6 +71,13 @@ class LibraryViewModel @Inject constructor(
 
     init {
         syncAll()
+        viewModelScope.launch {
+            sportsPreferences.isSportsEnabled.collect { enabled ->
+                if (!enabled && _selectedTab.value == LibraryTab.TEAMS) {
+                    _selectedTab.value = LibraryTab.ALL
+                }
+            }
+        }
     }
 
     fun setTab(tab: LibraryTab) {

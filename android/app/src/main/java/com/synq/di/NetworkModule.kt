@@ -88,4 +88,10 @@ object NetworkModule {
     fun provideLibraryApi(retrofit: Retrofit): com.synq.data.remote.api.LibraryApi {
         return retrofit.create(com.synq.data.remote.api.LibraryApi::class.java)
     }
+
+    @Provides
+    @Singleton
+    fun provideNotificationApi(retrofit: Retrofit): com.synq.data.remote.api.NotificationApi {
+        return retrofit.create(com.synq.data.remote.api.NotificationApi::class.java)
+    }
 }

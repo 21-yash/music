@@ -3,6 +3,7 @@ package com.synq
 import com.synq.data.remote.dto.UserDto
 import com.synq.data.repository.AuthRepository
 import com.synq.data.repository.LikedSongsRepository
+import com.synq.data.repository.NotificationRepository
 import com.synq.data.repository.PlaylistRepository
 import com.synq.features.music.jam.JamPreferences
 import com.synq.features.music.jam.JamSessionManager
@@ -33,6 +34,7 @@ class RootViewModelJamAuthTest {
     private val jamSessionManager: JamSessionManager = mockk(relaxed = true)
     private val themePreferences: com.synq.data.local.ThemePreferences = mockk(relaxed = true)
     private val sportsPreferences: com.synq.data.local.SportsPreferences = mockk(relaxed = true)
+    private val notificationRepository: NotificationRepository = mockk(relaxed = true)
     private val jamPreferences: JamPreferences = mockk(relaxed = true)
 
     private val cachedUserFlow = MutableStateFlow<UserDto?>(null)
@@ -60,6 +62,7 @@ class RootViewModelJamAuthTest {
             jamSessionManager = jamSessionManager,
             themePreferences = themePreferences,
             sportsPreferences = sportsPreferences,
+            notificationRepository = notificationRepository,
             jamPreferences = jamPreferences
         )
     }

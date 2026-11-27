@@ -3,6 +3,8 @@ package com.synq.features.sports
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.synq.data.local.db.entity.FollowedTeamEntity
+import com.synq.data.repository.FollowedTeamRepository
 import com.synq.features.music.playback.MusicPlayerManager
 import com.synq.features.sports.data.remote.SportsSocketService
 import com.synq.features.sports.data.dto.MatchDetailsResponseDto
@@ -12,6 +14,7 @@ import com.synq.features.sports.domain.model.MatchHighlight
 import com.synq.features.sports.domain.model.MatchState
 import com.synq.features.sports.domain.model.Scorecard
 import com.synq.features.sports.domain.model.Squad
+import com.synq.features.sports.domain.model.Team
 import com.synq.features.sports.domain.repository.SportsRepository
 import com.synq.features.sports.highlights.HighlightStreamResolver
 import com.synq.features.sports.highlights.ResolvedHighlightPlayback
@@ -20,12 +23,15 @@ import com.synq.features.sports.live.LiveEventType
 import com.synq.features.sports.live.LiveMatchEvent
 import com.synq.features.sports.live.LiveMatchEventDetector
 import com.synq.features.sports.live.RecentBallItem
+import com.synq.features.sports.notifications.ActiveMatchTracker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -57,11 +63,15 @@ class MatchDetailsViewModel @Inject constructor(
     private val highlightStreamResolver: HighlightStreamResolver,
     private val youTubeDeviceHighlightSearcher: YouTubeDeviceHighlightSearcher,
     private val musicPlayerManager: MusicPlayerManager,
+    private val followedTeamRepository: FollowedTeamRepository,
+    private val activeMatchTracker: ActiveMatchTracker,
     private val json: Json,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val matchId: String = checkNotNull(savedStateHandle["matchId"])
+    val followedTeams: StateFlow<List<FollowedTeamEntity>> = followedTeamRepository.followedTeams
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private var highlightsJob: Job? = null
     private var scorecardJob: Job? = null
     private var streamResolutionJob: Job? = null
@@ -75,8 +85,13 @@ class MatchDetailsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MatchDetailsUiState())
     val uiState: StateFlow<MatchDetailsUiState> = _uiState.asStateFlow()
+    private val inFlightTeamToggles = mutableSetOf<String>()
 
     init {
+        activeMatchTracker.enterMatch(matchId)
+        viewModelScope.launch {
+            followedTeamRepository.syncFollowedTeams()
+        }
         loadData()
         setupSocket()
     }
@@ -421,8 +436,36 @@ class MatchDetailsViewModel @Inject constructor(
         }
     }
 
+    fun toggleFollowTeam(team: Team) {
+        val teamKey = team.id.ifBlank { team.shortName.ifBlank { team.name }.lowercase() }
+        if (teamKey.isBlank() || !inFlightTeamToggles.add(teamKey)) return
+        viewModelScope.launch {
+            try {
+                val existing = followedTeams.value.filter { entity ->
+                    (team.id.isNotBlank() && entity.teamId == team.id) ||
+                        (team.shortName.isNotBlank() && entity.shortName.equals(team.shortName, ignoreCase = true)) ||
+                        (team.name.isNotBlank() && entity.teamName.equals(team.name, ignoreCase = true))
+                }
+                if (existing.isNotEmpty()) {
+                    existing.forEach { followedTeamRepository.unfollowTeam(it.teamId) }
+                } else {
+                    followedTeamRepository.followTeam(
+                        teamId = teamKey,
+                        teamName = team.name.ifBlank { team.shortName },
+                        shortName = team.shortName.ifBlank { team.name },
+                        imageUrl = team.logoUrl,
+                        sport = "cricket"
+                    )
+                }
+            } finally {
+                inFlightTeamToggles.remove(teamKey)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        activeMatchTracker.exitMatch(matchId)
         socketService.leaveMatch(matchId)
     }
 }

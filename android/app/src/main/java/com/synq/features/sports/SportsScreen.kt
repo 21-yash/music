@@ -260,14 +260,30 @@ object SportsFilterState {
     var selectedFormat by mutableStateOf("All")
     var sortOption by mutableStateOf("Default")
     var selectedTab by mutableStateOf("live")
+    var followedOnly by mutableStateOf(false)
 
     val isFilterActive: Boolean
-        get() = selectedCategory != "All" || selectedFormat != "All" || sortOption != "Default"
+        get() = selectedCategory != "All" || selectedFormat != "All" || sortOption != "Default" || followedOnly
 
     fun reset() {
         selectedCategory = "All"
         selectedFormat = "All"
         sortOption = "Default"
+        followedOnly = false
+    }
+}
+
+private fun MatchSummary.involvesFollowedTeam(
+    followedTeams: List<com.synq.data.local.db.entity.FollowedTeamEntity>
+): Boolean {
+    if (followedTeams.isEmpty()) return false
+    return followedTeams.any { entity ->
+        (team1.id.isNotBlank() && entity.teamId == team1.id) ||
+            entity.shortName.equals(team1.shortName, ignoreCase = true) ||
+            entity.teamName.equals(team1.name, ignoreCase = true) ||
+            (team2.id.isNotBlank() && entity.teamId == team2.id) ||
+            entity.shortName.equals(team2.shortName, ignoreCase = true) ||
+            entity.teamName.equals(team2.name, ignoreCase = true)
     }
 }
 
@@ -296,11 +312,19 @@ fun SportsScreen(
     val selectedCategory = SportsFilterState.selectedCategory
     val selectedFormat = SportsFilterState.selectedFormat
     val sortOption = SportsFilterState.sortOption
-    val isFilterActive = SportsFilterState.isFilterActive
+    val followedOnly = SportsFilterState.followedOnly
 
-    val displayedMatches by remember(uiState.matches, selectedCategory, selectedFormat, sortOption) {
+    val isFilterActive = SportsFilterState.isFilterActive
+    val followedTeams by viewModel.followedTeams.collectAsState()
+
+    val displayedMatches by remember(uiState.matches, selectedCategory, selectedFormat, sortOption, followedOnly, followedTeams) {
         derivedStateOf {
             var list = uiState.matches
+
+            // 0. Filter by Followed Teams
+            if (followedOnly) {
+                list = list.filter { it.involvesFollowedTeam(followedTeams) }
+            }
 
             // 1. Filter by Category
             if (selectedCategory != "All") {
@@ -319,11 +343,19 @@ fun SportsScreen(
                 }
             }
 
-            // 3. Sort safely handling startTime == 0L
+            // 3. Sort with followed-team matches ALWAYS first, then selected sort mode
+            fun compareFollowedFirst(a: MatchSummary, b: MatchSummary): Int {
+                val aFollowed = if (a.involvesFollowedTeam(followedTeams)) 0 else 1
+                val bFollowed = if (b.involvesFollowedTeam(followedTeams)) 0 else 1
+                return aFollowed.compareTo(bFollowed)
+            }
+
             when (sortOption) {
                 "Newest" -> {
                     list.sortedWith { a, b ->
-                        when {
+                        val followedCmp = compareFollowedFirst(a, b)
+                        if (followedCmp != 0) followedCmp
+                        else when {
                             a.startTime == b.startTime -> 0
                             a.startTime <= 0L -> 1
                             b.startTime <= 0L -> -1
@@ -333,7 +365,9 @@ fun SportsScreen(
                 }
                 "Oldest" -> {
                     list.sortedWith { a, b ->
-                        when {
+                        val followedCmp = compareFollowedFirst(a, b)
+                        if (followedCmp != 0) followedCmp
+                        else when {
                             a.startTime == b.startTime -> 0
                             a.startTime <= 0L -> 1
                             b.startTime <= 0L -> -1
@@ -343,34 +377,39 @@ fun SportsScreen(
                 }
                 else -> {
                     if (uiState.selectedFilter == "recent") {
-                        list
+                        list.sortedWith { a, b -> compareFollowedFirst(a, b) }
                     } else {
-                        // Live matches shown ABOVE stumped matches
+                        // Followed teams first, then active Live matches above Stumps
                         list.sortedWith { a, b ->
-                            val aStumps = a.status.contains("stumps", ignoreCase = true)
-                            val bStumps = b.status.contains("stumps", ignoreCase = true)
-                            val aActiveLive = a.isLive && !aStumps
-                            val bActiveLive = b.isLive && !bStumps
-
-                            val aRank = when {
-                                aActiveLive -> 0
-                                aStumps -> 1
-                                a.isLive -> 2
-                                else -> 3
-                            }
-                            val bRank = when {
-                                bActiveLive -> 0
-                                bStumps -> 1
-                                b.isLive -> 2
-                                else -> 3
-                            }
-
-                            if (aRank != bRank) {
-                                aRank.compareTo(bRank)
+                            val followedCmp = compareFollowedFirst(a, b)
+                            if (followedCmp != 0) {
+                                followedCmp
                             } else {
-                                val aTime = if (a.startTime <= 0L) Long.MAX_VALUE else a.startTime
-                                val bTime = if (b.startTime <= 0L) Long.MAX_VALUE else b.startTime
-                                aTime.compareTo(bTime)
+                                val aStumps = a.status.contains("stumps", ignoreCase = true)
+                                val bStumps = b.status.contains("stumps", ignoreCase = true)
+                                val aActiveLive = a.isLive && !aStumps
+                                val bActiveLive = b.isLive && !bStumps
+
+                                val aRank = when {
+                                    aActiveLive -> 0
+                                    aStumps -> 1
+                                    a.isLive -> 2
+                                    else -> 3
+                                }
+                                val bRank = when {
+                                    bActiveLive -> 0
+                                    bStumps -> 1
+                                    b.isLive -> 2
+                                    else -> 3
+                                }
+
+                                if (aRank != bRank) {
+                                    aRank.compareTo(bRank)
+                                } else {
+                                    val aTime = if (a.startTime <= 0L) Long.MAX_VALUE else a.startTime
+                                    val bTime = if (b.startTime <= 0L) Long.MAX_VALUE else b.startTime
+                                    aTime.compareTo(bTime)
+                                }
                             }
                         }
                     }
@@ -624,10 +663,12 @@ fun SportsScreen(
                 selectedCategory = selectedCategory,
                 selectedFormat = selectedFormat,
                 sortOption = sortOption,
+                followedOnly = followedOnly,
                 isFilterActive = isFilterActive,
                 onCategorySelected = { SportsFilterState.selectedCategory = it },
                 onFormatSelected = { SportsFilterState.selectedFormat = it },
                 onSortSelected = { SportsFilterState.sortOption = it },
+                onFollowedOnlyToggle = { SportsFilterState.followedOnly = !SportsFilterState.followedOnly },
                 onReset = { SportsFilterState.reset() },
                 onDismiss = { showFilterSheet = false }
             )
@@ -665,10 +706,12 @@ private fun SportsFilterBottomSheet(
     selectedCategory: String,
     selectedFormat: String,
     sortOption: String,
+    followedOnly: Boolean,
     isFilterActive: Boolean,
     onCategorySelected: (String) -> Unit,
     onFormatSelected: (String) -> Unit,
     onSortSelected: (String) -> Unit,
+    onFollowedOnlyToggle: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -714,6 +757,41 @@ private fun SportsFilterBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // 0. Followed Teams Filter
+            Text(
+                text = "FOLLOWING",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .height(32.dp)
+                    .pressable(
+                        onClick = onFollowedOnlyToggle,
+                        pressedScale = MotionTokens.ChipPressScale
+                    )
+                    .clip(CircleShape)
+                    .background(
+                        if (followedOnly) SportsAccent else MaterialTheme.colorScheme.surfaceContainerHighest
+                    )
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Followed Teams Only",
+                    fontSize = 12.sp,
+                    fontWeight = if (followedOnly) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (followedOnly) OnSportsAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 1. Category Filter (International, League, Domestic, Women)
             Text(

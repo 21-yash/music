@@ -1,6 +1,7 @@
 package com.synq
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +17,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import com.synq.features.sports.notifications.SynqFirebaseMessagingService
 import com.synq.ui.theme.SynqTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -54,6 +56,9 @@ class MainActivity : ComponentActivity() {
         }
 
         enableEdgeToEdge()
+        if (savedInstanceState == null) {
+            handleNotificationIntent(intent)
+        }
         setContent {
             val isDarkTheme by rootViewModel.isDarkTheme.collectAsState()
 
@@ -69,6 +74,27 @@ class MainActivity : ComponentActivity() {
             SynqTheme(darkTheme = isDarkTheme) {
                 SynqAppRoot(rootViewModel = rootViewModel)
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        val extraMatchId = intent?.getStringExtra(SynqFirebaseMessagingService.EXTRA_MATCH_ID)
+        val uriMatchId = intent?.data?.takeIf {
+            it.scheme == "synq" && it.host == "sports" && it.pathSegments.size >= 2 && it.pathSegments[0] == "match"
+        }?.pathSegments?.getOrNull(1)
+        val matchId = extraMatchId?.takeIf { it.isNotBlank() } ?: uriMatchId?.takeIf { it.isNotBlank() }
+        if (matchId != null) {
+            intent?.removeExtra(SynqFirebaseMessagingService.EXTRA_MATCH_ID)
+            if (uriMatchId != null) {
+                intent?.data = null
+            }
+            rootViewModel.onNotificationMatchId(matchId)
         }
     }
 }

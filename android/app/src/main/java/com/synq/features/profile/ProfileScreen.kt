@@ -5,7 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -15,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -23,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.synq.data.remote.dto.UpdateNotificationPreferencesRequest
 import com.synq.ui.SynqBrandedText
 import com.synq.ui.SynqLogo
 import com.synq.ui.components.SectionHeader
@@ -89,6 +93,7 @@ fun ProfileScreen(
     val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val isSportsEnabled by viewModel.isSportsEnabled.collectAsState()
+    val notificationPrefs by viewModel.notificationPrefs.collectAsState()
     val context = LocalContext.current
 
     val profilePrefs = remember(context) {
@@ -109,6 +114,7 @@ fun ProfileScreen(
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showAppearanceDialog by remember { mutableStateOf(false) }
     var showSportsDialog by remember { mutableStateOf(false) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
     var showCacheDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showAvatarCustomizer by remember { mutableStateOf(false) }
@@ -431,6 +437,140 @@ fun ProfileScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showSportsDialog = false }) {
+                    Text("Done", color = PinkPrimary)
+                }
+            }
+        )
+    }
+
+    // Notifications Selection Dialog (same popup styling as Appearance & Sports)
+    if (showNotificationsDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotificationsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Notifications,
+                        contentDescription = null,
+                        tint = PinkPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "Notifications",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = if (isSportsEnabled) {
+                            "Choose cricket alerts for teams you follow"
+                        } else {
+                            "Sports is currently turned off in Settings"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(2.dp))
+
+                    SettingsToggleOptionCard(
+                        title = "Cricket Alerts",
+                        subtitle = "Master switch for followed-team",
+                        checked = notificationPrefs.enabled,
+                        enabled = isSportsEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(enabled = !notificationPrefs.enabled)
+                            )
+                        }
+                    )
+
+                    val categoriesEnabled = isSportsEnabled && notificationPrefs.enabled
+
+                    SettingsToggleOptionCard(
+                        title = "Starting Soon",
+                        subtitle = "Before match starts",
+                        checked = notificationPrefs.matchStartingSoon,
+                        enabled = categoriesEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(
+                                    matchStartingSoon = !notificationPrefs.matchStartingSoon
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsToggleOptionCard(
+                        title = "Match Started",
+                        subtitle = "When match starts",
+                        checked = notificationPrefs.matchStarted,
+                        enabled = categoriesEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(
+                                    matchStarted = !notificationPrefs.matchStarted
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsToggleOptionCard(
+                        title = "Match Concluded",
+                        subtitle = "Final result summary",
+                        checked = notificationPrefs.matchConcluded,
+                        enabled = categoriesEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(
+                                    matchConcluded = !notificationPrefs.matchConcluded
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsToggleOptionCard(
+                        title = "Milestones",
+                        subtitle = "Batter fifties & centuries",
+                        checked = notificationPrefs.milestones,
+                        enabled = categoriesEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(
+                                    milestones = !notificationPrefs.milestones
+                                )
+                            )
+                        }
+                    )
+
+                    SettingsToggleOptionCard(
+                        title = "Match Updates",
+                        subtitle = "Toss, breaks, rain delays & stumps",
+                        checked = notificationPrefs.matchUpdates,
+                        enabled = categoriesEnabled,
+                        onToggle = {
+                            viewModel.updateNotificationPrefs(
+                                UpdateNotificationPreferencesRequest(
+                                    matchUpdates = !notificationPrefs.matchUpdates
+                                )
+                            )
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showNotificationsDialog = false }) {
                     Text("Done", color = PinkPrimary)
                 }
             }
@@ -788,7 +928,7 @@ fun ProfileScreen(
         )
     }
 
-    val settingsItems = remember(isDarkTheme, isSportsEnabled, cacheSizeBytes, selectedPaletteIndex, selectedIconTypeIndex) {
+    val settingsItems = remember(isDarkTheme, isSportsEnabled, notificationPrefs, cacheSizeBytes, selectedPaletteIndex, selectedIconTypeIndex) {
         listOf(
             SettingsItem(
                 title = "Appearance",
@@ -816,14 +956,22 @@ fun ProfileScreen(
             ),
             SettingsItem(
                 title = "Notifications",
-                subtitle = "Score alerts & release updates",
+                subtitle = when {
+                    !isSportsEnabled -> "Paused (Sports disabled)"
+                    !notificationPrefs.enabled -> "Paused"
+                    else -> {
+                        val activeCount = listOf(
+                            notificationPrefs.matchStartingSoon,
+                            notificationPrefs.matchStarted,
+                            notificationPrefs.matchConcluded,
+                            notificationPrefs.milestones,
+                            notificationPrefs.matchUpdates,
+                        ).count { it }
+                        "$activeCount of 5 cricket alerts active"
+                    }
+                },
                 icon = Icons.Filled.Notifications,
-                onClick = {
-                    com.synq.ui.toast.SynqToastManager.show(
-                        "Notifications are active for match & music updates",
-                        com.synq.ui.toast.SynqToastType.INFO
-                    )
-                }
+                onClick = { showNotificationsDialog = true }
             ),
             SettingsItem(
                 title = "Privacy & Security",
@@ -1186,6 +1334,69 @@ private fun SettingsRadioOptionCard(
                 selected = selected,
                 onClick = onClick,
                 colors = RadioButtonDefaults.colors(selectedColor = PinkPrimary)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleOptionCard(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onToggle: () -> Unit
+) {
+    val active = checked && enabled
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (enabled) {
+                    Modifier.pressable(onClick = onToggle, pressedScale = MotionTokens.RowPressScale)
+                } else {
+                    Modifier
+                }
+            )
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                if (active) MaterialTheme.colorScheme.surfaceContainerHigh
+                else MaterialTheme.colorScheme.surfaceContainerLow
+            )
+            .border(
+                1.dp,
+                if (active) PinkPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                MaterialTheme.shapes.medium
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.6f)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                modifier = Modifier.scale(0.72f),
+                checked = checked,
+                onCheckedChange = if (enabled) { { onToggle() } } else null,
+                enabled = enabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = PinkPrimary
+                )
             )
         }
     }
